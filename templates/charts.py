@@ -97,14 +97,43 @@ def _setup_rcparams():
 
 
 def load_price_csv(path):
-    """Load a yfinance CSV, handling MultiIndex columns."""
-    df = pd.read_csv(path, header=[0, 1], index_col=0, parse_dates=True)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    """Load a yfinance CSV, handling both single-header and MultiIndex columns."""
+    # Sniff how many header rows there are
+    with open(path) as _f:
+        first_line = _f.readline().strip()
+        second_line = _f.readline().strip()
+
+    # If the second row starts with 'Ticker' or a ticker symbol repeated, it's MultiIndex
+    second_cells = second_line.split(',')
+    # Heuristic: MultiIndex yfinance files have a 'Ticker' or non-date token in row 2 col 0
+    is_multi = second_cells[0].strip().lower() in ('ticker', 'price') or (
+        len(second_cells) > 1 and not second_cells[0].strip().replace('-', '').replace('/', '').replace(' ', '').isdigit()
+        and second_cells[0].strip() not in ('', 'Date')
+    )
+
+    if is_multi:
+        df = pd.read_csv(path, header=[0, 1], index_col=0, parse_dates=True)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        # Drop the 'Ticker' meta row that yfinance sometimes injects as a data row
+        df = df.loc[~df.index.astype(str).str.lower().isin(['ticker', 'date', ''])]
+    else:
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+
     df = df.loc[:, ~df.columns.duplicated()]
     for col in ['Close', 'Open', 'High', 'Low', 'Volume']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+    # Ensure the index is datetime (handle timezone-aware strings)
+    if not isinstance(df.index, pd.DatetimeIndex):
+        try:
+            df.index = pd.to_datetime(df.index, utc=True, errors='coerce')
+        except Exception:
+            df.index = pd.to_datetime(df.index, errors='coerce')
+    # Normalize to tz-naive for consistent arithmetic
+    if hasattr(df.index, 'tz') and df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+    df = df[df.index.notna()]
     return df.dropna(subset=['Close'])
 
 
@@ -402,11 +431,18 @@ def main():
 
     # Load catalysts if provided
     catalysts = None
+    def _load_catalysts(data):
+        """Extract catalyst list from catalysts.json, supporting multiple key layouts."""
+        return (data.get('catalysts')
+                or data.get('upcoming_catalysts')
+                or data.get('events')
+                or [])
+
     if remaining_args:
         try:
             with open(remaining_args[0]) as f:
                 cat_data = json.load(f)
-                catalysts = cat_data.get('catalysts', [])
+                catalysts = _load_catalysts(cat_data)
         except Exception:
             pass
 
@@ -417,7 +453,7 @@ def main():
             if cat_path.exists():
                 try:
                     with open(cat_path) as f:
-                        catalysts = json.load(f).get('catalysts', [])
+                        catalysts = _load_catalysts(json.load(f))
                     break
                 except Exception:
                     pass
@@ -457,9 +493,14 @@ def main():
     for idx_name in index_candidates:
         search_paths.append(raw_prices / f'{idx_name}_3mo.csv')
         search_paths.append(raw_prices / f'{idx_name}_medium.csv')
+    # Shared market context paths (various naming conventions)
+    shared_mc = Path(workspace) / '..' / 'shared' / 'market_context'
     search_paths.extend([
-        Path(workspace) / '..' / 'shared' / 'market_context' / date / 'raw' / 'SPY_3mo.csv',
-        Path(workspace) / '..' / 'shared' / 'market_context' / 'raw' / 'SPY_3mo.csv',
+        shared_mc / date / 'raw' / 'SPY_3mo.csv',
+        shared_mc / date / 'raw' / 'SPY_prices.csv',
+        shared_mc / 'raw' / 'SPY_3mo.csv',
+        shared_mc / 'raw' / 'SPY_prices.csv',
+        shared_mc / date / 'raw' / 'QQQ_prices.csv',
     ])
     for candidate in search_paths:
         if candidate.exists():
@@ -488,6 +529,8 @@ def main():
                 pfile = raw_prices / f'{pticker}_3mo.csv'
                 if not pfile.exists():
                     pfile = raw_prices / f'{pticker}_medium.csv'
+                if not pfile.exists():
+                    pfile = raw_prices / f'peer_{pticker}.csv'
                 if pfile.exists():
                     pdf = load_price_csv(str(pfile))
                     if len(pdf) >= 5:
