@@ -19,8 +19,16 @@ Convert the pipeline outputs into a professional JPM-style PDF equity research r
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
+## Language
+
+Read `resolved_config.json` → `language` field. If `ch`, the report body and all narrative sections should already be in Chinese (written by the report writer). Additionally:
+- Pass `--lang ch` to `charts.py` so chart labels are in Chinese
+- Add `\setlanguagech` before `\begin{document}` in the `.tex` file to activate Chinese strings in the LaTeX template
+- If language is `en` (default), no extra flags needed
+
 ## Inputs
 
+- `{workspace}/resolved_config.json` — merged config (contains language field)
 - `{workspace}/final/{date}/daily_report.md` — the final markdown report
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
 - `{workspace}/decision/{date}/final_decision.json` — BUY/HOLD/SELL decision
@@ -37,7 +45,8 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Run the chart generation script:
 
 ```bash
-.venv/bin/python3 templates/charts.py {workspace} {date} {TICKER}
+# If language is ch, add --lang ch
+.venv/bin/python3 templates/charts.py {workspace} {date} {TICKER} [--lang ch]
 ```
 
 This reads price CSVs and catalysts, and outputs to `{workspace}/exports/{date}/pdf/charts/`:
@@ -65,6 +74,7 @@ Write `{workspace}/exports/{date}/pdf/report.tex` following this **7-page struct
 \documentclass{equity_research}
 \company{...}\ticker{...}\exchange{...}\sector{...}
 \reportdate{...}\decision{...}\confidence{...}\horizon{...}\reportmode{Daily}
+% If language is ch, add: \setlanguagech
 \begin{document}
 \maketitlepage
 \subsection{Investment Thesis}

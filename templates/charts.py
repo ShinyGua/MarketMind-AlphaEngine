@@ -37,22 +37,63 @@ COLORS = {
     'highlight': '#FEF3C7',  # Amber highlight
 }
 
-plt.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
-    'font.size': 9,
-    'axes.labelcolor': COLORS['text'],
-    'axes.edgecolor': COLORS['light_gray'],
-    'xtick.color': COLORS['muted'],
-    'ytick.color': COLORS['muted'],
-    'figure.facecolor': COLORS['bg'],
-    'axes.facecolor': COLORS['bg'],
-    'axes.grid': True,
-    'grid.alpha': 0.2,
-    'grid.color': COLORS['light_gray'],
-    'axes.spines.top': False,
-    'axes.spines.right': False,
-})
+# ============================================================
+# Bilingual Labels
+# ============================================================
+LABELS = {
+    'en': {
+        'price_action': 'Price Action',
+        'relative_perf': 'Relative Performance',
+        'peer_perf': '5-Day Performance',
+        'vol': 'Vol',
+        'return_pct': 'Return (%)',
+        '5d_return': '5-Day Return (%)',
+        'golden_cross': 'Golden Cross',
+        'death_cross': 'Death Cross',
+        'rank': '#{rank} of {total}',
+    },
+    'ch': {
+        'price_action': '股价走势',
+        'relative_perf': '相对表现',
+        'peer_perf': '5日表现',
+        'vol': '成交量',
+        'return_pct': '收益率 (%)',
+        '5d_return': '5日收益率 (%)',
+        'golden_cross': '金叉',
+        'death_cross': '死叉',
+        'rank': '第{rank}名/共{total}只',
+    },
+}
+
+# Global language setting (set by main() from CLI arg or config)
+LANG = 'en'
+
+def L(key):
+    """Get localized label."""
+    return LABELS.get(LANG, LABELS['en']).get(key, key)
+
+
+def _setup_rcparams():
+    """Set matplotlib defaults, including CJK fonts for Chinese."""
+    fonts = ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif']
+    if LANG == 'ch':
+        fonts = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei'] + fonts
+    plt.rcParams.update({
+        'font.family': 'sans-serif',
+        'font.sans-serif': fonts,
+        'font.size': 9,
+        'axes.labelcolor': COLORS['text'],
+        'axes.edgecolor': COLORS['light_gray'],
+        'xtick.color': COLORS['muted'],
+        'ytick.color': COLORS['muted'],
+        'figure.facecolor': COLORS['bg'],
+        'axes.facecolor': COLORS['bg'],
+        'axes.grid': True,
+        'grid.alpha': 0.2,
+        'grid.color': COLORS['light_gray'],
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+    })
 
 
 def load_price_csv(path):
@@ -135,7 +176,7 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
     crossovers = find_sma_crossovers(sma20, sma50)
     for ctype, cdate, cprice in crossovers:
         color = COLORS['positive'] if ctype == 'golden' else COLORS['negative']
-        label = 'Golden Cross' if ctype == 'golden' else 'Death Cross'
+        label = L('golden_cross') if ctype == 'golden' else L('death_cross')
         xi = _date_to_idx(dates, cdate)
         ax1.scatter([xi], [cprice], color=color, s=80, zorder=5, edgecolors='white', linewidth=1.5)
         ax1.annotate(label, (xi, cprice),
@@ -179,7 +220,7 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
 
     ax1.set_ylabel('', fontsize=8)
     ax1.legend(loc='upper left', fontsize=7, frameon=False)
-    ax1.set_title(f'{ticker} — Price Action', fontsize=12, fontweight='bold',
+    ax1.set_title(f'{ticker} — {L("price_action")}', fontsize=12, fontweight='bold',
                   color=COLORS['primary'], loc='left', pad=12)
 
     # Volume bars
@@ -187,7 +228,7 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
         vol_colors = [COLORS['positive'] if df['Close'].iloc[i] >= df['Open'].iloc[i]
                       else COLORS['negative'] for i in range(len(df))]
         ax2.bar(x, df['Volume'].values, color=vol_colors, alpha=0.4, width=0.8)
-        ax2.set_ylabel('Vol', fontsize=7, color=COLORS['muted'])
+        ax2.set_ylabel(L('vol'), fontsize=7, color=COLORS['muted'])
         ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, p: f'{v/1e6:.0f}M'))
         vol_avg = df['Volume'].rolling(20).mean()
         ax2.plot(x, vol_avg.values, color=COLORS['muted'], linewidth=0.7, alpha=0.5)
@@ -258,8 +299,8 @@ def generate_relative_chart(ticker, ticker_path, spy_path, output_path, index_na
                 bbox=dict(boxstyle='round,pad=0.4', facecolor=spread_color,
                          alpha=0.1, edgecolor='none'))
 
-    ax.set_ylabel('Return (%)', fontsize=8, color=COLORS['muted'])
-    ax.set_title(f'{ticker} vs {index_name} — Relative Performance', fontsize=12,
+    ax.set_ylabel(L('return_pct'), fontsize=8, color=COLORS['muted'])
+    ax.set_title(f'{ticker} vs {index_name} — {L("relative_perf")}', fontsize=12,
                  fontweight='bold', color=COLORS['primary'], loc='left', pad=12)
     ax.legend(loc='upper left', fontsize=8, frameon=False)
 
@@ -309,7 +350,8 @@ def generate_peer_chart(ticker, peer_data, output_path):
     sorted_returns = sorted(enumerate(returns), key=lambda x: -x[1])
     for rank, (idx, _) in enumerate(sorted_returns, 1):
         if peer_data[idx]['name'] == ticker:
-            ax.annotate(f'#{rank} of {len(peer_data)}', xy=(0.98, 0.95),
+            rank_text = L('rank').format(rank=rank, total=len(peer_data))
+            ax.annotate(rank_text, xy=(0.98, 0.95),
                         xycoords='axes fraction', fontsize=9, fontweight='bold',
                         color=COLORS['primary'], ha='right', va='top',
                         bbox=dict(boxstyle='round,pad=0.3', facecolor=COLORS['very_light'],
@@ -317,8 +359,8 @@ def generate_peer_chart(ticker, peer_data, output_path):
             break
 
     ax.axvline(x=0, color=COLORS['light_gray'], linewidth=0.8)
-    ax.set_xlabel('5-Day Return (%)', fontsize=8, color=COLORS['muted'])
-    ax.set_title(f'{ticker} vs Peers — 5-Day Performance', fontsize=12,
+    ax.set_xlabel(L('5d_return'), fontsize=8, color=COLORS['muted'])
+    ax.set_title(f'{ticker} vs Peers — {L("peer_perf")}', fontsize=12,
                  fontweight='bold', color=COLORS['primary'], loc='left', pad=12)
 
     plt.tight_layout()
@@ -328,19 +370,41 @@ def generate_peer_chart(ticker, peer_data, output_path):
 
 
 def main():
+    global LANG
+
     if len(sys.argv) < 4:
-        print('Usage: .venv/bin/python3 templates/charts.py <workspace> <date> <ticker> [catalysts_json]')
+        print('Usage: .venv/bin/python3 templates/charts.py <workspace> <date> <ticker> [--lang ch] [catalysts_json]')
         sys.exit(1)
 
     workspace = sys.argv[1]
     date = sys.argv[2]
     ticker = sys.argv[3]
 
+    # Parse --lang flag
+    remaining_args = sys.argv[4:]
+    if '--lang' in remaining_args:
+        idx = remaining_args.index('--lang')
+        if idx + 1 < len(remaining_args):
+            LANG = remaining_args[idx + 1]
+            remaining_args = remaining_args[:idx] + remaining_args[idx+2:]
+    else:
+        # Try reading from resolved_config.json
+        rc_path = Path(workspace) / 'resolved_config.json'
+        if rc_path.exists():
+            try:
+                with open(rc_path) as f:
+                    rc = json.load(f)
+                LANG = rc.get('language', 'en')
+            except Exception:
+                pass
+
+    _setup_rcparams()
+
     # Load catalysts if provided
     catalysts = None
-    if len(sys.argv) > 4:
+    if remaining_args:
         try:
-            with open(sys.argv[4]) as f:
+            with open(remaining_args[0]) as f:
                 cat_data = json.load(f)
                 catalysts = cat_data.get('catalysts', [])
         except Exception:

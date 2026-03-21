@@ -37,7 +37,7 @@ import requests, os
 url = "https://newsapi.org/v2/everything"
 params = {
     "q": "<company_name> OR <ticker>",
-    "language": "en",
+    "language": config.get("language", "en"),  # from resolved_config
     "sortBy": "publishedAt",
     "pageSize": config["news"]["max_company_news"],
     "from": "<lookback_date>",

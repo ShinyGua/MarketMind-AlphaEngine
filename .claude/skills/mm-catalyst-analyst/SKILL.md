@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep, WebSearch
 
 Focus on the "when" question: What events are coming, how do they affect the thesis, and does the timing favor acting now or waiting? Analyze the catalyst calendar, earnings expectations, and event-driven risk/reward.
 
+## Language
+Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique)

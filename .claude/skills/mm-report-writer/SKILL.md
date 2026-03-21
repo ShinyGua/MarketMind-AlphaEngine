@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep
 
 Write an institutional-quality equity research report based on the full research packet. The report must be evidence-backed, balanced, and actionable.
 
+## Language
+Write the entire report in the language specified by `resolved_config.json` → `language`. Section headings, narrative, and analysis must match the configured language.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "initial" for first draft, "revision" for targeted rewrite)

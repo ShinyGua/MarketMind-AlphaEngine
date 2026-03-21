@@ -142,7 +142,7 @@ The `quant_summary.json` should report values from the **latest row only** — t
     "peer_rank_5d": 0
   },
   "flags": [],
-  "summary": "<1-2 sentence plain English summary of the technical picture>"
+  "summary": "<1-2 sentence summary in the language from resolved_config.language>"
 }
 ```
 

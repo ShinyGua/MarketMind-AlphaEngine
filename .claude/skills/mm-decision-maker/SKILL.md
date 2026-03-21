@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep
 
 Produce the final investment decision (BUY / HOLD / SELL) based on the complete research pipeline output. The decision must be evidence-backed, risk-aware, and include clear conditions under which the view would change.
 
+## Language
+Write reasons, risks, and narrative text in the language from `resolved_config.json` → `language`. BUY/HOLD/SELL labels remain English. JSON keys stay English.
+
 This is a SEPARATE stage from report writing. The report is the research product; the decision is the investment action layer.
 
 Workspace path: $ARGUMENTS[0]

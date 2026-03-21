@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep
 
 Interpret the quantitative data as narrative. Transform raw indicator values into actionable technical insights: trend direction, momentum quality, support/resistance levels, and signal confluence. Your role is to tell the "story" that the chart is telling.
 
+## Language
+Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique)

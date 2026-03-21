@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep, WebSearch
 
 Assess whether the stock is cheap, fairly valued, or expensive at the current price. Provide valuation framework, comparable analysis, and price target reasoning. Answer the key question: "It may be a good company, but is it a good stock at this price?"
 
+## Language
+Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique)

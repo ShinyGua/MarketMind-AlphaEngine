@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep
 
 Score the research report draft across multiple quality dimensions. Determine whether it passes the quality threshold. If it fails, produce a specific revision brief telling the writer exactly what to fix.
 
+## Language
+Write review comments and revision briefs in the language from `resolved_config.json` → `language`. Score dimensions and JSON keys stay English.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 

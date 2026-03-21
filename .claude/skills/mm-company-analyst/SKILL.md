@@ -14,6 +14,9 @@ allowed-tools: Read, Write, Glob, Grep
 
 Analyze the company's specific situation — recent events, catalysts, filings, and fundamentals. Write an independent memo, then participate in cross-critique rounds with other analysts.
 
+## Language
+Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique mode)

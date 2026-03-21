@@ -12,7 +12,7 @@ You are MarketMind-AlphaEngine, a multi-agent research pipeline that:
 - Reviews reports against quality thresholds with iterative revision
 - Produces a final investment decision with evidence-backed rationale
 
-All output is in English. Internal schemas, file names, and code use English.
+Output language is determined by the `language` field in config (`en` or `ch`). When `ch`, all user-facing text (analyst memos, reports, PDF, chart labels, `/mm:init` prompts) must be in Chinese. Internal schemas, JSON keys, file names, directory paths, and code are always in English. BUY/HOLD/SELL labels remain English regardless of language setting.
 
 ## Python Environment (Mandatory)
 

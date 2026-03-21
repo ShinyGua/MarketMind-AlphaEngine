@@ -16,10 +16,18 @@ Guide the user through setting up a new company research workspace. Ask which st
 
 ## Process
 
+### Step 0: Determine Language
+
+Read `config.yaml` (project root, fall back to `config.example.yaml`). Check `language` field:
+- `ch` → all user-facing prompts in Chinese
+- `en` (default) → all prompts in English
+
 ### Step 1: Ask for Stock
 
-Use AskUserQuestion:
+If language is `ch`:
+"请输入想分析的公司名称或股票代码（例如：英伟达 或 NVDA）："
 
+If language is `en`:
 "Which company or stock would you like to analyze? You can enter a ticker symbol (e.g., NVDA) or a company name (e.g., NVIDIA)."
 
 The user may provide a ticker, a company name, or an ambiguous input.
@@ -150,4 +158,4 @@ To run the full research pipeline:
 - Always verify company via web search — never guess
 - Present clear "Company Name (TICKER) — Exchange" for confirmation
 - Never overwrite existing workspace without user consent
-- All file content in English
+- File content language follows config `language` field (en or ch). JSON keys always English.

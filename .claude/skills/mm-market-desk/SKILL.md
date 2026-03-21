@@ -78,7 +78,7 @@ import requests
 url = "https://newsapi.org/v2/top-headlines"
 params = {
     "category": "business",
-    "language": "en",
+    "language": config.get("language", "en"),  # from resolved_config
     "pageSize": config["news"]["max_market_news"],
     "apiKey": os.environ["NEWSAPI_KEY"]
 }
