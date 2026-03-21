@@ -150,10 +150,10 @@ cp templates/equity_research.cls {workspace}/exports/{date}/pdf/
 ### Step 5: Compile with xelatex
 
 ```bash
-cd {workspace}/exports/{date}/pdf && xelatex -interaction=nonstopmode report.tex && xelatex -interaction=nonstopmode report.tex
+cd {workspace}/exports/{date}/pdf && xelatex -interaction=nonstopmode report.tex
 ```
 
-Run twice to resolve page references (LastPage).
+Run once. Only run a second pass if the log contains "Rerun to get cross-references right" — otherwise skip (saves ~1.5 minutes).
 
 ### Step 6: Verify
 

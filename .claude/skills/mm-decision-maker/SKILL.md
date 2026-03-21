@@ -35,6 +35,8 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/profile/company_profile.json` — company context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events
 
+**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+
 ## Process
 
 ### 1. Assess the Evidence Base

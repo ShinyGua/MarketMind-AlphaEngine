@@ -31,6 +31,8 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 - `{workspace}/profile/company_profile.json` — company context (undated)
 - `workspaces/shared/market_context/{date}/raw/*.csv` — index and macro asset prices
 
+**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+
 ## Behavior Modes
 
 ### Mode A: Independent Memo (default, no second argument)

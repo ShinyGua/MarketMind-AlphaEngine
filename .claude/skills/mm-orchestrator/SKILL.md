@@ -139,11 +139,53 @@ Wait for all 3. Log successes/failures.
 
 ### 4. normalize
 Verify evidence cards exist in `{workspace}/normalized/{date}/evidence_cards/`. If empty, log warning.
+
+**Then create evidence_digest.json** — concatenate all evidence cards into one file for fast downstream reads:
+```bash
+.venv/bin/python3 -c "
+import json, glob, os
+ws = '{workspace}/normalized/{date}/evidence_cards'
+cards = []
+for f in sorted(glob.glob(os.path.join(ws, '*.json'))):
+    try: cards.append(json.load(open(f)))
+    except: pass
+with open('{workspace}/normalized/{date}/evidence_digest.json', 'w') as out:
+    json.dump(cards, out, indent=2)
+print(f'evidence_digest.json: {len(cards)} cards')
+"
+```
+
 **Then immediately proceed to stage 5.**
 
 ### 5. quant
 Dispatch **mm-quant-analyst** with args: `{workspace} {date}`. Wait.
 Verify `{workspace}/quant/{date}/quant_summary.json` exists.
+
+**Then create shared_context.json** — bundle shared data that ALL downstream agents need:
+```bash
+.venv/bin/python3 -c "
+import json, os
+ws = '{workspace}'
+date = '{date}'
+ctx = {}
+for name, path in [
+    ('quant', f'{ws}/quant/{date}/quant_summary.json'),
+    ('profile', f'{ws}/profile/company_profile.json'),
+    ('peers', f'{ws}/profile/peer_set.json'),
+]:
+    if os.path.exists(path):
+        ctx[name] = json.load(open(path))
+# Try catalysts
+for cp in [f'{ws}/raw/{date}/calendar/catalysts.json', f'{ws}/raw/calendar/catalysts.json']:
+    if os.path.exists(cp):
+        ctx['catalysts'] = json.load(open(cp))
+        break
+with open(f'{ws}/{date}_shared_context.json', 'w') as out:
+    json.dump(ctx, out, indent=2)
+print(f'shared_context.json: {len(ctx)} sections')
+"
+```
+
 **Then immediately proceed to stage 6.**
 
 ### 6. discuss_memos
@@ -178,7 +220,8 @@ For each round N:
 **Then immediately proceed to stage 8.**
 
 ### 8. discuss_synthesis
-Dispatch **mm-discussion-moderator** with args: `{workspace} {date}`. Wait.
+Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. Wait.
+The moderator already read all memos during the scan phase (stage 7) and stored summaries in `debate_assignments.json`. In synthesis mode, it should read ONLY the critique files from `discussion/{date}/debate/round_1/` plus the stored memo summaries — NOT re-read full memos.
 Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 **Then immediately proceed to stage 9.**
 

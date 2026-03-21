@@ -26,12 +26,11 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 - `{workspace}/resolved_config.json` — review thresholds
 - `{workspace}/drafts/{date}/*.md` — the latest draft (highest version number)
-- `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
-- `{workspace}/quant/{date}/quant_summary.json` — quant data for factuality checks
+- `{workspace}/normalized/{date}/evidence_digest.json` — ALL evidence cards in one file (do NOT read individual cards)
+- `{workspace}/{date}_shared_context.json` — quant, profile, peers, catalysts in one file
 - `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis for coverage checks
-- `{workspace}/discussion/{date}/debate_summary.md` — debate details
-- `{workspace}/raw/{date}/calendar/catalysts.json` — catalyst data for accuracy checks
-- `{workspace}/profile/company_profile.json` — company context (undated)
+
+**IMPORTANT: Read only these 4 files** (draft + evidence_digest + shared_context + thesis_map). Do NOT read individual evidence card files, quant_summary, company_profile, catalysts, or debate_summary separately — they are already in the digest/context files. This reduces reads from ~32 to ~4.
 
 ## Process
 

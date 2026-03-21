@@ -10,14 +10,26 @@ Optional: `$ARGUMENTS[0]` = company name or ticker (skips the first question if 
 
 ## Steps
 
+### 0. Determine Language
+
+Read `config.yaml` from project root (fall back to `config.example.yaml`). Check the `language` field:
+- `ch` → all user-facing prompts below should be in Chinese (see Chinese variants in parentheses)
+- `en` (default) → all prompts in English
+
 ### 1. Ask for Company
 
 If `$ARGUMENTS[0]` is provided, use it. Otherwise, output this text and wait for the user to reply in chat:
 
+**English (language: en):**
 ```
 What company or stock would you like to analyze?
 
 Enter a ticker (e.g., NVDA) or company name (e.g., NVIDIA):
+```
+
+**Chinese (language: ch):**
+```
+请输入想分析的公司名称或股票代码（例如：英伟达 或 NVDA）：
 ```
 
 Wait for the user's chat reply.
@@ -34,13 +46,21 @@ Extract: full company name, ticker symbol, exchange, sector/industry.
 
 Output the result as text and wait for the user's chat reply:
 
+**English:**
 ```
 I found: **{COMPANY_NAME} ({TICKER}) — {EXCHANGE}, {SECTOR}**
 
 Is this correct? (yes / or type the correct company name or ticker)
 ```
 
-- If user replies "yes", "y", "correct", etc. → proceed to Step 4
+**Chinese:**
+```
+找到：**{COMPANY_NAME} ({TICKER}) — {EXCHANGE}, {SECTOR}**
+
+是否正确？（输入 yes 确认，或输入正确的公司名/代码）
+```
+
+- If user replies "yes", "y", "correct", "是", "对" etc. → proceed to Step 4
 - If user types something else → treat it as a new search query, go back to Step 2
 - Repeat until confirmed
 
@@ -48,8 +68,14 @@ Is this correct? (yes / or type the correct company name or ticker)
 
 Output as text and wait for reply:
 
+**English:**
 ```
 Report type? (daily / weekly, default: daily)
+```
+
+**Chinese:**
+```
+报告类型？（daily 日报 / weekly 周报，默认：daily）
 ```
 
 - If user replies "weekly" or "w" → set run_mode to weekly
@@ -96,13 +122,37 @@ If the exchange doesn't match any of these (e.g., ASX, TSX, BSE), default to the
 
 ### 7. Check Existing Workspace
 
-If `workspaces/{TICKER}/` already exists, output:
+If `workspaces/{TICKER}/` already exists:
 
+1. Determine today's trading date (use the same smart trading day logic from the orchestrator — if pre-market or weekend, use the last trading day)
+2. Check if `workspaces/{TICKER}/final/{date}/daily_report.md` exists
+
+**Case A: Today's report already exists** — ask the user:
+
+**English:**
 ```
-A workspace for {TICKER} already exists. Overwrite or resume? (overwrite / resume, default: resume)
+Today's report for {TICKER} ({date}) already exists. Regenerate? (yes / no, default: no)
 ```
 
-Wait for reply. If overwrite → delete and recreate. If resume → keep existing files.
+**Chinese:**
+```
+{TICKER} 今日报告（{date}）已存在。是否重新生成？（yes 重新生成 / no 跳过，默认：no）
+```
+
+- If yes → proceed (orchestrator will overwrite today's date directories)
+- If no → output the existing report path and stop
+
+**Case B: No report for today** — no question needed, just inform and proceed:
+
+**English:**
+```
+Workspace for {TICKER} exists. Starting new analysis for {date}...
+```
+
+**Chinese:**
+```
+{TICKER} 工作区已存在，开始 {date} 的新分析...
+```
 
 ### 8. Create Directory Tree
 
