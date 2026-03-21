@@ -305,6 +305,7 @@
   % #2 = \item list for "Why"
   % #3 = \item list for "Risks"
   \begin{tcolorbox}[
+    breakable,
     colback=\decisioncolor!4,
     colframe=\decisioncolor!60,
     boxrule=1pt,
