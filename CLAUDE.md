@@ -36,7 +36,7 @@ claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
 
 ### Initialize a New Company Research
 
-```
+```text
 /mm:init
 ```
 
@@ -44,7 +44,7 @@ The system will ask which company to analyze, verify via web search, and create 
 
 ### Run the Full Pipeline
 
-```
+```text
 /mm:run workspaces/NVDA
 ```
 
@@ -52,7 +52,7 @@ This launches the autonomous pipeline via ralph-loop — it runs all 12 stages c
 
 ### Check Status
 
-```
+```text
 /mm:status
 ```
 
@@ -62,7 +62,7 @@ Shows all workspaces and their pipeline progress.
 
 ## Pipeline Stages
 
-```
+```text
 resolve_config → init_workspace → collect(parallel) → normalize
     → quant → discuss → draft → review_loop → decide → export
 ```
@@ -81,6 +81,7 @@ resolve_config → init_workspace → collect(parallel) → normalize
 
 ### Stage 2: Parallel Data Collection
 Run these desks in parallel:
+
 - **mm-market-desk**: Macro headlines, index data, macro asset prices (yfinance, FRED)
 - **mm-company-desk**: Company news, SEC filings, catalyst calendar (NewsAPI, EDGAR)
 - **mm-sector-desk**: Sector news, peer price data (NewsAPI, yfinance)
@@ -103,6 +104,7 @@ Follows a structured debate protocol inspired by multi-agent collaboration:
 
 **Phase 1 — Independent Memos (parallel)**
 All 3 analysts run in parallel. Each reads evidence cards, quant summary, and company profile, but NOT each other's work:
+
 - **mm-market-analyst** → `discussion/analyst_memos/market_analyst.md`
 - **mm-company-analyst** → `discussion/analyst_memos/company_analyst.md`
 - **mm-risk-analyst** → `discussion/analyst_memos/risk_analyst.md`
@@ -118,6 +120,7 @@ Only assigned pairs write critiques (2-3 pairs instead of full N×N). Each criti
 Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughness)
 
 **Phase 3 — Synthesis**
+
 - **mm-discussion-moderator** reads all memos + all critique files
 - Produces:
   - `discussion/thesis_map.json` — consensus, disagreements, bull/bear cases, key risks, unsupported claims, writer guidance
@@ -149,7 +152,7 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 
 All time-sensitive data is organized under `{YYYY-MM-DD}/` date folders to preserve multi-day history. Static reference data (profile, config) stays undated.
 
-```
+```text
 workspaces/
   shared/
     market_context/
@@ -247,6 +250,7 @@ The `run_date` field (YYYY-MM-DD) determines which date subdirectory all stages 
 Later values override earlier values. The system checks for `config.yaml` first; if it does not exist, falls back to `config.example.yaml`.
 
 ### Config Reference
+
 - `config.example.yaml` — template with all available knobs and placeholder values
 - `config.yaml` — your local copy with real API keys and preferences (add to `.gitignore`)
 
