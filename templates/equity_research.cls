@@ -90,13 +90,33 @@
 \color{textmain}
 \linespread{1.5}
 
-%% Chinese font support (loaded conditionally at \begin{document})
+%% Chinese font support — xeCJK loaded in preamble, fonts set at \begin{document}
+\RequirePackage{xeCJK}
+\newcommand{\setCJKFontsAuto}{%
+  %% macOS: Songti SC (main) + Heiti SC (sans/bold)
+  \IfFontExistsTF{Songti SC}{%
+    \setCJKmainfont[AutoFakeBold=2.5]{Songti SC}%
+    \setCJKsansfont{Heiti SC}%
+  }{%
+    %% Ubuntu with fonts-noto-cjk
+    \IfFontExistsTF{Noto Serif CJK SC}{%
+      \setCJKmainfont[AutoFakeBold=2.5]{Noto Serif CJK SC}%
+      \setCJKsansfont{Noto Sans CJK SC}%
+    }{%
+      %% Minimal fallback
+      \IfFontExistsTF{WenQuanYi Micro Hei}{%
+        \setCJKmainfont[AutoFakeBold=2.5]{WenQuanYi Micro Hei}%
+        \setCJKsansfont{WenQuanYi Micro Hei}%
+      }{%
+        %% Last resort: use whatever CJK font is available
+        \setCJKmainfont[AutoFakeBold=2.5]{SimSun}%
+        \setCJKsansfont{SimHei}%
+      }%
+    }%
+  }%
+}
 \AtBeginDocument{%
-  \ifchinese
-    \RequirePackage{xeCJK}%
-    \setCJKmainfont{PingFang SC}%
-    \setCJKsansfont{PingFang SC}%
-  \fi
+  \ifchinese \setCJKFontsAuto \fi
 }
 
 %% ============================================================
