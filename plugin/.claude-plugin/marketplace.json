@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "marketmind",
+  "description": "MarketMind-AlphaEngine local plugin",
+  "owner": {
+    "name": "MarketMind"
+  },
+  "plugins": [
+    {
+      "name": "mm",
+      "source": "./",
+      "description": "Automated equity research pipeline with multi-agent debate and BUY/HOLD/SELL decisions",
+      "version": "1.0.0",
+      "author": {
+        "name": "MarketMind"
+      }
+    }
+  ]
+}

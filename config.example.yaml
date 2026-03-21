@@ -1,0 +1,164 @@
+# ============================================================
+# MarketMind-AlphaEngine — Master Configuration
+# Copy to config.yaml and customize per deployment
+# ============================================================
+
+# --- General ---
+project_name: marketmind-alpha-engine
+language: en                    # en | ch
+run_mode: daily                 # daily | weekly
+
+# --- Company Target (filled by /mm:init via web search) ---
+company:
+  ticker:                       # resolved by /mm:init
+  name:                         # resolved by /mm:init
+  exchange:                     # resolved by /mm:init
+  market_profile:               # resolved by /mm:init (US | HK | CN | JP | UK | EU)
+  sector_profile:               # resolved by /mm:init
+
+# --- Workspace ---
+workspace:
+  base_dir: workspaces
+  save_raw_content: true
+
+# --- Data Sources (free-tier APIs) ---
+data_sources:
+  price:
+    provider: yfinance          # yfinance (free)
+    horizons:
+      short:
+        period: 5d
+        interval: 1h
+      medium:
+        period: 3mo
+        interval: 1d
+      long:
+        period: 2y
+        interval: 1mo
+    save_csv: true
+
+  news:
+    provider: newsapi           # newsapi free tier; falls back to web_search if no API key
+    fallback: web_search        # use WebSearch tool when API key is unavailable
+    api_key_env: NEWSAPI_API_KEY
+    max_market_news: 10
+    max_sector_news: 12
+    max_company_news: 15
+    lookback_hours_daily: 36
+    lookback_days_weekly: 7
+    dedup_similarity_threshold: 0.82
+
+  filings:
+    provider: sec_edgar         # SEC EDGAR (free, official)
+    user_agent: "MarketMind/1.0 (contact@example.com)"
+    max_filings: 5
+
+  macro:
+    provider: fred              # FRED API (free)
+    api_key_env: FRED_API_KEY
+    series:
+      - DGS10                   # US 10Y yield
+      - DTWEXBGS                # Trade-weighted USD
+      - VIXCLS                  # VIX
+
+# --- Shared Market Context ---
+shared_market_context:
+  indices:
+    - SPY
+    - QQQ
+    - DIA
+  macro_assets:
+    - GLD                       # Gold
+    - USO                       # Oil
+    - BTC-USD
+    - ^VIX
+
+# --- Peers ---
+peers:
+  auto_select: true
+  max_peers: 5
+
+# --- Quant Module ---
+quant:
+  enabled: true
+  indicators:
+    - rsi_14
+    - macd_12_26_9
+    - sma_20
+    - sma_50
+    - ema_12
+    - ema_26
+    - atr_14
+  return_windows: [1d, 5d, 1m, 3m]
+  relative_strength: true
+  event_window: true
+
+# --- Discussion (Multi-Agent Debate) ---
+# Phase 1: Independent memos (all analysts run in parallel)
+# Phase 2: Moderator quick scan → assigns targeted critique pairs
+# Phase 3: Selective cross-critique (only assigned pairs debate)
+# Phase 4: Moderator synthesis (thesis_map.json)
+discussion:
+  enabled: true
+  analyst_roles:                  # ranked by importance, uncomment to enable
+    - company_analyst             # 1. fundamentals, events, catalysts
+    - risk_analyst                # 2. bear case, failure conditions
+    - market_analyst              # 3. macro context, alpha vs beta
+    # - valuation_analyst         # 4. P/E, DCF, price target (uncomment to enable)
+    # - technical_analyst         # 5. chart patterns, momentum signals (uncomment to enable)
+    # - catalyst_analyst          # 6. event timing, earnings calendar (uncomment to enable)
+  debate_mode: selective          # selective (moderator picks pairs) | full (N×N cross)
+  debate_rounds: 1                # number of cross-critique rounds (1-3)
+  max_critique_pairs: 3           # max pairs per round (for selective mode)
+  require_thesis_map: true
+
+# --- Review ---
+review:
+  enabled: true
+  max_revision_loops: 3
+  dimensions:
+    - factuality
+    - evidence_coverage
+    - decision_quality
+  min_overall_score: 8.0
+  min_factuality: 9.0
+  blocker_policy: hard_fail
+
+# --- Decision ---
+decision:
+  enabled: true
+  labels: [BUY, HOLD, SELL]
+  require_confidence_score: true
+  require_risk_section: true
+  require_disconfirming_evidence: true
+  min_evidence_count: 5
+
+# --- Report Style ---
+report_style:
+  daily_layout: dashboard_landscape
+  weekly_layout: institutional_portrait
+  max_pages_daily: 8
+  max_pages_weekly: 12
+  include_quant_section: true
+  include_decision_page: true
+
+# --- Export ---
+export:
+  formats: [markdown, json]     # V1: markdown + json; pdf + web added later
+  output_dir: exports
+
+# --- Model Routing ---
+models:
+  default_provider: anthropic
+  providers:
+    anthropic:
+      enabled: true
+    openai:
+      enabled: false
+  stage_routes:
+    collection: mm-light
+    analysis: mm-standard
+    discussion: mm-standard
+    review: mm-heavy
+    decision: mm-heavy
+    writing: mm-standard

@@ -1,0 +1,8 @@
+{
+  "name": "mm",
+  "description": "MarketMind-AlphaEngine — Automated equity research pipeline with multi-agent debate and BUY/HOLD/SELL decisions",
+  "version": "1.0.0",
+  "author": {
+    "name": "MarketMind"
+  }
+}

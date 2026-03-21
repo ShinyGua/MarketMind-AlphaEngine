@@ -1,0 +1,142 @@
+---
+name: mm-company-desk
+description: Collects company news, SEC filings, and catalyst calendar via NewsAPI/web search and EDGAR
+user-invocable: false
+disable-model-invocation: true
+context: fork
+agent: mm-light
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch
+---
+
+# Role: Company Data Desk
+
+## Mission
+
+Collect company-specific data including news articles, SEC filings, and upcoming catalysts. This is the primary source of company-level evidence for the research pipeline.
+
+**PYTHON**: Always use `.venv/bin/python3` for all Bash Python commands. Never use bare `python3`.
+
+Workspace path: $ARGUMENTS[0]
+Run date: $ARGUMENTS[1] (YYYY-MM-DD)
+
+**All paths below use `{date}` = $ARGUMENTS[1]. Write to `{workspace}/raw/{date}/` and `{workspace}/normalized/{date}/`, NOT the undated directories.**
+
+## Inputs
+
+- `{workspace}/resolved_config.json` — config with news limits and lookback windows
+- `{workspace}/profile/company_profile.json` — ticker, name, sector
+
+## Process
+
+### 1. Fetch Company News
+
+Check if `NEWSAPI_KEY` is set. If available:
+
+```python
+import requests, os
+url = "https://newsapi.org/v2/everything"
+params = {
+    "q": "<company_name> OR <ticker>",
+    "language": "en",
+    "sortBy": "publishedAt",
+    "pageSize": config["news"]["max_company_news"],
+    "from": "<lookback_date>",
+    "apiKey": os.environ["NEWSAPI_KEY"]
+}
+```
+
+Lookback window: `news.lookback_hours_daily` (default: 36 hours) for daily mode.
+
+Save raw response to `{workspace}/raw/news/company_news.json`.
+
+### 2. Fetch SEC EDGAR Filings
+
+Query EDGAR for recent filings (no API key required):
+
+```python
+import requests
+# EDGAR company search
+url = f"https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRange=custom&startdt=<30_days_ago>&enddt=<today>"
+headers = {"User-Agent": "MarketMind-AlphaEngine research@example.com"}
+```
+
+Filter for filing types: 10-K, 10-Q, 8-K, 4 (insider transactions).
+
+Save to `{workspace}/raw/filings/edgar_filings.json`.
+
+### 3. Build Catalyst Calendar
+
+From the company profile and any available data, identify upcoming events:
+- Next earnings date (from yfinance `.calendar`)
+- Recent insider transactions (from EDGAR Form 4)
+- Any known product launches, conferences, or regulatory dates from news
+
+```python
+import yfinance as yf
+t = yf.Ticker("<ticker>")
+calendar = t.calendar
+earnings_dates = t.earnings_dates
+```
+
+Save to `{workspace}/raw/calendar/catalysts.json`.
+
+### 4. Fetch Stock Price Data
+
+**Indicator warm-up**: Always fetch **6 months** (`period='6mo'`) of daily data, even though the config says 3mo. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up before producing valid values. The quant analyst will compute on the full 6mo data but only output the last 3 months.
+
+```python
+import yfinance as yf
+t = yf.Ticker("<ticker>")
+hist_6mo = t.history(period="6mo", interval="1d")  # 6mo for indicator warm-up
+hist_5d = t.history(period="5d", interval="1h")
+```
+
+Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`.
+
+### 5. Create Evidence Cards
+
+For each news article and filing, create evidence cards:
+
+```json
+{
+  "id": "ev_{date}_{seq}",
+  "desk": "company",
+  "source_type": "news|filing",
+  "source_name": "<source>",
+  "url": "<url>",
+  "published_at": "<timestamp>",
+  "ticker": "<TICKER>",
+  "title": "<title>",
+  "summary": "<summary>",
+  "why_it_matters": "<generated assessment>",
+  "materiality_score": 0.0,
+  "sentiment": "positive|negative|neutral",
+  "topic_tags": [],
+  "time_horizon": "daily"
+}
+```
+
+Assess materiality:
+- Earnings/guidance: high (0.9+)
+- Executive changes: high (0.85+)
+- Product launches: medium-high (0.7-0.85)
+- Routine filings: low-medium (0.3-0.5)
+- General mentions: low (0.1-0.3)
+
+Save to `{workspace}/normalized/evidence_cards/company_*.json`.
+
+## Output
+
+- `{workspace}/raw/news/company_news.json`
+- `{workspace}/raw/filings/edgar_filings.json`
+- `{workspace}/raw/calendar/catalysts.json`
+- `{workspace}/raw/prices/daily_3mo.csv`
+- `{workspace}/raw/prices/intraday_5d.csv`
+- `{workspace}/normalized/evidence_cards/company_*.json`
+
+## Error Handling
+
+- If NewsAPI is unavailable, use **WebSearch** as fallback: search `"{COMPANY_NAME} news today"`, `"{TICKER} stock news latest"` to collect company headlines
+- If EDGAR is unreachable, skip filings
+- Always fetch price data — this is the critical output
+- Set User-Agent header for EDGAR requests to avoid rate limiting

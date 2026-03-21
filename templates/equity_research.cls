@@ -1,0 +1,358 @@
+%% equity_research.cls — JPMorgan Equity Research Style
+%% MarketMind-AlphaEngine v2
+%%
+%% Design principles:
+%% - One page = one topic
+%% - Charts are primary content, not decoration
+%% - Narrative paragraphs, bullets only for risks
+%% - Strong visual hierarchy: Big Idea → supporting → evidence
+%% - 30-50% whitespace
+%%
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesClass{equity_research}[2026/03/21 MarketMind JPM-Style Research v2]
+
+\LoadClass[11pt,a4paper]{article}
+
+%% ============================================================
+%% Packages
+%% ============================================================
+\RequirePackage[margin=3cm, top=3.5cm, bottom=3cm, headheight=14pt]{geometry}
+\RequirePackage{xcolor}
+\RequirePackage{graphicx}
+\RequirePackage{booktabs}
+\RequirePackage{fancyhdr}
+\RequirePackage{tikz}
+\RequirePackage{titlesec}
+\RequirePackage{enumitem}
+\RequirePackage{array}
+\RequirePackage{hyperref}
+\RequirePackage{lastpage}
+\RequirePackage{fontspec}
+\RequirePackage{etoolbox}
+\RequirePackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+
+%% ============================================================
+%% Colors — JPM Palette
+%% ============================================================
+\definecolor{jpmnavy}{HTML}{1B2A4A}
+\definecolor{jpmblue}{HTML}{2B5EA7}
+\definecolor{jpmlight}{HTML}{EDF1F7}
+\definecolor{textmain}{HTML}{2D2D2D}
+\definecolor{textsub}{HTML}{6B7280}
+\definecolor{textmuted}{HTML}{9CA3AF}
+\definecolor{bglight}{HTML}{F8F9FB}
+\definecolor{rulelight}{HTML}{D1D5DB}
+\definecolor{buygreen}{HTML}{16A34A}
+\definecolor{holdamber}{HTML}{D97706}
+\definecolor{sellred}{HTML}{DC2626}
+
+%% ============================================================
+%% Typography
+%% ============================================================
+\setmainfont{Helvetica Neue}[
+  BoldFont=Helvetica Neue Bold,
+  ItalicFont=Helvetica Neue Italic,
+]
+\setsansfont{Helvetica Neue}[
+  BoldFont=Helvetica Neue Bold,
+]
+\renewcommand{\familydefault}{\sfdefault}
+\color{textmain}
+\linespread{1.5}
+
+%% ============================================================
+%% Metadata
+%% ============================================================
+\newcommand{\company}[1]{\def\@company{#1}}
+\newcommand{\ticker}[1]{\def\@ticker{#1}}
+\newcommand{\exchange}[1]{\def\@exchange{#1}}
+\newcommand{\sector}[1]{\def\@sector{#1}}
+\newcommand{\reportdate}[1]{\def\@reportdate{#1}}
+\newcommand{\decision}[1]{\def\@decision{#1}}
+\newcommand{\confidence}[1]{\def\@confidence{#1}}
+\newcommand{\horizon}[1]{\def\@horizon{#1}}
+\newcommand{\reportmode}[1]{\def\@reportmode{#1}}
+
+\company{Company}\ticker{TICK}\exchange{NYSE}\sector{Sector}
+\reportdate{\today}\decision{HOLD}\confidence{0.50}\horizon{1w}\reportmode{Daily}
+
+%% ============================================================
+%% Decision color
+%% ============================================================
+%% Resolve decision color once at \begin{document} into a named color alias
+\newcommand{\decisioncolor}{decidedcolor}
+\AtBeginDocument{%
+  \ifdefstring{\@decision}{BUY}{\colorlet{decidedcolor}{buygreen}}{%
+  \ifdefstring{\@decision}{SELL}{\colorlet{decidedcolor}{sellred}}{%
+  \colorlet{decidedcolor}{holdamber}}}%
+}
+
+%% ============================================================
+%% Page 1: Cover + Thesis (JPM Header Style)
+%% ============================================================
+\newcommand{\maketitlepage}{%
+  \thispagestyle{empty}
+  \noindent
+  \begin{tikzpicture}[remember picture, overlay]
+    % Thin top accent bar
+    \fill[jpmnavy] (current page.north west) rectangle
+      ([yshift=-3pt]current page.north east);
+
+    % Header zone
+    % Ticker + Rating line
+    \node[anchor=west, font=\fontsize{24}{28}\selectfont\bfseries\color{jpmnavy}]
+      at ([xshift=2.5cm, yshift=-2cm]current page.north west)
+      {\@ticker\ US\ ---\ \@decision};
+
+    % Company name (auto-wrap for long names)
+    \node[anchor=north west, text width=12cm, font=\fontsize{10}{13}\selectfont\color{textsub}]
+      at ([xshift=2.5cm, yshift=-2.7cm]current page.north west)
+      {\@company\ \textbar\ \@sector\ \textbar\ \@exchange};
+
+    % Date
+    \node[anchor=west, font=\fontsize{10}{12}\selectfont\color{textmuted}]
+      at ([xshift=2.5cm, yshift=-3.7cm]current page.north west)
+      {\@reportmode\ Brief\ \textbar\ \@reportdate};
+
+    % Decision badge (right side) — LARGE
+    \fill[\decisioncolor, rounded corners=5pt]
+      ([xshift=-6cm, yshift=-1.2cm]current page.north east)
+      rectangle ([xshift=-2.5cm, yshift=-2.8cm]current page.north east);
+    \node[white, font=\fontsize{22}{26}\selectfont\bfseries]
+      at ([xshift=-4.25cm, yshift=-2cm]current page.north east)
+      {\@decision};
+
+    % Confidence + Horizon
+    \node[anchor=east, font=\fontsize{9}{11}\selectfont\color{textsub}]
+      at ([xshift=-2.5cm, yshift=-3.2cm]current page.north east)
+      {Confidence: \@confidence\ \textbar\ Horizon: \@horizon};
+
+    % Separator line
+    \draw[rulelight, line width=0.5pt]
+      ([xshift=2.5cm, yshift=-4.3cm]current page.north west) --
+      ([xshift=-2.5cm, yshift=-4.3cm]current page.north east);
+  \end{tikzpicture}
+  \vspace{3.5cm}
+}
+
+%% ============================================================
+%% Headers and Footers
+%% ============================================================
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Thin top bar on every page
+\fancyhead[C]{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \fill[jpmnavy] (current page.north west) rectangle
+      ([yshift=-3pt]current page.north east);
+  \end{tikzpicture}%
+}
+\fancyhead[L]{\footnotesize\color{jpmnavy}\@ticker\ US\ \textbar\ \@decision}
+\fancyhead[R]{\footnotesize\color{textmuted}\@reportdate}
+
+\fancyfoot[L]{\scriptsize\color{textmuted}MarketMind-AlphaEngine}
+\fancyfoot[C]{\scriptsize\color{textmuted}For informational purposes only}
+\fancyfoot[R]{\scriptsize\color{textmuted}\thepage/\pageref{LastPage}}
+
+%% ============================================================
+%% Section = New Page
+%% ============================================================
+\titleformat{\section}
+  {\clearpage\bfseries\fontsize{18}{22}\selectfont\color{jpmnavy}}
+  {}
+  {0pt}
+  {}
+  [\vspace{0.2em}{\color{rulelight}\rule{\textwidth}{0.5pt}}\vspace{0.8em}]
+
+\titleformat{\subsection}
+  {\bfseries\fontsize{11}{14}\selectfont\color{jpmblue}}
+  {}
+  {0pt}
+  {}
+
+\titlespacing*{\section}{0pt}{0pt}{0.5em}
+\titlespacing*{\subsection}{0pt}{1.5em}{0.5em}
+
+%% ============================================================
+%% Big Idea — thesis statement (large, italic)
+%% ============================================================
+\newcommand{\bigidea}[1]{%
+  \vspace{0.8em}
+  \noindent{\fontsize{14}{19}\selectfont\itshape\color{jpmnavy}#1}
+  \vspace{1.5em}\par
+}
+
+%% ============================================================
+%% Big Picture Page — regime insight
+%% ============================================================
+\newcommand{\bigpicturepage}[2]{%
+  % #1 = insight (the big statement)
+  % #2 = why it matters (supporting paragraph)
+  \clearpage
+  \vspace*{2em}
+  {\fontsize{20}{24}\selectfont\bfseries\color{jpmnavy}The Big Picture}
+
+  \vspace{0.3em}
+  {\color{rulelight}\rule{\textwidth}{0.6pt}}
+
+  \vspace{2em}
+  {\fontsize{15}{21}\selectfont\itshape\color{jpmnavy}#1}
+
+  \vspace{3em}
+  {\fontsize{10}{14}\selectfont\bfseries\color{jpmblue}WHY THIS MATTERS}
+
+  \vspace{0.5em}
+  {\fontsize{10.5}{15}\selectfont\color{textmain}#2}
+
+  \vspace{2em}
+}
+
+%% ============================================================
+%% Key Metrics Strip — auto-sizing
+%% ============================================================
+\RequirePackage{fp}
+\newlength{\metricwidth}
+
+\newcommand{\metricbox}[2]{%
+  \begin{minipage}[t]{0.18\textwidth}
+  \centering
+  \settowidth{\metricwidth}{\fontsize{22}{26}\selectfont\bfseries #2}%
+  \ifdim\metricwidth>0.18\textwidth
+    \settowidth{\metricwidth}{\fontsize{16}{20}\selectfont\bfseries #2}%
+    \ifdim\metricwidth>0.18\textwidth
+      {\fontsize{13}{16}\selectfont\bfseries\color{jpmnavy}#2}%
+    \else
+      {\fontsize{16}{20}\selectfont\bfseries\color{jpmnavy}#2}%
+    \fi
+  \else
+    {\fontsize{22}{26}\selectfont\bfseries\color{jpmnavy}#2}%
+  \fi
+  \\[4pt]
+  {\fontsize{6.5}{8}\selectfont\color{textmuted}\MakeUppercase{#1}}
+  \end{minipage}%
+}
+
+\newcommand{\metricsep}{%
+  \hspace{0.3em}%
+  {\color{rulelight}\vrule width 0.5pt height 2em}%
+  \hspace{0.3em}%
+}
+
+%% ============================================================
+%% Chart Inclusion
+%% ============================================================
+\newcommand{\insertchart}[1]{%
+  \begin{center}
+  \includegraphics[width=\textwidth]{#1}
+  \end{center}
+  \vspace{0.5em}
+}
+
+\newcommand{\insertchartscaled}[2][0.9]{%
+  \begin{center}
+  \includegraphics[width=#1\textwidth]{#2}
+  \end{center}
+  \vspace{0.5em}
+}
+
+%% ============================================================
+%% Decision Page
+%% ============================================================
+\newcommand{\decisionpage}[3]{%
+  % #1 = summary paragraph
+  % #2 = \item list for "Why"
+  % #3 = \item list for "Risks"
+  \begin{tcolorbox}[
+    colback=\decisioncolor!4,
+    colframe=\decisioncolor!60,
+    boxrule=1pt,
+    arc=4pt,
+    title={\bfseries\fontsize{12}{15}\selectfont\color{white}\@decision\hfill\fontsize{10}{13}\selectfont Confidence: \@confidence\ \textbar\ Horizon: \@horizon},
+    coltitle=white,
+    colbacktitle=\decisioncolor,
+    top=14pt, bottom=14pt,
+    left=14pt, right=14pt,
+  ]
+  \color{textmain}\fontsize{10.5}{14}\selectfont
+  #1
+
+  \vspace{1em}
+  {\bfseries\color{jpmnavy}Why:}
+  \begin{itemize}[topsep=4pt, itemsep=3pt]
+  #2
+  \end{itemize}
+
+  \vspace{0.8em}
+  {\bfseries\color{jpmnavy}Key Risks:}
+  \begin{itemize}[topsep=4pt, itemsep=3pt]
+  #3
+  \end{itemize}
+  \end{tcolorbox}
+}
+
+%% ============================================================
+%% Thesis Box (cover page)
+%% ============================================================
+\newenvironment{thesisbox}{%
+  \begin{tcolorbox}[
+    colback=jpmlight,
+    colframe=jpmblue!30,
+    boxrule=0.5pt,
+    arc=3pt,
+    left=14pt, right=14pt, top=12pt, bottom=12pt,
+    fontupper=\fontsize{10.5}{14}\selectfont\color{textmain},
+  ]
+}{%
+  \end{tcolorbox}
+}
+
+%% ============================================================
+%% Source attribution
+%% ============================================================
+\newcommand{\sourceattr}[1]{%
+  \vspace{0.5em}
+  {\scriptsize\color{textmuted}Source: #1}
+}
+
+%% ============================================================
+%% Evidence ref
+%% ============================================================
+\newcommand{\evidence}[1]{%
+  {\scriptsize\color{textmuted}[#1]}%
+}
+
+%% ============================================================
+%% Lists — sparse
+%% ============================================================
+\setlist[itemize]{topsep=6pt, itemsep=4pt, parsep=2pt, leftmargin=1.5em}
+\renewcommand{\labelitemi}{\textcolor{jpmblue}{\raisebox{0.3ex}{\tiny$\blacksquare$}}}
+
+%% ============================================================
+%% Hyperref
+%% ============================================================
+\hypersetup{hidelinks, pdfauthor={MarketMind-AlphaEngine}}
+
+%% ============================================================
+%% Disclaimer
+%% ============================================================
+\newcommand{\disclaimer}{%
+  \vfill
+  \noindent{\color{rulelight}\rule{\textwidth}{0.4pt}}
+  \vspace{0.3em}
+
+  {\scriptsize\color{textmuted}
+  \textbf{Disclaimer:} This report is generated by MarketMind-AlphaEngine,
+  an automated equity research system. It is provided for informational
+  purposes only and does not constitute investment advice, a recommendation,
+  or an offer to buy or sell any security. Past performance is not indicative
+  of future results. Users should conduct their own due diligence.
+
+  \vspace{0.3em}
+  \textbf{Sources:} Yahoo Finance, NewsAPI, SEC EDGAR, FRED, web search.}
+}
+
+\endinput
