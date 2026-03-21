@@ -65,11 +65,38 @@ source setup.sh
 
 # 3. (Optional) Add your API keys to config.yaml
 cp config.example.yaml config.yaml
-# Edit config.yaml: add NewsAPI key, FRED key, etc.
-# Leaving keys blank is allowed; WebSearch fallback still works
+# Edit config.yaml for provider settings
+# API secrets are typically supplied via environment variables
 
-# 4. Launch Claude Code with the plugin
+# 4. (Optional) Export API keys before launching Claude Code
+export NEWSAPI_API_KEY="your_newsapi_key"
+export FRED_API_KEY="your_fred_key"
+# Leaving keys unset is allowed; WebSearch fallback still works
+
+# 5. Launch Claude Code with the plugin
 claude --plugin-dir "$PWD/plugin"
+```
+
+### NewsAPI Key Setup
+
+If you want higher-quality news coverage than the fallback web search, create a NewsAPI key first:
+
+1. Register at [newsapi.org/register](https://newsapi.org/register)
+2. Verify your email and copy your API key from the NewsAPI dashboard/docs examples
+3. Export it in your shell as `NEWSAPI_API_KEY`
+
+This project reads the key from the environment variable named in [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml), under:
+
+```yaml
+data_sources:
+  news:
+    api_key_env: NEWSAPI_API_KEY
+```
+
+That means the value should go into your shell environment, for example:
+
+```bash
+export NEWSAPI_API_KEY="your_newsapi_key"
 ```
 
 ### Usage
@@ -92,14 +119,56 @@ The `/mm:init` flow:
 ## Pipeline Architecture
 
 ```text
-/mm:init -> /mm:run -> 12-stage autonomous pipeline -> PDF report
+/mm:run workspaces/{TICKER}
 ```
 
 ```text
-resolve_config -> init_workspace -> collect (3 desks parallel)
-    -> normalize -> quant -> discuss_memos (analysts parallel)
-    -> discuss_debate (selective) -> discuss_synthesis
-    -> draft -> review_loop -> decide -> export + PDF
++== MarketMind /mm:run ================================================+
+|                                                                      |
+|  Existing company workspace                                          |
+|       |                                                              |
+|       v                                                              |
+|  Resolve config + validate status                                    |
+|       |                                                              |
+|       v                                                              |
+|  Init workspace context                                              |
+|       |                                                              |
+|       v                                                              |
+|  Collect (3 desks in parallel)                                       |
+|       |-- Market desk: macro headlines, indices, macro assets        |
+|       |-- Company desk: company news, filings, catalysts             |
+|       |-- Sector desk: sector news, peer prices                      |
+|       |                                                              |
+|       v                                                              |
+|  Normalize evidence cards + time-series tables                       |
+|       |                                                              |
+|       v                                                              |
+|  Quant snapshot                                                      |
+|       | RSI, MACD, SMA, ATR, relative strength                       |
+|       v                                                              |
+|  Discussion loop                                                     |
+|       |-- Independent analyst memos (parallel)                       |
+|       |-- Moderator selects critique pairs                           |
+|       |-- Selective debate                                           |
+|       |-- Thesis synthesis                                           |
+|       |                                                              |
+|       v                                                              |
+|  Draft institutional report                                          |
+|       |                                                              |
+|       v                                                              |
+|  Review loop                                                         |
+|       | pass ------------------------------+                         |
+|       | fail -> targeted revision -> draft |                         |
+|       v                                (max loops from config)       |
+|  Investment decision                                                 |
+|       | BUY / HOLD / SELL + confidence + risks                       |
+|       v                                                              |
+|  Export markdown + JSON + charts + LaTeX PDF                         |
+|       |                                                              |
+|       v                                                              |
+|  Final dated report under workspaces/{TICKER}/final/{YYYY-MM-DD}/    |
+|                                                                      |
++----------------------------------------------------------------------+
 ```
 
 ### Stage Details

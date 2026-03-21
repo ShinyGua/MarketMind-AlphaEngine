@@ -31,7 +31,7 @@ Setup: `source setup.sh` (creates `.venv/` with all dependencies).
 Start Claude Code with the MarketMind plugin:
 
 ```bash
-claude --plugin-dir "$MM_ROOT/plugin"
+claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
 ```
 
 ### Initialize a New Company Research

@@ -65,11 +65,38 @@ source setup.sh
 
 # 3. （可选）配置 API key
 cp config.example.yaml config.yaml
-# 编辑 config.yaml，填入 NewsAPI、FRED 等 key
-# 即使留空也可以运行，系统会自动回退到 WebSearch
+# 编辑 config.yaml 中的数据源配置
+# API 密钥通常通过环境变量提供
 
-# 4. 启动 Claude Code 并加载插件
-claude --plugin-dir "$PWD/plugin"
+# 4. （可选）在启动前导出 API key
+export NEWSAPI_API_KEY="your_newsapi_key"
+export FRED_API_KEY="your_fred_key"
+# 即使不设置也可以运行，系统会自动回退到 WebSearch
+
+# 5. 启动 Claude Code 并加载插件
+claude --plugin-dir "$PWD/plugin" --dangerously-skip-permissions
+```
+
+### NewsAPI 申请与填写位置
+
+如果你希望新闻采集质量高于默认的 WebSearch 回退方式，建议先申请 NewsAPI key：
+
+1. 打开 [newsapi.org/register](https://newsapi.org/register) 注册账号
+2. 完成邮箱验证后，在 NewsAPI 控制台或官方示例中复制你的 API key
+3. 在终端里把它设置为环境变量 `NEWSAPI_API_KEY`
+
+本项目读取的键名定义在 [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml) 这里：
+
+```yaml
+data_sources:
+  news:
+    api_key_env: NEWSAPI_API_KEY
+```
+
+也就是说，密钥应填写到你的 shell 环境变量里，而不是直接硬编码进 `config.yaml`。示例：
+
+```bash
+export NEWSAPI_API_KEY="your_newsapi_key"
 ```
 
 ### 使用方法
@@ -92,14 +119,56 @@ claude --plugin-dir "$PWD/plugin"
 ## 流水线架构
 
 ```text
-/mm:init -> /mm:run -> 12 阶段自治研究流水线 -> PDF 报告
+/mm:run workspaces/{TICKER}
 ```
 
 ```text
-resolve_config -> init_workspace -> collect（3 个 desk 并行）
-    -> normalize -> quant -> discuss_memos（分析师并行）
-    -> discuss_debate（选择性辩论）-> discuss_synthesis
-    -> draft -> review_loop -> decide -> export + PDF
++== MarketMind /mm:run ================================================+
+|                                                                      |
+|  已有公司 workspace                                                  |
+|       |                                                              |
+|       v                                                              |
+|  解析配置并校验当前状态                                              |
+|       |                                                              |
+|       v                                                              |
+|  初始化工作区上下文                                                  |
+|       |                                                              |
+|       v                                                              |
+|  Collect（3 个 desk 并行）                                           |
+|       |-- Market desk: 宏观新闻、指数、宏观资产                      |
+|       |-- Company desk: 公司新闻、监管披露、催化事件                 |
+|       |-- Sector desk: 行业新闻、可比公司价格数据                    |
+|       |                                                              |
+|       v                                                              |
+|  Normalize：整理证据卡片与时间序列表                                 |
+|       |                                                              |
+|       v                                                              |
+|  Quant 快照                                                          |
+|       | RSI、MACD、SMA、ATR、相对强弱                                |
+|       v                                                              |
+|  Discussion 辩论循环                                                 |
+|       |-- 分析师独立 memo（并行）                                    |
+|       |-- 主持者选择交叉质询配对                                     |
+|       |-- 选择性辩论                                                 |
+|       |-- 观点综合与 thesis map                                      |
+|       |                                                              |
+|       v                                                              |
+|  生成机构风格研究报告草稿                                            |
+|       |                                                              |
+|       v                                                              |
+|  Review 循环                                                         |
+|       | 通过 ------------------------------+                         |
+|       | 不通过 -> 定向修订 -> draft        |                         |
+|       v                          （最多循环次数由 config 控制）      |
+|  投资决策                                                             |
+|       | BUY / HOLD / SELL + 置信度 + 风险项                          |
+|       v                                                              |
+|  导出 markdown + JSON + 图表 + LaTeX PDF                             |
+|       |                                                              |
+|       v                                                              |
+|  最终按日期落盘到 workspaces/{TICKER}/final/{YYYY-MM-DD}/            |
+|                                                                      |
++----------------------------------------------------------------------+
 ```
 
 ### 阶段说明
