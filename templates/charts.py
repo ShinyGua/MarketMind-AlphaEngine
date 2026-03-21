@@ -112,27 +112,28 @@ def load_price_csv(path):
     )
 
     if is_multi:
-        df = pd.read_csv(path, header=[0, 1], index_col=0, parse_dates=True)
+        df = pd.read_csv(path, header=[0, 1], index_col=0, parse_dates=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        # Drop the 'Ticker' meta row that yfinance sometimes injects as a data row
-        df = df.loc[~df.index.astype(str).str.lower().isin(['ticker', 'date', ''])]
+        # Drop the 'Ticker'/'Date' meta rows that yfinance injects
+        df = df.loc[~df.index.astype(str).str.lower().isin(['ticker', 'date', 'price', ''])]
     else:
-        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        df = pd.read_csv(path, index_col=0, parse_dates=False)
 
     df = df.loc[:, ~df.columns.duplicated()]
     for col in ['Close', 'Open', 'High', 'Low', 'Volume']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-    # Ensure the index is datetime (handle timezone-aware strings)
+    # Ensure the index is tz-naive date-normalized datetime for consistent arithmetic
     if not isinstance(df.index, pd.DatetimeIndex):
         try:
             df.index = pd.to_datetime(df.index, utc=True, errors='coerce')
         except Exception:
             df.index = pd.to_datetime(df.index, errors='coerce')
-    # Normalize to tz-naive for consistent arithmetic
     if hasattr(df.index, 'tz') and df.index.tz is not None:
         df.index = df.index.tz_localize(None)
+    # Normalize to midnight so NVDA (+04:00) and SPY (00:00) align
+    df.index = df.index.normalize()
     df = df[df.index.notna()]
     return df.dropna(subset=['Close'])
 
