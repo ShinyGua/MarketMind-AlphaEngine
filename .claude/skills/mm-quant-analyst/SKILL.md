@@ -152,9 +152,39 @@ The `quant_summary.json` should report values from the **latest row only** — t
 - `{workspace}/quant/relative_strength.csv` — relative performance table
 - `{workspace}/quant/quant_summary.json` — snapshot for analysts and writer
 
+## Number Formatting Rules
+
+When writing `quant_summary.json`, apply these formatting rules in your Python script:
+
+```python
+def fmt(val, kind='default'):
+    """Format numbers for clean JSON output."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    v = float(val)
+    if kind == 'price':    return round(v, 2)         # $135.66
+    if kind == 'pct':      return round(v, 2)         # -2.31
+    if kind == 'indicator': return round(v, 2)        # RSI: 47.24
+    if kind == 'volume':
+        if abs(v) >= 1e9:  return f"{v/1e9:.2f}B"
+        if abs(v) >= 1e6:  return f"{v/1e6:.1f}M"
+        if abs(v) >= 1e3:  return f"{v/1e3:.1f}K"
+    if kind == 'large':
+        if abs(v) >= 1e12: return f"{v/1e12:.2f}T"
+        if abs(v) >= 1e9:  return f"{v/1e9:.2f}B"
+        if abs(v) >= 1e6:  return f"{v/1e6:.1f}M"
+    return round(v, 2)
+```
+
+Apply to fields:
+- `latest_close`, `sma_*`, `ema_*`, `atr_14` → `fmt(val, 'price')`
+- `returns.*` → `fmt(val, 'pct')`
+- `rsi_14`, `macd*` → `fmt(val, 'indicator')`
+
+**Never output raw floats** like `135.66000366210938` — always round.
+
 ## Quality Rules
 
-- All numeric values must be rounded to reasonable precision (2-4 decimal places)
 - If price data is insufficient for a given indicator window, skip that indicator and note it
 - The summary text must be factual and data-driven, not speculative
 - Ensure quant_summary.json is valid JSON
