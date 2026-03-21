@@ -93,9 +93,17 @@ hist_5d = t.history(period="5d", interval="1h")
 
 Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`.
 
-### 5. Create Evidence Cards
+### 5. Create Evidence Cards (Batch Mode)
 
-For each news article and filing, create evidence cards:
+Process ALL collected news articles and filings in a SINGLE pass — do NOT create cards one by one.
+
+1. Compile all raw news articles and filings into a numbered list
+2. In ONE response, generate ALL evidence cards as a JSON array
+3. **Filter**: Skip articles with materiality < 0.3 (routine news, no market impact)
+4. **Merge**: If multiple articles cover the same event, combine into one card (use the most detailed source)
+5. Write each card to `{workspace}/normalized/{date}/evidence_cards/ev_{date}_comp_NNN.json`
+
+Evidence card schema:
 
 ```json
 {

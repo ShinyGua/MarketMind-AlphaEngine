@@ -71,16 +71,29 @@ Quickly read all analyst memos and identify the **top disagreements**. Assign ta
 - Never assign more than `max_critique_pairs` pairs
 - If all analysts agree on everything, assign 1 pair anyway (devil's advocate)
 
-### Mode B: Full Synthesis (default, no third argument)
+**Also save memo summaries** in the `debate_assignments.json` to avoid re-reading full memos during synthesis:
+```json
+{
+  "assignments": [...],
+  "memo_summaries": {
+    "company_analyst": "3-sentence summary of core thesis + key evidence",
+    "risk_analyst": "3-sentence summary of core thesis + key evidence",
+    "market_analyst": "3-sentence summary of core thesis + key evidence"
+  }
+}
+```
 
-Read all analyst memos AND all cross-critique debate files. Produce thesis_map.json and debate_summary.md.
+### Mode B: Synthesis (argument = "synthesis")
+
+Read critique files AND the memo summaries saved during scan. Do NOT re-read full analyst memos.
 
 ## Inputs (for synthesis mode)
 
-- `{workspace}/discussion/{date}/analyst_memos/*.md` — all independent analyst memos
-- `{workspace}/discussion/{date}/debate/round_*/*.md` — all cross-critique files from all rounds
-- `{workspace}/quant/{date}/quant_summary.json` — for validating quantitative claims
-- `{workspace}/profile/company_profile.json` — company context (undated)
+- `{workspace}/discussion/{date}/debate_assignments.json` — contains memo_summaries from scan phase
+- `{workspace}/discussion/{date}/debate/round_*/*.md` — cross-critique files from debate
+- `{workspace}/{date}_shared_context.json` — quant, profile, peers, catalysts (one file)
+
+**Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/{date}_shared_context.json` instead of individual evidence card, quant, profile, and catalyst files.
 
 ## Process
 

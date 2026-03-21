@@ -33,6 +33,8 @@ Mode: $ARGUMENTS[2] (optional — "initial" for first draft, "revision" for targ
 - `{workspace}/discussion/{date}/debate_summary.md` — human-readable debate summary
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events
 
+**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+
 For revision mode:
 - `{workspace}/reviews/{date}/revision_briefs/revision_brief.json` — what to fix
 - `{workspace}/drafts/{date}/` — the current draft to revise

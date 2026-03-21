@@ -88,9 +88,17 @@ Save raw response to `{workspace}/raw/news/market_headlines.json`.
 
 If NewsAPI is unavailable, skip and log a warning.
 
-### 5. Create Evidence Cards
+### 5. Create Evidence Cards (Batch Mode)
 
-For each headline, create an evidence card:
+Process ALL collected headlines in a SINGLE pass — do NOT create cards one by one.
+
+1. Compile all raw headlines into a numbered list
+2. In ONE response, generate ALL evidence cards as a JSON array
+3. **Filter**: Skip articles with materiality < 0.3 (routine news, no market impact)
+4. **Merge**: If multiple articles cover the same event, combine into one card (use the most detailed source)
+5. Write each card to `{workspace}/normalized/{date}/evidence_cards/ev_{date}_mkt_NNN.json`
+
+Evidence card schema:
 
 ```json
 {

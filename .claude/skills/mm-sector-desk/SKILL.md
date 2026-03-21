@@ -71,9 +71,17 @@ data = yf.download(sector_etf, period="3mo", interval="1d")
 
 Save to `{workspace}/raw/prices/sector_etf.csv`.
 
-### 4. Create Evidence Cards
+### 4. Create Evidence Cards (Batch Mode)
 
-For each sector news article:
+Process ALL collected sector news articles in a SINGLE pass — do NOT create cards one by one.
+
+1. Compile all raw sector headlines into a numbered list
+2. In ONE response, generate ALL evidence cards as a JSON array
+3. **Filter**: Skip articles with materiality < 0.3 (routine news, no market impact)
+4. **Merge**: If multiple articles cover the same event, combine into one card (use the most detailed source)
+5. Write each card to `{workspace}/normalized/{date}/evidence_cards/ev_{date}_sec_NNN.json`
+
+Evidence card schema:
 
 ```json
 {
