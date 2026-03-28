@@ -40,6 +40,9 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 - **选择性辩论**：由主持者定向分配交叉评审对，相比所有分析师两两互评的全量 N×N 辩论，在分析师人数增加时可节省 50-90% 的 token 消耗
 - **日期归档历史**：每次运行都按 `{YYYY-MM-DD}/` 目录保留结果，因此可以对同一家公司进行连续日度分析而不丢失历史研究记录
 - **智能交易日逻辑**：自动识别正确的数据截面，处理盘前、周末和节假日等情况
+- **MCP 服务器架构**：3 个 Model Context Protocol 服务器（market-data、workspace、memory）为 Agent 提供结构化的数据、文件和持久记忆工具访问
+- **长期记忆系统**：情景记忆、语义记忆和过程记忆三层架构，使系统能跨运行回顾历史分析、学习到的模式和优化后的流程
+- **自动化评测流水线**：代码评分器对每次运行进行多维度打分，配合运行日志和聚合指标持续追踪报告质量
 - **免费数据源优先**：完全支持免费 API（yfinance、NewsAPI 免费版、SEC EDGAR、FRED），没有 API key 时可自动退化到 WebSearch
 
 ---
@@ -103,7 +106,7 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 
 ```text
 /mm:init                          # 创建新的公司工作区（交互式）
-/mm:run workspaces/NVDA           # 运行完整的 12 阶段研究流水线
+/mm:run workspaces/NVDA           # 运行完整的 14 阶段研究流水线
 /mm:status                        # 查看所有工作区状态
 ```
 
@@ -166,6 +169,13 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 |  导出 markdown + JSON + 图表 + LaTeX PDF                             |
 |       |                                                              |
 |       v                                                              |
+|  用户反馈（唯一暂停等待输入的阶段）                                  |
+|       | 收集用户对报告的反馈意见                                      |
+|       v                                                              |
+|  Reflect 反思                                                        |
+|       | 评估运行质量、更新长期记忆、                                  |
+|       | 记录指标用于持续改进                                          |
+|       v                                                              |
 |  最终按日期落盘到 workspaces/{TICKER}/final/{YYYY-MM-DD}/            |
 |                                                                      |
 +----------------------------------------------------------------------+
@@ -182,6 +192,8 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 | **Review** | 进行多维度打分并驱动迭代修订 | `mm-report-reviewer` |
 | **Decide** | 输出带置信度、理由和风险项的 BUY/HOLD/SELL 决策 | `mm-decision-maker` |
 | **Export** | 生成标注图表并通过 LaTeX 导出 JPM 风格 PDF 报告 | `mm-pdf-exporter` |
+| **User Review** | 暂停收集用户反馈 — 是否认同、修正意见、个人洞察 | 用户（human-in-the-loop） |
+| **Reflect** | 通过代码评分器评估运行质量、存储用户反馈和长期记忆 | eval 流水线 + memory |
 
 ### 分析师角色（可配置）
 
@@ -204,7 +216,7 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 MarketMind-AlphaEngine/
 ├── .claude/
 │   ├── agents/                    # 模型档位定义（heavy/standard/light）
-│   └── skills/                    # 19 个 agent skill
+│   └── skills/                    # 20 个 agent skill
 │       ├── mm-orchestrator/       # 流水线总控（铁律：不能停）
 │       ├── mm-company-resolver/   # 股票代码 -> 公司画像 + 同业
 │       ├── mm-market-desk/        # 宏观数据采集
@@ -223,10 +235,28 @@ MarketMind-AlphaEngine/
 │       ├── mm-decision-maker/     # BUY/HOLD/SELL 决策输出
 │       ├── mm-pdf-exporter/       # 图表生成与 LaTeX -> PDF
 │       ├── mm-progress-monitor/   # 后台进度监控
+│       ├── mm-memory-writer/      # 运行后记忆提取与存储
 │       └── mm-init/               # 工作区初始化
 ├── plugin/
 │   ├── .claude-plugin/            # 插件元数据
 │   └── commands/                  # 面向用户的命令（/mm:init, /mm:run, /mm:status）
+├── .mcp.json                      # Claude Code MCP 服务器注册
+├── mcp/                           # MCP 服务器（market-data、workspace、memory）
+│   ├── market_data_server.py
+│   ├── workspace_server.py
+│   ├── memory_server.py
+│   └── shared/
+│       ├── contracts.py           # 单一事实来源（阶段、路径、命名）
+│       ├── schemas.py
+│       └── rate_limiter.py
+├── memory/                        # 长期记忆存储（情景/语义/过程）
+├── eval/                          # 评测流水线（评分器、运行日志、指标聚合）
+│   ├── graders/                   # 事实性、证据覆盖、一致性、成本评分器
+│   ├── release_gate.py            # 确定性的通过/警告/失败裁定
+│   ├── stage_timer.py             # 阶段开始/结束时间戳记录
+│   ├── finalize_run.py            # 从所有产物汇总运行日志条目
+│   ├── metrics.py                 # 聚合仪表盘计算
+│   └── run_log.jsonl              # 只追加的流水线运行历史
 ├── templates/
 │   ├── equity_research.cls        # JPM 风格 LaTeX 文档类
 │   └── charts.py                  # 标注图表生成器（matplotlib）
@@ -300,6 +330,12 @@ review:
 ## 发展路线图
 
 **当前版本：dev 0.1**。核心流水线已经可用，JPM 风格 PDF 生成功能已打通。
+
+### 已完成
+
+- [x] **MCP 服务器架构**：3 个 MCP 服务器（market-data、workspace、memory）为 Agent 提供结构化工具访问
+- [x] **长期记忆系统**：跨运行的情景记忆、语义记忆和过程记忆三层架构
+- [x] **自动化评测流水线**：代码评分器、运行日志和聚合指标，持续追踪报告质量
 
 ### TODO
 

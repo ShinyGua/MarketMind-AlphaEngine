@@ -34,6 +34,8 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 
 **Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
+**Memory context (optional):** If `{workspace}/{date}_memory_context_analyst.json` exists, read it for historical context — previous risk assessments, known failure patterns, and persistent risk factors for this company/sector. Use this to inform your analysis but do not let it override current evidence.
+
 ## Behavior Modes
 
 ### Mode A: Independent Memo (default, no second argument)

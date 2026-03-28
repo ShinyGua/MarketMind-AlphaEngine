@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-heavy
-allowed-tools: Read, Write, Glob, Grep
+allowed-tools: Read, Write, Glob, Grep, mcp__workspace__write_artifact
 ---
 
 # Role: Research Report Reviewer
@@ -20,17 +20,28 @@ Write review comments and revision briefs in the language from `resolved_config.
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
+**Derive TICKER from the workspace directory name** (e.g., `workspaces/NVDA` → `NVDA`). Use it for MCP resource URIs.
+
 **All paths below use `{date}` = $ARGUMENTS[1].**
 
-## Inputs
+## Inputs (MCP-first)
 
-- `{workspace}/resolved_config.json` — review thresholds
-- `{workspace}/drafts/{date}/*.md` — the latest draft (highest version number)
-- `{workspace}/normalized/{date}/evidence_digest.json` — ALL evidence cards in one file (do NOT read individual cards)
-- `{workspace}/{date}_shared_context.json` — quant, profile, peers, catalysts in one file
-- `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis for coverage checks
+**Primary input — read ONE composite resource instead of many files:**
 
-**IMPORTANT: Read only these 4 files** (draft + evidence_digest + shared_context + thesis_map). Do NOT read individual evidence card files, quant_summary, company_profile, catalysts, or debate_summary separately — they are already in the digest/context files. This reduces reads from ~32 to ~4.
+Read `workspace://{TICKER}/{date}/review_packet` via MCP resource. This returns:
+- `latest_draft` — the highest-version draft text
+- `draft_version` — e.g. "v2"
+- `evidence_digest` — all evidence cards for coverage checks
+- `shared_context` — quant, profile, peers, catalysts for fact-checking
+- `thesis_map` — debate synthesis for decision quality checks
+- `memory_context` — procedural memories (known error patterns from past reviews), or null
+
+Also read `{workspace}/resolved_config.json` for review thresholds.
+
+**IMPORTANT:** The review_packet bundles everything. Do NOT read individual evidence card files, quant_summary, company_profile, catalysts, or debate_summary separately — they are already in the packet. This reduces reads from ~32 to ~2.
+
+**Fallback (if MCP resources unavailable):** Read individual files:
+- `{workspace}/drafts/{date}/*.md`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/{date}_shared_context.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/{date}_memory_context_reviewer.json`
 
 ## Process
 
@@ -96,7 +107,7 @@ Pass if:
 
 ### 5. Write Review Output
 
-Write to: `{workspace}/reviews/final_reviews/review_v{N}.json`
+Write to: `{workspace}/reviews/{date}/final_reviews/review_v{N}.json`
 
 ```json
 {
@@ -119,7 +130,7 @@ Write to: `{workspace}/reviews/final_reviews/review_v{N}.json`
 
 ### 6. Write Revision Brief (if failed)
 
-If the review fails, write to: `{workspace}/reviews/revision_briefs/revision_brief.json`
+If the review fails, write to: `{workspace}/reviews/{date}/revision_briefs/revision_brief.json`
 
 ```json
 {
@@ -136,7 +147,7 @@ If the review fails, write to: `{workspace}/reviews/revision_briefs/revision_bri
 
 ### 7. Update Score History
 
-Append to `{workspace}/reviews/score_history.json`:
+Append to `{workspace}/reviews/{date}/score_history.json`:
 
 ```json
 [

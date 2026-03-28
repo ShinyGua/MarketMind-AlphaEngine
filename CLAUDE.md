@@ -48,7 +48,7 @@ The system will ask which company to analyze, verify via web search, and create 
 /mm:run workspaces/NVDA
 ```
 
-This launches the autonomous pipeline via ralph-loop — it runs all 12 stages continuously without stopping, tracking progress via TodoWrite. If interrupted, re-run the same command to resume.
+This launches the autonomous pipeline — it runs all 14 stages continuously, tracking progress via TodoWrite. Stage 13 (user_review) pauses to collect user feedback; all other stages run autonomously. The final stage (reflect) runs code-based graders, produces a release gate verdict, and writes long-term memories including user feedback. If interrupted, re-run the same command to resume.
 
 ### Check Status
 
@@ -64,7 +64,7 @@ Shows all workspaces and their pipeline progress.
 
 ```text
 resolve_config → init_workspace → collect(parallel) → normalize
-    → quant → discuss → draft → review_loop → decide → export
+    → quant → discuss → draft → review_loop → decide → export → reflect
 ```
 
 ### Stage 0: Resolve Config
@@ -96,7 +96,7 @@ Run these desks in parallel:
 - RSI(14), MACD(12,26,9), SMA(20,50), EMA(12,26), ATR(14)
 - Return windows: 1d, 5d, 1m, 3m
 - Relative strength vs index, sector, peers
-- Output: `quant/technical_indicators.csv`, `quant/quant_summary.json`
+- Output: `quant/{date}/technical_indicators.csv`, `quant/{date}/quant_summary.json`
 
 ### Stage 5: Multi-Analyst Discussion (Debate Loop)
 
@@ -123,8 +123,8 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 
 - **mm-discussion-moderator** reads all memos + all critique files
 - Produces:
-  - `discussion/thesis_map.json` — consensus, disagreements, bull/bear cases, key risks, unsupported claims, writer guidance
-  - `discussion/debate_summary.md` — human-readable summary of where analysts agreed and disagreed, and why
+  - `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases, key risks, unsupported claims, writer guidance
+  - `discussion/{date}/debate_summary.md` — human-readable summary of where analysts agreed and disagreed, and why
 
 ### Stage 6: Draft Report
 - **mm-report-writer** generates daily or weekly report from:
@@ -145,6 +145,12 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 - Write final markdown report to `final/`
 - Write structured JSON report to `final/`
 - (Future: PDF and web PPT export)
+
+### Stage 10: Reflect (Non-Critical)
+- Run code-based graders (factuality, evidence coverage, consistency, cost)
+- Finalize run log entry (`eval/run_log.jsonl`)
+- **mm-memory-writer** extracts and stores episodic/semantic/procedural memories
+- If this stage fails, pipeline still counts as complete
 
 ---
 
@@ -207,8 +213,8 @@ workspaces/
       final_decision.json
 
     final/{YYYY-MM-DD}/          # Date-stamped final output
-      daily_report.md
-      daily_report.json
+      {daily_report|weekly_report}.md   # basename depends on run_mode
+      {daily_report|weekly_report}.json
 
     exports/{YYYY-MM-DD}/        # Date-stamped exports
       pdf/
@@ -273,11 +279,11 @@ API keys are configured via environment variables specified in `config.yaml` und
 
 All inter-stage data exchange uses JSON files written to the workspace. Key schemas:
 
-- **Evidence Card**: `normalized/evidence_cards/*.json` — standardized source items with scores
-- **Quant Summary**: `quant/quant_summary.json` — technical indicators and flags
-- **Thesis Map**: `discussion/thesis_map.json` — consensus, disagreements, bull/bear cases
-- **Review Output**: `reviews/final_reviews/*.json` — pass/fail, dimension scores, rewrite actions
-- **Final Decision**: `decision/final_decision.json` — BUY/HOLD/SELL with evidence
+- **Evidence Card**: `normalized/{date}/evidence_cards/*.json` — standardized source items with scores
+- **Quant Summary**: `quant/{date}/quant_summary.json` — technical indicators and flags
+- **Thesis Map**: `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases
+- **Review Output**: `reviews/{date}/final_reviews/*.json` — pass/fail, dimension scores, rewrite actions
+- **Final Decision**: `decision/{date}/final_decision.json` — BUY/HOLD/SELL with evidence
 
 See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema definitions.
 
@@ -290,6 +296,110 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 | mm-heavy | claude-opus-4-6 | Orchestration, discussion moderation, review, decision |
 | mm-standard | claude-opus-4-6 | Company resolution, report writing, analyst memos |
 | mm-light | claude-sonnet-4-6 | Data collection desks, quant computation |
+
+---
+
+## MCP Server Architecture
+
+Three MCP servers provide standardized tool/resource/prompt interfaces for the pipeline:
+
+### market-data-mcp (`mcp/market_data_server.py`)
+Wraps all external data source calls with rate limiting and fallback logic.
+
+| Tool | Source | Purpose |
+|------|--------|---------|
+| `get_price_history` | yfinance | OHLCV price data for tickers |
+| `get_news` | NewsAPI | News articles (falls back to WebSearch) |
+| `get_filings` | SEC EDGAR | Company SEC filings |
+| `get_macro_series` | FRED | Macro time series data |
+| `get_company_info` | yfinance | Company profile and fundamentals |
+| `get_earnings_calendar` | yfinance | Upcoming earnings dates |
+
+### workspace-mcp (`mcp/workspace_server.py`)
+Manages workspace artifact I/O with path-traversal protection.
+
+**Tools**: `write_artifact`, `update_status`, `create_workspace`, `create_date_dirs`
+**Resources**: `workspace://{ticker}/{path}` — URI-addressable workspace files (profile, quant, evidence, thesis_map, decision)
+**Prompts**: `pipeline_status_summary`, `workspace_overview`
+
+### memory-mcp (`mcp/memory_server.py`)
+Long-term memory storage and retrieval across pipeline runs.
+
+**Tools**: `store_memory`, `search_memory`, `get_entity_timeline`, `update_memory`, `prune_memories`
+**Resources**: `memory://index`, `memory://entity/{name}`, `memory://recent`
+**Prompts**: `analysis_reflection`, `lesson_extraction`
+
+Configuration: `.mcp.json` at project root registers all three servers for Claude Code.
+
+---
+
+## Memory Layer
+
+Cross-run memory system with three types stored as JSONL under `memory/`:
+
+| Type | Purpose | Lifecycle | Example |
+|------|---------|-----------|---------|
+| Episodic | Per-run decision + key themes | 1 per run, never expires | "AMD 2026-03-20: HOLD at 0.72, AI uncertainty vs strong relative strength" |
+| Semantic | Persistent company/sector beliefs | Evolves: old superseded by new | "EPYC server adoption accelerating since 2023" |
+| Procedural | Process learnings from errors | Never expires | "MACD direction errors: always check sign vs signal" |
+
+**Storage**: `memory/{type}/index.jsonl` — append-only, one JSON line per memory unit
+
+**Retrieval**: `memory/retrieval.py` scores memories by `importance x confidence x recency_decay(days)` and returns top-k. Injected at three points:
+- Before analyst memos (Stage 6): episodic + semantic for ticker/sector
+- Before report writing (Stage 9): procedural + recent episodic
+- Before review (Stage 10): procedural only
+
+**Memory writer**: `mm-memory-writer` skill runs in Stage 14 (reflect) to extract memories from completed pipeline runs, including user review feedback from Stage 13.
+
+---
+
+## Evaluation Layer
+
+Automated evaluation pipeline under `eval/`:
+
+### Code-Based Graders
+
+| Grader | What It Checks |
+|--------|---------------|
+| `factuality_grader.py` | Report numbers match quant_summary.json |
+| `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
+| `consistency_grader.py` | Decision aligns with thesis_map consensus |
+| `cost_tracker.py` | Token/cost estimation per run |
+
+### Run Log
+
+`eval/run_log.jsonl` — append-only, one entry per completed pipeline run. Contains stage timings, review scores, grader results, decision, and cost estimates.
+
+### Metrics
+
+`eval/metrics.py` computes aggregate dashboards: pipeline health, quality trends, decision analytics, cost analytics.
+
+```bash
+.venv/bin/python3 eval/metrics.py --ticker AMD --format markdown
+```
+
+---
+
+## Context Governance
+
+Token optimization through layered compression:
+
+```text
+raw doc → evidence card → evidence_digest → thesis_map → decision capsule
+```
+
+Each layer is ~5-10x smaller. Downstream agents read the most compressed form sufficient for their task.
+
+### Existing Patterns
+- **Selective debate**: Moderator assigns 2-3 critique pairs instead of N×N
+- **Evidence digest**: All cards consolidated into one file
+- **Shared context**: quant + profile + peers + catalysts bundled in one file
+- **Memo summaries**: Stored in debate_assignments.json, reused in synthesis
+- **Targeted revision**: revision_brief specifies sections to rewrite, not full report
+
+### Memory-Aware Context Budget
+When memory context is loaded, it supplements (not replaces) current evidence. The retrieval script returns only top-k scored memories to stay within token budget.
 
 ---
 
@@ -311,6 +421,7 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 | mm-report-writer | mm-standard | No | Generate report draft |
 | mm-report-reviewer | mm-heavy | No | Multi-dimensional scoring + revision |
 | mm-decision-maker | mm-heavy | No | Final BUY/HOLD/SELL decision |
+| mm-memory-writer | mm-standard | No | Extract and store memories from completed runs |
 
 ---
 

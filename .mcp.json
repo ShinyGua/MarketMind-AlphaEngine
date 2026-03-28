@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "market-data": {
+      "command": ".venv/bin/python3",
+      "args": ["mcp/market_data_server.py"],
+      "env": {
+        "NEWSAPI_KEY": "${NEWSAPI_KEY}",
+        "FRED_API_KEY": "${FRED_API_KEY}"
+      }
+    },
+    "workspace": {
+      "command": ".venv/bin/python3",
+      "args": ["mcp/workspace_server.py"],
+      "env": {
+        "WORKSPACES_DIR": "workspaces"
+      }
+    },
+    "memory": {
+      "command": ".venv/bin/python3",
+      "args": ["mcp/memory_server.py"],
+      "env": {
+        "MEMORY_DIR": "memory"
+      }
+    }
+  }
+}

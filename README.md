@@ -40,6 +40,9 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 - **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
+- **MCP Server Architecture**: 3 Model Context Protocol servers (market-data, workspace, memory) give agents structured tool access to data, files, and persistent memory
+- **Long-Term Memory**: Episodic, semantic, and procedural memory layers let the system recall past analyses, learned patterns, and refined procedures across runs
+- **Automated Evaluation Pipeline**: Code-based graders score each run along multiple dimensions, with a run log and aggregated metrics to track quality over time
 - **Free Data Sources**: Works entirely with free APIs (yfinance, NewsAPI free tier, SEC EDGAR, FRED) with WebSearch fallback when API keys are unavailable
 
 ---
@@ -74,7 +77,7 @@ export FRED_API_KEY="your_fred_key"
 # Leaving keys unset is allowed; WebSearch fallback still works
 
 # 5. Launch Claude Code with the plugin
-claude --plugin-dir "$PWD/plugin"
+claude --plugin-dir "$PWD/plugin" --dangerously-skip-permissions
 ```
 
 ### NewsAPI Key Setup
@@ -103,7 +106,7 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 
 ```text
 /mm:init                          # Create a new company workspace (interactive)
-/mm:run workspaces/NVDA           # Run the full 12-stage research pipeline
+/mm:run workspaces/NVDA           # Run the full 14-stage research pipeline
 /mm:status                        # Check all workspace statuses
 ```
 
@@ -166,6 +169,13 @@ The `/mm:init` flow:
 |  Export markdown + JSON + charts + LaTeX PDF                         |
 |       |                                                              |
 |       v                                                              |
+|  User Review (only stage that pauses for input)                      |
+|       | Collect user feedback on the report                          |
+|       v                                                              |
+|  Reflect                                                             |
+|       | Evaluate run quality, update long-term memory,               |
+|       | log metrics for continuous improvement                       |
+|       v                                                              |
 |  Final dated report under workspaces/{TICKER}/final/{YYYY-MM-DD}/    |
 |                                                                      |
 +----------------------------------------------------------------------+
@@ -182,6 +192,8 @@ The `/mm:init` flow:
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
 | **Decide** | BUY/HOLD/SELL decision with confidence, reasons, and risks | `mm-decision-maker` |
 | **Export** | Annotated charts plus LaTeX output into a JPM-style PDF report | `mm-pdf-exporter` |
+| **User Review** | Pause for user feedback — agreement, corrections, personal insights | user (human-in-the-loop) |
+| **Reflect** | Evaluate run quality via code graders, store user feedback + long-term memory | eval pipeline + memory |
 
 ### Analyst Roles (Configurable)
 
@@ -204,7 +216,7 @@ Enable additional analysts by uncommenting roles in `config.yaml`.
 MarketMind-AlphaEngine/
 ├── .claude/
 │   ├── agents/                    # Model tier definitions (heavy/standard/light)
-│   └── skills/                    # 19 agent skills
+│   └── skills/                    # 20 agent skills
 │       ├── mm-orchestrator/       # Pipeline driver (iron law: never stop)
 │       ├── mm-company-resolver/   # Ticker -> profile + peers
 │       ├── mm-market-desk/        # Macro data collection
@@ -223,10 +235,28 @@ MarketMind-AlphaEngine/
 │       ├── mm-decision-maker/     # BUY/HOLD/SELL decision
 │       ├── mm-pdf-exporter/       # Chart generation + LaTeX -> PDF
 │       ├── mm-progress-monitor/   # Background progress tracking
+│       ├── mm-memory-writer/      # Memory extraction from completed runs
 │       └── mm-init/               # Workspace initialization
 ├── plugin/
 │   ├── .claude-plugin/            # Plugin metadata
 │   └── commands/                  # User-facing commands (/mm:init, /mm:run, /mm:status)
+├── .mcp.json                      # MCP server registration for Claude Code
+├── mcp/                           # MCP servers (market-data, workspace, memory)
+│   ├── market_data_server.py
+│   ├── workspace_server.py
+│   ├── memory_server.py
+│   └── shared/
+│       ├── contracts.py           # Single source of truth (stages, paths, naming)
+│       ├── schemas.py
+│       └── rate_limiter.py
+├── memory/                        # Long-term memory store (episodic/semantic/procedural)
+├── eval/                          # Evaluation pipeline (graders, run log, metrics)
+│   ├── graders/                   # Factuality, evidence, consistency, cost graders
+│   ├── release_gate.py            # Deterministic pass/warning/failed verdict
+│   ├── stage_timer.py             # Stage start/end timestamp recorder
+│   ├── finalize_run.py            # Assembles run log entry from all artifacts
+│   ├── metrics.py                 # Aggregate dashboard computation
+│   └── run_log.jsonl              # Append-only pipeline run history
 ├── templates/
 │   ├── equity_research.cls        # JPM-style LaTeX document class
 │   └── charts.py                  # Annotated chart generator (matplotlib)
@@ -300,6 +330,12 @@ review:
 ## Roadmap
 
 **Current: dev 0.1**. The core pipeline is functional and JPM-style PDF generation is working.
+
+### Done
+
+- [x] **MCP Server Architecture**: 3 MCP servers (market-data, workspace, memory) for structured agent tool access
+- [x] **Long-Term Memory System**: Episodic, semantic, and procedural memory layers across runs
+- [x] **Automated Evaluation Pipeline**: Code-based graders, run log, and aggregated metrics for quality tracking
 
 ### TODO
 

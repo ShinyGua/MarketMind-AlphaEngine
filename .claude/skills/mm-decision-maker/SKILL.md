@@ -79,7 +79,7 @@ Score confidence from 0.0 to 1.0:
 
 ### 4. Write Final Decision
 
-Write to: `{workspace}/decision/final_decision.json`
+Write to: `{workspace}/decision/{date}/final_decision.json`
 
 ```json
 {

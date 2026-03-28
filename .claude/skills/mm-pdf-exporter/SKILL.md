@@ -29,7 +29,7 @@ Read `resolved_config.json` → `language` field. If `ch`, the report body and a
 ## Inputs
 
 - `{workspace}/resolved_config.json` — merged config (contains language field)
-- `{workspace}/final/{date}/daily_report.md` — the final markdown report
+- `{workspace}/final/{date}/{daily_report|weekly_report}.md` — the final markdown report (filename depends on `run_mode` in resolved_config: `daily_report.md` for daily, `weekly_report.md` for weekly)
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
 - `{workspace}/decision/{date}/final_decision.json` — BUY/HOLD/SELL decision
 - `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis
@@ -63,7 +63,7 @@ Read these files and extract key data:
 - From `final_decision.json`: decision, confidence, horizon, decision_summary, top_reasons, key_risks, disconfirming_signals
 - From `quant_summary.json`: returns (1d/5d/1m/3m), technical indicators (RSI, MACD, ATR), relative_strength, flags
 - From `thesis_map.json`: consensus, strongest_bull_case, strongest_bear_case, writer_guidance
-- From `daily_report.md`: section content (Executive Summary, Market Context, Company Events, etc.)
+- From the final report markdown (`daily_report.md` or `weekly_report.md`): section content (Executive Summary, Market Context, Company Events, etc.)
 
 ### Step 3: Write report.tex
 
@@ -108,6 +108,40 @@ Write `{workspace}/exports/{date}/pdf/report.tex` following this **7-page struct
 [1 short paragraph about volume/momentum]
 ```
 
+After the paragraph, add a **Technical Snapshot table** (from `quant_summary.json`). Use `\resizebox` to fit 11 columns. Include: Close, 1D%, 5D%, 1M%, 3M%, RSI(14), MACD, MACD Signal, MACD Hist, SMA20, SMA50. **Do NOT include** EMA12, EMA26, or ATR. Color returns and MACD values (positive=`\textcolor{buygreen}{}`, negative=`\textcolor{sellred}{}`).
+
+```latex
+\vspace{0.8em}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}rrrrrrrrrrr@{}}
+\rowcolor{jpmnavy}
+\textcolor{white}{\textbf{Close}} &
+\textcolor{white}{\textbf{1D\%}} &
+\textcolor{white}{\textbf{5D\%}} &
+\textcolor{white}{\textbf{1M\%}} &
+\textcolor{white}{\textbf{3M\%}} &
+\textcolor{white}{\textbf{RSI(14)}} &
+\textcolor{white}{\textbf{MACD}} &
+\textcolor{white}{\textbf{Signal}} &
+\textcolor{white}{\textbf{Hist}} &
+\textcolor{white}{\textbf{SMA20}} &
+\textcolor{white}{\textbf{SMA50}} \\
+\rowcolor{jpmlight}
+\$[close] &
+[+/-][1d]\% &
+[+/-][5d]\% &
+[+/-][1m]\% &
+[+/-][3m]\% &
+[rsi] &
+[macd] &
+[macd\_signal] &
+[+/-][macd\_hist] &
+\$[sma20] &
+\$[sma50] \\
+\end{tabular}}
+\sourceattr{Yahoo Finance via yfinance}
+```
+
 **Page 5: What Changed (Company Events)**
 ```latex
 \section{What Changed}
@@ -116,11 +150,52 @@ Write `{workspace}/exports/{date}/pdf/report.tex` following this **7-page struct
 ```
 
 **Page 6: Sector & Peers**
+
+Build two LaTeX tables from `quant_summary.json`. **Do NOT use `\insertchart{charts/peer_chart.pdf}`** on this page.
+
 ```latex
 \section{Sector \& Peers}
 \bigidea{[one-sentence peer positioning]}
-\insertchart{charts/peer_chart.pdf}
 [1 short narrative paragraph]
+\vspace{1em}
+```
+
+**Table 1 — Peer 5D Returns** (from `relative_strength.peer_5d_returns`). Sort descending by return. Bold the target ticker row. Color returns green/red. Use `\rowcolor{jpmlight}` on the target row.
+
+```latex
+\begin{center}
+{\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\rowcolor{jpmnavy}
+\textcolor{white}{\textbf{Ticker}} &
+\textcolor{white}{\textbf{5D Return}} &
+\textcolor{white}{\textbf{Peer Rank}} \\
+\rowcolor{jpmlight}
+\textbf{[TICKER]} & \textcolor{buygreen/sellred}{\textbf{[+/-][X.XX]\%}} & \textbf{\#[rank] of [N]} \\
+[peer1] & \textcolor{buygreen/sellred}{[+/-][X.XX]\%} & \\
+[peer2] & \textcolor{buygreen/sellred}{[+/-][X.XX]\%} & \\
+... \\
+\end{tabular}}
+\end{center}
+```
+
+**Table 2 — Relative Strength vs Benchmarks** (from `relative_strength.vs_SPY_5d`, `vs_SPY_1m`, `vs_SOXX_5d`, `vs_SOXX_1m`). Place below table 1 with `\vspace{1em}`.
+
+```latex
+\vspace{1em}
+\begin{center}
+{\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\rowcolor{jpmnavy}
+\textcolor{white}{\textbf{Benchmark}} &
+\textcolor{white}{\textbf{5D Alpha}} &
+\textcolor{white}{\textbf{1M Alpha}} \\
+\rowcolor{jpmlight}
+vs SPY & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} \\
+vs SOXX (Sector) & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} \\
+\end{tabular}}
+\end{center}
+\sourceattr{Yahoo Finance via yfinance}
 ```
 
 **Page 7: Decision & Risk**

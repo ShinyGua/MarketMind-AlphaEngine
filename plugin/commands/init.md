@@ -125,7 +125,7 @@ If the exchange doesn't match any of these (e.g., ASX, TSX, BSE), default to the
 If `workspaces/{TICKER}/` already exists:
 
 1. Determine today's trading date (use the same smart trading day logic from the orchestrator — if pre-market or weekend, use the last trading day)
-2. Check if `workspaces/{TICKER}/final/{date}/daily_report.md` exists
+2. Check if a final report exists: look for `workspaces/{TICKER}/final/{date}/daily_report.md` or `weekly_report.md` (depends on `run_mode` in the existing `status.json`)
 
 **Case A: Today's report already exists** — ask the user:
 
@@ -218,4 +218,4 @@ Skill tool: /mm:run
 Arguments: workspaces/{TICKER}
 ```
 
-This starts the autonomous pipeline — the user does not need to type `/mm:run` separately. The pipeline will run all 12 stages continuously via ralph-loop.
+This starts the autonomous pipeline — the user does not need to type `/mm:run` separately. The pipeline will run all 14 stages continuously, including user review (feedback collection) and the final reflect stage (eval + memory).

@@ -33,7 +33,9 @@ ALL_STAGES = [
   "draft",
   "review",
   "decide",
-  "export"
+  "export",
+  "user_review",
+  "reflect"
 ]
 
 STAGE_LABELS = {
@@ -48,7 +50,9 @@ STAGE_LABELS = {
   "draft":             { content: "Draft report",                   activeForm: "Drafting research report..." },
   "review":            { content: "Review & revision loop",         activeForm: "Reviewing and revising report..." },
   "decide":            { content: "Investment decision",            activeForm: "Producing BUY/HOLD/SELL decision..." },
-  "export":            { content: "Export final report",            activeForm: "Exporting final report..." }
+  "export":            { content: "Export final report",            activeForm: "Exporting final report..." },
+  "user_review":       { content: "User review (awaiting input)",  activeForm: "Waiting for user feedback..." },
+  "reflect":           { content: "Eval + memory (non-critical)",   activeForm: "Running graders and writing memories..." }
 }
 ```
 
@@ -65,7 +69,7 @@ LOOP:
        - If stage is in stages_completed → status: "completed"
        - If stage is the NEXT uncompleted stage → status: "in_progress"
        - Otherwise → status: "pending"
-  4. Call TodoWrite with the full 12-stage list
+  4. Call TodoWrite with the full 14-stage list
   5. Check: if status.json stage == "completed" → EXIT loop (pipeline done)
   6. Sleep 5 seconds (use Bash: sleep 5)
   7. Go to 1

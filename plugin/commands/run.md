@@ -2,7 +2,7 @@
 
 ## Description
 
-Execute the complete MarketMind equity research pipeline for a company workspace. Runs all 12 stages autonomously from start to finish, producing a final research report with BUY/HOLD/SELL decision.
+Execute the complete MarketMind equity research pipeline for a company workspace. Runs 14 stages mostly autonomously, with a single pause at stage 13 (`user_review`) to collect user feedback. Produces a final research report with BUY/HOLD/SELL decision, then runs evaluation and long-term memory updates.
 
 ## Arguments
 
@@ -31,15 +31,16 @@ Read `{workspace}/status.json`. Determine the ticker and run_mode.
 Check if today's date folder already has a report:
 
 ```bash
-python3 -c "
+.venv/bin/python3 -c "
 import os, json, datetime
 workspace = 'WORKSPACE_PATH'
 today = datetime.date.today().isoformat()
-mode = 'daily'  # from status.json
-report_path = os.path.join(workspace, 'final', today, f'{mode}_report.md')
-print(json.dumps({'exists': os.path.exists(report_path), 'date': today}))
-"
-    print(json.dumps({'exists': False, 'is_today': False}))
+# Read run_mode from status.json
+status = json.load(open(os.path.join(workspace, 'status.json'))) if os.path.exists(os.path.join(workspace, 'status.json')) else {}
+mode = status.get('run_mode', 'daily')
+basename = 'weekly_report' if mode == 'weekly' else 'daily_report'
+report_path = os.path.join(workspace, 'final', today, f'{basename}.md')
+print(json.dumps({'exists': os.path.exists(report_path), 'date': today, 'mode': mode}))
 "
 ```
 
@@ -72,7 +73,7 @@ This monitor will read `status.json` periodically and update the TodoWrite check
 1. Read `.claude/skills/mm-orchestrator/SKILL.md` — this is your complete instruction set
 2. Follow its IRON LAW and Execution Protocol for workspace `{WORKSPACE_PATH}`
 3. Use `.venv/bin/python3` for all Python commands
-4. Execute ALL 12 stages sequentially without stopping
+4. Execute ALL 14 stages sequentially (stage 13 pauses for user review; all others run autonomously)
 5. After each stage: update `{WORKSPACE_PATH}/status.json`, then immediately do the next stage
 6. Dispatch sub-skills via Agent tool (for parallel stages like collect and discuss_memos)
 
@@ -82,12 +83,16 @@ This monitor will read `status.json` periodically and update the TodoWrite check
 
 When the pipeline finishes:
 
-Read `{workspace}/decision/final_decision.json` and display:
+Read `{workspace}/decision/{date}/final_decision.json` and `{workspace}/eval/{date}/release_gate.json`, then display:
 
 ```
-Pipeline complete for {TICKER}
+Pipeline complete for {TICKER} ({date})
 
   Decision:   {BUY|HOLD|SELL} (confidence: {score})
-  Report:     {workspace}/final/daily_report.md
-  Decision:   {workspace}/decision/final_decision.json
+  Report:     {workspace}/final/{date}/{daily_report|weekly_report}.md
+  PDF:        {workspace}/exports/{date}/pdf/report.pdf
+  Decision:   {workspace}/decision/{date}/final_decision.json
+  Release:    {release_status}
 ```
+
+(Use `daily_report.md` or `weekly_report.md` based on `resolved_config.run_mode`)

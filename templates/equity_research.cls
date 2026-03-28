@@ -16,7 +16,7 @@
 %% ============================================================
 %% Packages
 %% ============================================================
-\RequirePackage[margin=3cm, top=3.5cm, bottom=3cm, headheight=14pt]{geometry}
+\RequirePackage[margin=3cm, top=3.5cm, bottom=3cm, headheight=22pt]{geometry}
 \RequirePackage{xcolor}
 \RequirePackage{graphicx}
 \RequirePackage{booktabs}
@@ -25,10 +25,12 @@
 \RequirePackage{titlesec}
 \RequirePackage{enumitem}
 \RequirePackage{array}
+\RequirePackage{colortbl}
 \RequirePackage{hyperref}
 \RequirePackage{lastpage}
 \RequirePackage{fontspec}
 \RequirePackage{etoolbox}
+\RequirePackage{amssymb}
 \RequirePackage{tcolorbox}
 \tcbuselibrary{skins,breakable}
 
@@ -202,15 +204,25 @@
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
 
-% Thin top bar on every page
+%% Full-width navy header band with white text (non-cover pages only)
+%% All three elements in C slot — z-order: fill → text nodes
+\fancyhead[L]{}
+\fancyhead[R]{}
 \fancyhead[C]{%
   \begin{tikzpicture}[remember picture, overlay]
+    %% Solid navy band
     \fill[jpmnavy] (current page.north west) rectangle
-      ([yshift=-3pt]current page.north east);
+      ([yshift=-30pt]current page.north east);
+    %% Left: TICKER US | DECISION  (bold white)
+    \node[anchor=west, font=\small\bfseries\color{white}]
+      at ([xshift=2.5cm, yshift=-15pt]current page.north west)
+      {\@ticker\ US\ \textbar\ \@decision};
+    %% Right: date  (white, lighter weight)
+    \node[anchor=east, font=\small\color{white!70}]
+      at ([xshift=-2.5cm, yshift=-15pt]current page.north east)
+      {\@reportdate};
   \end{tikzpicture}%
 }
-\fancyhead[L]{\footnotesize\color{jpmnavy}\@ticker\ US\ \textbar\ \@decision}
-\fancyhead[R]{\footnotesize\color{textmuted}\@reportdate}
 
 \fancyfoot[L]{\scriptsize\color{textmuted}MarketMind-AlphaEngine}
 \fancyfoot[C]{\scriptsize\color{textmuted}\strInfoOnly}
