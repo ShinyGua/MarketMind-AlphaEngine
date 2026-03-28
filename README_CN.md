@@ -255,8 +255,9 @@ MarketMind-AlphaEngine/
 │   ├── release_gate.py            # 确定性的通过/警告/失败裁定
 │   ├── stage_timer.py             # 阶段开始/结束时间戳记录
 │   ├── finalize_run.py            # 从所有产物汇总运行日志条目
-│   ├── metrics.py                 # 聚合仪表盘计算
-│   └── run_log.jsonl              # 只追加的流水线运行历史
+│   └── metrics.py                 # 聚合仪表盘计算
+├── logs/
+│   └── run_log.jsonl              # 只追加的流水线运行历史（不提交）
 ├── templates/
 │   ├── equity_research.cls        # JPM 风格 LaTeX 文档类
 │   └── charts.py                  # 标注图表生成器（matplotlib）

@@ -255,8 +255,9 @@ MarketMind-AlphaEngine/
 │   ├── release_gate.py            # Deterministic pass/warning/failed verdict
 │   ├── stage_timer.py             # Stage start/end timestamp recorder
 │   ├── finalize_run.py            # Assembles run log entry from all artifacts
-│   ├── metrics.py                 # Aggregate dashboard computation
-│   └── run_log.jsonl              # Append-only pipeline run history
+│   └── metrics.py                 # Aggregate dashboard computation
+├── logs/
+│   └── run_log.jsonl              # Append-only pipeline run history (not committed)
 ├── templates/
 │   ├── equity_research.cls        # JPM-style LaTeX document class
 │   └── charts.py                  # Annotated chart generator (matplotlib)

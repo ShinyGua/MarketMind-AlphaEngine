@@ -57,22 +57,31 @@ params = {
 
 Lookback window: `news.lookback_hours_daily` (default: 36 hours) for daily mode.
 
-Save raw response to `{workspace}/raw/news/company_news.json`.
+Save raw response to `{workspace}/raw/{date}/news/company_news.json`.
 
 ### 2. Fetch SEC EDGAR Filings
 
-Query EDGAR for recent filings (no API key required):
+Use the MCP tool to fetch filings with the configured limit:
 
-```python
-import requests
-# EDGAR company search
-url = f"https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRange=custom&startdt=<30_days_ago>&enddt=<today>"
-headers = {"User-Agent": "MarketMind-AlphaEngine research@example.com"}
+```
+Call mcp__market-data__get_filings with:
+  ticker: {TICKER}
+  company_name: {company_name from profile}
+  filing_types: ["10-K", "10-Q", "8-K", "4"]
+  limit: {resolved_config.data_sources.filings.max_filings}  (default: 5)
+  lookback_days: 30
 ```
 
-Filter for filing types: 10-K, 10-Q, 8-K, 4 (insider transactions).
+Save the MCP tool's response to `{workspace}/raw/{date}/filings/edgar_filings.json`.
 
-Save to `{workspace}/raw/filings/edgar_filings.json`.
+If the MCP tool is unavailable, fall back to inline Python hitting EDGAR directly, but **always truncate** results before writing:
+
+```python
+max_filings = resolved_config["data_sources"]["filings"]["max_filings"]  # default: 5
+filings = filings[:max_filings]  # MUST truncate before saving
+```
+
+Both MCP and fallback paths must produce `≤ max_filings` entries in the output file.
 
 ### 3. Build Catalyst Calendar
 
@@ -145,12 +154,12 @@ Save to `{workspace}/normalized/evidence_cards/company_*.json`.
 
 ## Output
 
-- `{workspace}/raw/news/company_news.json`
-- `{workspace}/raw/filings/edgar_filings.json`
-- `{workspace}/raw/calendar/catalysts.json`
-- `{workspace}/raw/prices/daily_3mo.csv`
-- `{workspace}/raw/prices/intraday_5d.csv`
-- `{workspace}/normalized/evidence_cards/company_*.json`
+- `{workspace}/raw/{date}/news/company_news.json`
+- `{workspace}/raw/{date}/filings/edgar_filings.json`
+- `{workspace}/raw/{date}/calendar/catalysts.json`
+- `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv`
+- `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`
+- `{workspace}/normalized/{date}/evidence_cards/comp_*.json`
 
 ## Error Handling
 

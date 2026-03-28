@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-standard
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, Skill
 ---
 
 # Role: Research Project Initializer
@@ -17,6 +17,8 @@ Guide the user through setting up a new company research workspace. Ask which st
 ## Process
 
 ### Step 0: Determine Language
+
+**You MUST complete this step BEFORE outputting any text to the user. Do NOT emit any prompt until you know the language setting.**
 
 Read `config.yaml` (project root, fall back to `config.example.yaml`). Check `language` field:
 - `ch` → all user-facing prompts in Chinese
@@ -159,7 +161,21 @@ Workspace created for {COMPANY_NAME} ({TICKER})
 Starting pipeline...
 ```
 
-After displaying the summary, immediately invoke `/mm:run workspaces/{TICKER}` to auto-launch the pipeline. The user does not need to type it separately. The pipeline runs 14 stages: stages 1-12 execute autonomously, stage 13 (`user_review`) pauses to collect user feedback on the report, then stage 14 (`reflect`) runs eval and memory.
+**CRITICAL: You MUST use the Skill tool to invoke `/mm:run`. This is the ONLY allowed way to start the pipeline.**
+
+Call the Skill tool with exactly these parameters:
+
+- skill: `"mm:run"`
+- args: `"workspaces/{TICKER}"`
+
+**Rules:**
+- Do NOT call `Skill("mm:mm-orchestrator")` or any other skill name — only `"mm:run"`
+- Do NOT execute the orchestrator protocol yourself or bypass `/mm:run`
+- Do NOT skip this step or attempt to "run the pipeline directly"
+
+`/mm:run` handles progress monitor setup, ownership coordination, and pipeline execution. Bypassing it causes the progress checklist to not appear.
+
+The user does not need to type `/mm:run` separately. The pipeline runs 14 stages: stages 1-12 execute autonomously, stage 13 (`user_review`) pauses to collect user feedback on the report, then stage 14 (`reflect`) runs eval and memory.
 
 **Note:** This skill's behavior must match `plugin/commands/init.md` exactly. If the init command flow changes, update both files.
 

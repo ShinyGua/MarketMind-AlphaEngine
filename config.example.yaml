@@ -171,7 +171,7 @@ memory:
 # --- Evaluation ---
 eval:
   enabled: true
-  run_log: eval/run_log.jsonl
+  run_log: logs/run_log.jsonl
   graders:
     factuality: true
     evidence_coverage: true

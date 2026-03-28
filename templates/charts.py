@@ -121,6 +121,8 @@ def load_price_csv(path):
         df = pd.read_csv(path, index_col=0, parse_dates=False)
 
     df = df.loc[:, ~df.columns.duplicated()]
+    # Normalize column names to title-case so lowercase CSVs work (e.g. 'close' -> 'Close')
+    df.columns = [c.strip().title() if c.strip().lower() in ('close', 'open', 'high', 'low', 'volume', 'date') else c for c in df.columns]
     for col in ['Close', 'Open', 'High', 'Low', 'Volume']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')

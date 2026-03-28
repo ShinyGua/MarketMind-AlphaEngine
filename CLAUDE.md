@@ -148,7 +148,7 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 
 ### Stage 10: Reflect (Non-Critical)
 - Run code-based graders (factuality, evidence coverage, consistency, cost)
-- Finalize run log entry (`eval/run_log.jsonl`)
+- Finalize run log entry (`logs/run_log.jsonl`)
 - **mm-memory-writer** extracts and stores episodic/semantic/procedural memories
 - If this stage fails, pipeline still counts as complete
 
@@ -369,7 +369,7 @@ Automated evaluation pipeline under `eval/`:
 
 ### Run Log
 
-`eval/run_log.jsonl` — append-only, one entry per completed pipeline run. Contains stage timings, review scores, grader results, decision, and cost estimates.
+`logs/run_log.jsonl` — append-only, one entry per completed pipeline run. Contains stage timings, review scores, grader results, decision, and cost estimates.
 
 ### Metrics
 

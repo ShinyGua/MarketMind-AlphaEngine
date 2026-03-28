@@ -56,6 +56,16 @@ STAGE_LABELS = {
 }
 ```
 
+## Ownership Check
+
+Before starting the monitoring loop, read `{workspace}/status.json` and check the `progress_mode` field:
+
+- If `progress_mode == "monitor"` → proceed with the monitoring loop below (you are the TodoWrite owner)
+- If `progress_mode == "orchestrator"` → **EXIT immediately** — the orchestrator is handling TodoWrite itself
+- If `progress_mode` is not set → proceed with the monitoring loop (assume you are needed)
+
+**There must be only ONE TodoWrite writer at a time.** If the orchestrator is the owner, do not write TodoWrite.
+
 ## Monitoring Loop
 
 Execute this loop continuously:
@@ -63,16 +73,17 @@ Execute this loop continuously:
 ```
 LOOP:
   1. Read {workspace}/status.json
-  2. Extract stages_completed list and current stage
-  3. Build TodoWrite update:
+  2. Check progress_mode — if changed to "orchestrator", EXIT immediately
+  3. Extract stages_completed list and current stage
+  4. Build TodoWrite update:
      - For each stage in ALL_STAGES:
        - If stage is in stages_completed → status: "completed"
        - If stage is the NEXT uncompleted stage → status: "in_progress"
        - Otherwise → status: "pending"
-  4. Call TodoWrite with the full 14-stage list
-  5. Check: if status.json stage == "completed" → EXIT loop (pipeline done)
-  6. Sleep 5 seconds (use Bash: sleep 5)
-  7. Go to 1
+  5. Call TodoWrite with the full 14-stage list
+  6. Check: if status.json stage == "completed" → EXIT loop (pipeline done)
+  7. Sleep 5 seconds (use Bash: sleep 5)
+  8. Go to 1
 ```
 
 ## Important Rules

@@ -175,8 +175,8 @@ def main():
 
     entry = finalize(workspace, date)
 
-    # Append to run_log.jsonl at project root
-    run_log_path = PROJECT_ROOT / "eval" / "run_log.jsonl"
+    # Append to run_log.jsonl
+    run_log_path = PROJECT_ROOT / "logs" / "run_log.jsonl"
     run_log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(run_log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
