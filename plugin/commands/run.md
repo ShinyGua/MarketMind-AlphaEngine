@@ -55,7 +55,9 @@ Auto-reset: set `stages_completed: []`, `stage: "initialized"`, `run_date: "{tod
 
 ### 3. Launch Background Progress Monitor
 
-Launch the **mm-progress-monitor** skill as a background agent:
+**This step is MANDATORY. Do NOT skip it. Do NOT proceed to Step 4 until the monitor launch is attempted.**
+
+Launch the **mm-progress-monitor** as a background agent:
 
 ```
 Agent tool:
@@ -64,7 +66,27 @@ Agent tool:
   run_in_background: true
 ```
 
-This monitor will read `status.json` periodically and update the TodoWrite checklist. It runs independently and does not block the pipeline.
+**After launching the monitor**, set `progress_mode` in `status.json` via the MCP tool:
+
+```
+mcp__workspace__update_status with:
+  ticker: {TICKER}
+  progress_mode: "monitor"
+```
+
+The monitor reads `status.json` every 5 seconds and updates the TodoWrite checklist. It runs independently and does not block the pipeline. **The monitor is the sole TodoWrite owner in this mode.**
+
+**If the Agent tool call fails** (monitor does not launch):
+
+Set `progress_mode` to `"orchestrator"` instead:
+
+```
+mcp__workspace__update_status with:
+  ticker: {TICKER}
+  progress_mode: "orchestrator"
+```
+
+In this fallback mode, the orchestrator itself will write TodoWrite after each stage transition. The user must always see progress regardless of whether the monitor is running.
 
 ### 4. Execute Pipeline Directly
 
@@ -78,6 +100,8 @@ This monitor will read `status.json` periodically and update the TodoWrite check
 6. Dispatch sub-skills via Agent tool (for parallel stages like collect and discuss_memos)
 
 **You are now the orchestrator. Start executing stages immediately. Do not delegate to another tool or skill — do it yourself right here.**
+
+**Note:** The progress monitor (or orchestrator fallback) handles TodoWrite updates. Do NOT call TodoWrite yourself in this step unless `progress_mode` is `"orchestrator"` — in that case, follow the orchestrator SKILL.md instructions for self-reporting.
 
 ### 5. Completion
 

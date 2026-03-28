@@ -12,6 +12,8 @@ Optional: `$ARGUMENTS[0]` = company name or ticker (skips the first question if 
 
 ### 0. Determine Language
 
+**You MUST complete this step BEFORE outputting any text to the user. Do NOT emit any prompt until you know the language setting.**
+
 Read `config.yaml` from project root (fall back to `config.example.yaml`). Check the `language` field:
 - `ch` → all user-facing prompts below should be in Chinese (see Chinese variants in parentheses)
 - `en` (default) → all prompts in English
@@ -211,11 +213,18 @@ Starting pipeline...
 
 ### 12. Auto-launch Pipeline
 
-Immediately after workspace creation, invoke the pipeline by calling:
+**CRITICAL: You MUST use the Skill tool to invoke `/mm:run`. This is the ONLY allowed way to start the pipeline.**
 
-```
-Skill tool: /mm:run
-Arguments: workspaces/{TICKER}
-```
+Call the Skill tool with exactly these parameters:
 
-This starts the autonomous pipeline — the user does not need to type `/mm:run` separately. The pipeline will run all 14 stages continuously, including user review (feedback collection) and the final reflect stage (eval + memory).
+- skill: `"mm:run"`
+- args: `"workspaces/{TICKER}"`
+
+**Rules:**
+- Do NOT call `Skill("mm:mm-orchestrator")` or any other skill name — only `"mm:run"`
+- Do NOT execute the orchestrator protocol yourself or bypass `/mm:run`
+- Do NOT skip this step or attempt to "run the pipeline directly"
+
+`/mm:run` handles progress monitor setup, ownership coordination, and pipeline execution. Bypassing it causes the progress checklist to not appear.
+
+The user does not need to type `/mm:run` separately. The pipeline will run all 14 stages continuously, including user review (feedback collection) and the final reflect stage (eval + memory).

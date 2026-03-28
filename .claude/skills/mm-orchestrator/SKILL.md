@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-heavy
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite, mcp__workspace__update_status
 ---
 
 # IRON LAW: NEVER STOP UNTIL PIPELINE IS COMPLETE
@@ -57,8 +57,32 @@ STAGES = [
 
 **Execute this protocol exactly. Do not deviate.**
 
-A background progress monitor is watching `status.json` and updating the TodoWrite checklist.
-You do NOT need to call TodoWrite yourself — just update `status.json` and the monitor handles the display.
+**Progress reporting is controlled by `progress_mode` in `status.json`:**
+
+- **`progress_mode: "monitor"`** (default when launched via `/mm:run`): A background `mm-progress-monitor` agent is watching `status.json` and updating the TodoWrite checklist. You do NOT need to call TodoWrite yourself — just update `status.json` via MCP and the monitor handles the display.
+
+- **`progress_mode: "orchestrator"`** (fallback when monitor failed to launch, or when invoked directly without `/mm:run`): You ARE the TodoWrite owner. After completing each stage, call TodoWrite yourself with all 14 stages, marking completed/in_progress/pending accordingly. Use the same stage list and labels as `mm-progress-monitor`:
+
+```
+STAGE_LABELS = {
+  "resolve_config":    "Resolve config",
+  "init_workspace":    "Initialize workspace",
+  "collect":           "Collect data (3 desks parallel)",
+  "normalize":         "Normalize evidence cards",
+  "quant":             "Quant snapshot",
+  "discuss_memos":     "Analyst memos (parallel)",
+  "discuss_debate":    "Cross-critique debate",
+  "discuss_synthesis": "Discussion synthesis",
+  "draft":             "Draft report",
+  "review":            "Review & revision loop",
+  "decide":            "Investment decision",
+  "export":            "Export final report",
+  "user_review":       "User review (awaiting input)",
+  "reflect":           "Eval + memory (non-critical)"
+}
+```
+
+- **If `progress_mode` is not set in `status.json`**: Assume `"orchestrator"` mode (safe fallback — always show progress).
 
 ### Date Handling
 
@@ -85,7 +109,7 @@ Rules:
 - Saturday/Sunday → use last Friday
 - After market open → use today
 
-Store the result in `status.json` as `run_date`. Use this date for ALL path references.
+Store the result via `mcp__workspace__update_status` with `run_date: "{date}"`. Use this date for ALL path references.
 
 **Path convention**: Every stage reads/writes under `{workspace}/{stage_dir}/{date}/` instead of `{workspace}/{stage_dir}/`.
 Exception: `profile/` is undated (static company reference data).
@@ -98,10 +122,10 @@ When dispatching skills, pass date as the second argument: `{workspace} {date}`
 3. Create date subdirectories for all stages
 4. FOR EACH stage that is NOT in stages_completed (in order):
    a. Execute the stage (see Stage Details below) — pass {workspace} and {date} to each skill
-   b. Update {workspace}/status.json: append stage to stages_completed, update timestamp
+   b. Update status.json via MCP tool `mcp__workspace__update_status` with `ticker`, `stage` (current stage name), and `completed_stage` (the stage just finished). The MCP tool validates that `completed_stage` is in the STAGES whitelist and deduplicates automatically. **NEVER write status.json directly via inline Python or the Write tool** — always go through the MCP tool so validation is enforced.
    c. >>> IMMEDIATELY GO TO THE NEXT STAGE — DO NOT STOP <<<
 5. When all 14 stages are in stages_completed:
-   a. Set status.json stage to "completed"
+   a. Call `mcp__workspace__update_status` with `stage: "completed"`
    b. Display final summary
    c. DONE — only now may you return control
 
@@ -133,7 +157,36 @@ This populates `eval_stage_log.json` for the eval pipeline.
 
 ### 1. resolve_config
 Check if `config.yaml` exists in project root — use it as base. If not, use `config.example.yaml`.
-Read `{workspace}/config.yaml` (company overrides). Merge. Write `{workspace}/resolved_config.json`.
+Read `{workspace}/config.yaml` (company overrides). Merge.
+
+**Sanitize secrets before writing**: After merging, scan for any `api_key_env` fields. If the value does NOT look like an environment variable name (pattern: `^[A-Z][A-Z0-9_]+$`), replace it with `"[REDACTED]"`. This prevents real API keys from leaking into workspace artifacts. The actual keys stay in `config.yaml` and are read at runtime via `os.environ`.
+
+```bash
+.venv/bin/python3 -c "
+import json, re, os
+ws = '{workspace}'
+rc_path = os.path.join(ws, 'resolved_config.json')
+with open(rc_path) as f:
+    cfg = json.load(f)
+env_var_pattern = re.compile(r'^[A-Z][A-Z0-9_]+$')
+def redact(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == 'api_key_env' and isinstance(v, str) and not env_var_pattern.match(v):
+                obj[k] = '[REDACTED]'
+            else:
+                redact(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            redact(item)
+redact(cfg)
+with open(rc_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('resolved_config.json: secrets sanitized')
+"
+```
+
+Write `{workspace}/resolved_config.json`.
 **Then immediately proceed to stage 2.**
 
 ### 2. init_workspace

@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.contracts import (  # noqa: E402
+    STAGES,
     evidence_digest_path, shared_context_path, quant_summary_path,
     thesis_map_path, decision_path, memory_context_path, detect_final_report,
 )
@@ -148,6 +149,7 @@ async def list_tools() -> list[mcp.types.Tool]:
                     "completed_stage": {"type": "string", "description": "Stage to mark completed"},
                     "run_date":        {"type": "string", "description": "YYYY-MM-DD run date"},
                     "error":           {"type": "string", "description": "Error message to append"},
+                    "progress_mode":   {"type": "string", "description": "TodoWrite owner: 'monitor' or 'orchestrator'"},
                 },
                 "required": ["ticker"],
             },
@@ -210,10 +212,18 @@ def _tool_update_status(args: dict) -> dict:
         status["stage"] = args["stage"]
     if args.get("completed_stage") is not None:
         cs = args["completed_stage"]
-        if cs not in status.get("stages_completed", []):
-            status.setdefault("stages_completed", []).append(cs)
+        if cs not in STAGES:
+            return {"error": f"Invalid stage name '{cs}'. Must be one of: {STAGES}"}
+        completed = status.setdefault("stages_completed", [])
+        if cs not in completed:
+            completed.append(cs)
     if args.get("run_date") is not None:
         status["run_date"] = args["run_date"]
+    if args.get("progress_mode") is not None:
+        pm = args["progress_mode"]
+        if pm not in ("monitor", "orchestrator"):
+            return {"error": f"Invalid progress_mode '{pm}'. Must be 'monitor' or 'orchestrator'"}
+        status["progress_mode"] = pm
     if args.get("error") is not None:
         status.setdefault("errors", []).append(args["error"])
     status["updated_at"] = _now_iso()

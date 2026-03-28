@@ -181,7 +181,7 @@ def ticker_pdf(ticker: str, date: str):
 @app.route("/api/eval/runs")
 def eval_runs():
     """Return recent pipeline run log entries."""
-    run_log = ROOT / "eval" / "run_log.jsonl"
+    run_log = ROOT / "logs" / "run_log.jsonl"
     if not run_log.exists():
         return jsonify([])
     entries = []
@@ -221,7 +221,7 @@ def eval_metrics():
 def eval_ticker(ticker):
     """Return evaluation history for a specific ticker."""
     ticker = ticker.upper()
-    run_log = ROOT / "eval" / "run_log.jsonl"
+    run_log = ROOT / "logs" / "run_log.jsonl"
     if not run_log.exists():
         return jsonify({"ticker": ticker, "runs": []})
     runs = []

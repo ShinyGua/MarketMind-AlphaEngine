@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute aggregate metrics from eval/run_log.jsonl.
+"""Compute aggregate metrics from logs/run_log.jsonl.
 
 Usage:
     .venv/bin/python3 eval/metrics.py [--ticker AMD] [--last-n 30] [--format json|markdown]
@@ -11,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUN_LOG_PATH = PROJECT_ROOT / "eval" / "run_log.jsonl"
+RUN_LOG_PATH = PROJECT_ROOT / "logs" / "run_log.jsonl"
 
 import sys as _sys
 _sys.path.insert(0, str(PROJECT_ROOT / "mcp"))
