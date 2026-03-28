@@ -144,8 +144,44 @@ report_style:
 
 # --- Export ---
 export:
-  formats: [markdown, json]     # V1: markdown + json; pdf + web added later
+  formats: [markdown, json, pdf]
   output_dir: exports
+  web:
+    default_port: 7860          # port for /mm:dashboard
+
+# --- Memory Layer ---
+memory:
+  enabled: true
+  store_dir: memory
+  episodic:
+    enabled: true
+    max_per_ticker: 90          # ~3 months of daily runs
+  semantic:
+    enabled: true
+    supersede_on_conflict: true
+    half_life_days: 180
+  procedural:
+    enabled: true
+    extract_from_review_failures: true
+  retrieval:
+    top_k: 10
+    recency_half_life_days: 30
+    min_importance: 0.3
+
+# --- Evaluation ---
+eval:
+  enabled: true
+  run_log: eval/run_log.jsonl
+  graders:
+    factuality: true
+    evidence_coverage: true
+    consistency: true
+    cost_tracker: true
+  cost_estimation:
+    opus_input_per_1k: 0.015
+    opus_output_per_1k: 0.075
+    sonnet_input_per_1k: 0.003
+    sonnet_output_per_1k: 0.015
 
 # --- Model Routing ---
 models:

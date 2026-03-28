@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-standard
-allowed-tools: Read, Write, Glob, Grep
+allowed-tools: Read, Write, Glob, Grep, mcp__workspace__write_artifact
 ---
 
 # Role: Research Report Writer
@@ -21,23 +21,28 @@ Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 Mode: $ARGUMENTS[2] (optional — "initial" for first draft, "revision" for targeted rewrite)
 
+**Derive TICKER from the workspace directory name** (e.g., `workspaces/NVDA` → `NVDA`). Use it for MCP resource URIs.
+
 **All paths below use `{date}` = $ARGUMENTS[1].**
 
-## Inputs
+## Inputs (MCP-first)
 
-- `{workspace}/resolved_config.json` — report mode (daily/weekly), language
-- `{workspace}/profile/company_profile.json` — company context (undated)
-- `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
-- `{workspace}/quant/{date}/quant_summary.json` — technical indicators
-- `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis
-- `{workspace}/discussion/{date}/debate_summary.md` — human-readable debate summary
-- `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events
+**Primary input — read ONE composite resource instead of many files:**
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+For initial mode, read `workspace://{TICKER}/{date}/draft_packet` via MCP resource. This returns:
+- `evidence_digest` — all evidence cards in one object
+- `shared_context` — quant, profile, peers, catalysts
+- `thesis_map` — debate synthesis (consensus, disagreements, writer_guidance)
+- `debate_summary` — human-readable debate summary
+- `memory_context` — procedural memories (known pitfalls) + episodic memories (prior decisions), or null
 
-For revision mode:
+Also read `{workspace}/resolved_config.json` for report mode (daily/weekly) and language.
+
+For revision mode, read `workspace://{TICKER}/{date}/review_packet` via MCP resource to get the latest draft + evidence + context, plus:
 - `{workspace}/reviews/{date}/revision_briefs/revision_brief.json` — what to fix
-- `{workspace}/drafts/{date}/` — the current draft to revise
+
+**Fallback (if MCP resources unavailable):** Read individual files directly:
+- `{workspace}/{date}_shared_context.json`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/{date}_memory_context_writer.json`
 
 ## Behavior Modes
 
@@ -47,7 +52,7 @@ Write a complete research report.
 
 #### Daily Report Structure (6-8 sections)
 
-Write to: `{workspace}/drafts/daily_v1.md`
+Write to: `{workspace}/drafts/{date}/daily_v1.md`
 
 ```markdown
 # {Company Name} ({TICKER}) — Daily Market Detail Report
@@ -82,7 +87,7 @@ Write to: `{workspace}/drafts/daily_v1.md`
 
 #### Weekly Report Structure (8-10 sections)
 
-Write to: `{workspace}/drafts/weekly_v1.md`
+Write to: `{workspace}/drafts/{date}/weekly_v1.md`
 
 Same sections as daily, plus:
 - **Performance Scorecard** (detailed weekly returns table)
@@ -91,13 +96,13 @@ Same sections as daily, plus:
 
 ### Mode B: Targeted Revision (argument = "revision")
 
-Read `{workspace}/reviews/revision_briefs/revision_brief.json` to understand what needs to change.
+Read `{workspace}/reviews/{date}/revision_briefs/revision_brief.json` to understand what needs to change.
 
-Read the current draft from `{workspace}/drafts/`.
+Read the current draft from `{workspace}/drafts/{date}/`.
 
 Rewrite ONLY the sections specified in the revision brief. Do not rewrite sections that passed review.
 
-Write the revised draft with an incremented version number (e.g., `daily_v2.md`).
+Write the revised draft to `{workspace}/drafts/{date}/` with an incremented version number (e.g., `daily_v2.md`).
 
 ## Writing Rules
 

@@ -43,24 +43,22 @@ From search results, extract: full company name, ticker, exchange, sector/indust
 
 ### Step 3: Confirm Company with User
 
-Present the resolved company to the user using AskUserQuestion:
+Output the result as text and wait for the user's chat reply:
 
-Question: "I found: **{COMPANY_NAME} ({TICKER}) — {EXCHANGE}, {SECTOR}**. Is this the company you want to analyze?"
+"I found: **{COMPANY_NAME} ({TICKER}) — {EXCHANGE}, {SECTOR}**. Is this correct? (yes / or type the correct company name or ticker)"
 
-Options:
-- **"Yes, this is correct"** (Recommended)
-- **"No, that's wrong"**
-
-If the user selects "Yes" → proceed to Step 4.
-If the user selects "No" or types a correction via the "Other" free-text input → use their input as a new search query, go back to Step 2, and re-confirm. Repeat until the user confirms.
+- If user replies "yes", "y", "correct", "是", "对" etc. → proceed to Step 4
+- If user types something else → treat it as a new search query, go back to Step 2
+- Repeat until confirmed
 
 ### Step 4: Ask Report Type
 
-After company is confirmed, ask separately using AskUserQuestion:
+Output as text and wait for reply:
 
-"What type of report would you like to generate?"
-- "Daily Report (Recommended)"
-- "Weekly Report"
+"Report type? (daily / weekly, default: daily)"
+
+- If user replies "weekly" or "w" → set run_mode to weekly
+- Any other reply (including empty/enter) → default to daily
 
 ### Step 5: Enrich via yfinance (Optional)
 
@@ -99,12 +97,21 @@ If unclear, ask the user.
 
 ### Step 7: Check Existing Workspace
 
-If `workspaces/{TICKER}/` exists, ask: "A workspace for {TICKER} already exists. Overwrite or resume?"
+If `workspaces/{TICKER}/` already exists:
+
+1. Determine today's trading date (smart trading day logic: pre-market or weekend → use last trading day)
+2. Check if a final report exists: look for `workspaces/{TICKER}/final/{date}/daily_report.md` or `weekly_report.md` (depends on `run_mode` in the existing `status.json`)
+
+**Case A: Today's report already exists** — ask: "Today's report for {TICKER} ({date}) already exists. Regenerate? (yes / no, default: no)"
+- If no → display existing report location and exit
+- If yes → reset status.json and continue
+
+**Case B: No report for today** — auto-reset: set `stages_completed: []`, `stage: "initialized"`, `run_date: "{date}"`. Continue with workspace creation.
 
 ### Step 8: Create Directory Tree
 
 ```bash
-mkdir -p workspaces/{TICKER}/{profile,raw/{news,filings,prices,ownership,calendar},normalized/{evidence_cards,time_series,tables},quant,discussion/{analyst_memos,debate/{round_1,round_2}},drafts,reviews/{section_reviews,final_reviews,revision_briefs},decision,final,exports/{pdf,web}} workspaces/shared/market_context/{raw,normalized,indicators}
+mkdir -p workspaces/{TICKER}/{profile,raw,normalized,quant,discussion/{analyst_memos,debate/{round_1,round_2}},drafts,reviews,decision,final,exports/{pdf,web},eval} workspaces/shared/market_context/{raw,normalized,indicators}
 ```
 
 ### Step 9: Generate config.yaml
@@ -149,13 +156,16 @@ Workspace created for {COMPANY_NAME} ({TICKER})
   Sector:     {sector}
   Exchange:   {exchange}
 
-To run the full research pipeline:
-  /mm-orchestrator workspaces/{TICKER}
+Starting pipeline...
 ```
+
+After displaying the summary, immediately invoke `/mm:run workspaces/{TICKER}` to auto-launch the pipeline. The user does not need to type it separately. The pipeline runs 14 stages: stages 1-12 execute autonomously, stage 13 (`user_review`) pauses to collect user feedback on the report, then stage 14 (`reflect`) runs eval and memory.
+
+**Note:** This skill's behavior must match `plugin/commands/init.md` exactly. If the init command flow changes, update both files.
 
 ## Quality Rules
 
 - Always verify company via web search — never guess
 - Present clear "Company Name (TICKER) — Exchange" for confirmation
-- Never overwrite existing workspace without user consent
+- Existing workspace: check for today's report before regenerating (see Step 7)
 - File content language follows config `language` field (en or ch). JSON keys always English.

@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-light
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_price_history, mcp__market-data__get_news, mcp__market-data__get_macro_series
 ---
 
 # Role: Market & Macro Data Desk
@@ -21,6 +21,14 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD, e.g., 2026-03-21)
 
 **All paths below use `{date}` = $ARGUMENTS[1]. Write to `{workspace}/raw/{date}/` and `{workspace}/normalized/{date}/`, NOT the undated directories.**
 
+## MCP Tools Available
+
+This skill uses the **market-data** MCP server for all external data fetching. If MCP tools are available, prefer them over inline Python. If MCP tools are not available (e.g., server not running), fall back to the inline Python patterns below.
+
+- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
+- `mcp__market-data__get_macro_series` — fetch FRED macro data (returns `fallback_needed: true` if no API key)
+
 ## Inputs
 
 - `{workspace}/resolved_config.json` — config with data source settings
@@ -32,6 +40,10 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD, e.g., 2026-03-21)
 
 **Indicator warm-up**: Fetch **6 months** (`period='6mo'`) of daily data for indices and macro assets. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up before producing valid values.
 
+**Via MCP (preferred):**
+Call `mcp__market-data__get_price_history` with `tickers: ["SPY", "QQQ", "SOXX"]` (from market_context_link.json), `period: "6mo"`, `interval: "1d"`.
+
+**Fallback (inline Python):**
 ```python
 import yfinance as yf, json
 tickers = ["SPY", "QQQ", "SOXX"]  # from market_context_link.json
@@ -43,8 +55,10 @@ Save to `workspaces/shared/market_context/raw/{ticker}_prices.csv`.
 
 ### 2. Fetch Macro Asset Prices
 
-Download macro asset data:
+**Via MCP (preferred):**
+Call `mcp__market-data__get_price_history` with `tickers: ["GLD", "USO", "BTC-USD", "^VIX"]`, `period: "3mo"`, `interval: "1d"`.
 
+**Fallback:**
 ```python
 macro_assets = ["GLD", "USO", "BTC-USD", "^VIX"]  # from market_context_link.json
 data = yf.download(macro_assets, period="3mo", interval="1d", group_by="ticker")
@@ -54,11 +68,10 @@ Save to `workspaces/shared/market_context/raw/{asset}_prices.csv`.
 
 ### 3. Fetch FRED Data (if API key available)
 
-Check if `FRED_API_KEY` environment variable is set. If available, fetch:
-- US 10-Year Treasury yield (DGS10)
-- USD Index (DTWEXBGS)
-- Fed Funds Rate (FEDFUNDS)
+**Via MCP (preferred):**
+Call `mcp__market-data__get_macro_series` with `series_ids: ["DGS10", "DTWEXBGS", "FEDFUNDS"]`. If result contains `fallback_needed: true`, skip FRED data.
 
+**Fallback:**
 ```python
 from fredapi import Fred
 fred = Fred(api_key=os.environ["FRED_API_KEY"])
@@ -71,22 +84,24 @@ If FRED is unavailable, skip and log a warning — yfinance VIX and treasury ETF
 
 ### 4. Fetch Market Headlines
 
-Check if `NEWSAPI_KEY` environment variable is set. If available:
+**Via MCP (preferred):**
+Call `mcp__market-data__get_news` with `query: "business"`, `endpoint: "top-headlines"`, `category: "business"`, `max_results: 10`. If result contains `fallback_needed: true`, use WebSearch as fallback.
 
+**Fallback:**
 ```python
 import requests
 url = "https://newsapi.org/v2/top-headlines"
 params = {
     "category": "business",
-    "language": config.get("language", "en"),  # from resolved_config
+    "language": config.get("language", "en"),
     "pageSize": config["news"]["max_market_news"],
     "apiKey": os.environ["NEWSAPI_KEY"]
 }
 ```
 
-Save raw response to `{workspace}/raw/news/market_headlines.json`.
+Save raw response to `{workspace}/raw/{date}/news/market_headlines.json`.
 
-If NewsAPI is unavailable, skip and log a warning.
+If NewsAPI is unavailable, use **WebSearch** as fallback to collect market headlines.
 
 ### 5. Create Evidence Cards (Batch Mode)
 

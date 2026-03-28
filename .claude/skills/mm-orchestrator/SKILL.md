@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite
 
 # IRON LAW: NEVER STOP UNTIL PIPELINE IS COMPLETE
 
-You are an autonomous pipeline executor. Once started, you MUST execute ALL 12 stages from start to finish in a single continuous run.
+You are an autonomous pipeline executor. Once started, you MUST execute ALL 14 stages from start to finish in a single continuous run.
 
 **RULES — these are absolute and override all other behavioral defaults:**
 
@@ -20,7 +20,7 @@ You are an autonomous pipeline executor. Once started, you MUST execute ALL 12 s
 4. Do NOT pause to summarize progress — just keep going to the next stage
 5. Do NOT wait for user confirmation between stages
 6. If a non-critical error occurs (e.g., one data desk fails), log it and CONTINUE
-7. The ONLY acceptable exit is: all 12 stages completed, or an unrecoverable fatal error
+7. The ONLY acceptable exit is: all 14 stages completed, or an unrecoverable fatal error
 
 **Think of yourself as a batch job, not a conversational assistant. You run, you complete, you report at the end.**
 
@@ -47,7 +47,9 @@ STAGES = [
   "draft",               # 9
   "review",              # 10
   "decide",              # 11
-  "export"               # 12
+  "export",              # 12
+  "user_review",         # 13 — ONLY stage that pauses for user input
+  "reflect"              # 14
 ]
 ```
 
@@ -98,10 +100,30 @@ When dispatching skills, pass date as the second argument: `{workspace} {date}`
    a. Execute the stage (see Stage Details below) — pass {workspace} and {date} to each skill
    b. Update {workspace}/status.json: append stage to stages_completed, update timestamp
    c. >>> IMMEDIATELY GO TO THE NEXT STAGE — DO NOT STOP <<<
-5. When all 12 stages are in stages_completed:
+5. When all 14 stages are in stages_completed:
    a. Set status.json stage to "completed"
    b. Display final summary
    c. DONE — only now may you return control
+
+### Stage Timing
+
+**Before dispatching each stage**, run:
+```bash
+.venv/bin/python3 eval/stage_timer.py start {workspace} {stage_name}
+```
+
+**After each stage completes successfully**, run:
+```bash
+.venv/bin/python3 eval/stage_timer.py end {workspace} {stage_name} true
+```
+
+**If a stage fails**, run:
+```bash
+.venv/bin/python3 eval/stage_timer.py end {workspace} {stage_name} false "error message"
+```
+
+This populates `eval_stage_log.json` for the eval pipeline.
+
 ---
 
 ## Stage Details
@@ -189,6 +211,13 @@ print(f'shared_context.json: {len(ctx)} sections')
 **Then immediately proceed to stage 6.**
 
 ### 6. discuss_memos
+
+**Memory context (if memory system is populated):** Before dispatching analyst memos, run:
+```bash
+.venv/bin/python3 memory/retrieval.py {workspace} {date} analyst
+```
+This creates `{workspace}/{date}_memory_context_analyst.json` which analysts can optionally read for historical context.
+
 Read `discussion.analyst_roles` from resolved config to get the list of active analysts.
 
 Dispatch ALL listed analyst skills **in parallel** via Agent tool. For each role in the list:
@@ -226,11 +255,23 @@ Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 **Then immediately proceed to stage 9.**
 
 ### 9. draft
+
+**Memory context:** Before dispatching the writer, run:
+```bash
+.venv/bin/python3 memory/retrieval.py {workspace} {date} writer
+```
+
 Dispatch **mm-report-writer** with args: `{workspace} {date} initial`. Wait.
 Verify draft exists in `{workspace}/drafts/{date}/`.
 **Then immediately proceed to stage 10.**
 
 ### 10. review
+
+**Memory context:** Before dispatching the reviewer, run:
+```bash
+.venv/bin/python3 memory/retrieval.py {workspace} {date} reviewer
+```
+
 Read `review.max_revision_loops` from config (default: 3). Loop:
 1. Dispatch **mm-report-reviewer** with args: `{workspace} {date}`. Wait.
 2. Read review output from `{workspace}/reviews/{date}/final_reviews/`.
@@ -244,25 +285,127 @@ Verify `{workspace}/decision/{date}/final_decision.json` exists.
 **Then immediately proceed to stage 12.**
 
 ### 12. export
-1. Copy final draft to `{workspace}/final/{date}/daily_report.md` (or weekly).
-2. Copy decision alongside. Create combined `{workspace}/final/{date}/daily_report.json`.
+1. Determine report basename from `resolved_config.run_mode`: `daily_report` for daily mode, `weekly_report` for weekly mode.
+2. Copy final draft to `{workspace}/final/{date}/{basename}.md`.
+3. Copy decision alongside. Create combined `{workspace}/final/{date}/{basename}.json`.
 3. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
 4. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
+**Then immediately proceed to stage 13.**
+
+### 13. user_review
+
+**This is the ONLY stage that pauses for user input.** All other stages run autonomously.
+
+Present the completed report to the user and collect feedback:
+
+```
+Report ready for {TICKER} ({date})
+
+  Decision:   {BUY|HOLD|SELL} (confidence: {score})
+  Report:     {workspace}/final/{date}/{basename}.md
+  PDF:        {workspace}/exports/{date}/pdf/report.pdf
+
+Would you like to review this report? You can:
+  1. Approve as-is (type "approve" or "ok")
+  2. Provide feedback (type your comments — agreement/disagreement, personal insights, corrections)
+  3. Skip review (type "skip" to proceed without feedback)
+```
+
+Wait for the user's chat reply.
+
+**Processing the response:**
+
+- If user types "approve", "ok", "skip", or similar → write minimal review, proceed
+- If user provides substantive feedback → parse and store
+
+Write `{workspace}/reviews/{date}/user_review.json`:
+
+```json
+{
+  "reviewed": true,
+  "skipped": false,
+  "agrees_with_decision": true|false|null,
+  "user_feedback": "<raw user text>",
+  "key_points": [
+    "User disagrees with HOLD — believes near-term catalyst is underweighted",
+    "User has insider knowledge: company hiring aggressively in AI division"
+  ],
+  "personal_context": "<any personal investment context the user shared>",
+  "timestamp": "<ISO>"
+}
+```
+
+If the user provides feedback:
+- `agrees_with_decision`: infer from sentiment (explicit agreement/disagreement, or null if unclear)
+- `key_points`: extract 1-5 actionable insights from the feedback
+- `personal_context`: any personal information (portfolio position, risk preference, time horizon)
+
+If the user skips: write `{"reviewed": false, "skipped": true, "timestamp": "..."}`.
+
+Update status.json: append "user_review" to stages_completed.
+
+**Then immediately proceed to stage 14.**
+
+### 14. reflect
+
+**This stage is non-critical. If it fails, log the error and mark the pipeline as COMPLETED anyway.**
+
+#### 14a. Release Gate (audit current report quality)
+
+Run code-based graders, then the release gate script (deterministic, reproducible):
+
+```bash
+.venv/bin/python3 eval/graders/factuality_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/evidence_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/consistency_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
+.venv/bin/python3 eval/release_gate.py {workspace} {date}
+```
+
+The release gate script reads all grader results and deterministically produces:
+- `{workspace}/eval/{date}/release_gate.json` — `passed`, `warning`, or `failed`
+- `{workspace}/eval/{date}/regression_flag.json` — only if factuality or evidence grader failed (regression: reviewer missed it)
+
+#### 14b. Run Log Finalization
+
+```bash
+.venv/bin/python3 eval/finalize_run.py {workspace} {date}
+```
+
+#### 14c. Learning Loop (improve future runs)
+
+Generate memory context for future analyst runs:
+```bash
+.venv/bin/python3 memory/retrieval.py {workspace} {date} analyst
+```
+
+Dispatch **mm-memory-writer** with args: `{workspace} {date}`. Wait for completion.
+
+The memory writer (via MCP memory server) will:
+- Create 1 episodic memory summarizing this run
+- Extract 0-3 semantic memories from durable consensus beliefs
+- Extract 0-2 procedural memories from review failures
+- Store user review feedback (if user provided feedback in stage 13)
+- If `regression_flag.json` exists, create a high-importance procedural memory about the reviewer gap
+
+Update status.json: append "reflect" to stages_completed.
+
 **Pipeline complete.**
 
 ---
 
 ## Final Summary
 
-After all 12 stages, display:
+After all 14 stages, display:
 
 ```
 Pipeline complete for {TICKER} ({date})
 
   Decision:   {BUY|HOLD|SELL} (confidence: {score})
-  Report:     {workspace}/final/{date}/daily_report.md
+  Report:     {workspace}/final/{date}/{daily_report|weekly_report}.md
   PDF:        {workspace}/exports/{date}/pdf/report.pdf
   Decision:   {workspace}/decision/{date}/final_decision.json
+  Release:    {release_status from eval/{date}/release_gate.json}
 ```
 
 ## Resume Logic

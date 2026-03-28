@@ -22,9 +22,9 @@ MarketMind Workspaces
 
   Ticker   Stage              Completed    Mode
   ------   -----              ---------    ----
-  NVDA     discuss_synthesis   8/12        daily
-  AAPL     completed          12/12        daily
-  MSFT     collect             2/12        weekly
+  NVDA     discuss_synthesis   8/14        daily
+  AAPL     completed          14/14        daily
+  MSFT     collect             2/14        weekly
 
 To run a pipeline:  /mm:run workspaces/{TICKER}
 To create new:      /mm:init

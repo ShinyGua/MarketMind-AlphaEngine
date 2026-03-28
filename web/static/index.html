@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MarketMind Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script type="importmap">
+    { "imports": { "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js" } }
+  </script>
+  <style>
+    /* Markdown prose */
+    .prose h1 { font-size:1.6rem; font-weight:700; margin:1.2rem 0 .6rem; }
+    .prose h2 { font-size:1.25rem; font-weight:700; margin:1.4rem 0 .5rem; border-bottom:1px solid #e5e7eb; padding-bottom:.3rem; color:#1e3a5f; }
+    .prose h3 { font-size:1.05rem; font-weight:600; margin:1rem 0 .4rem; color:#1e3a5f; }
+    .prose p  { margin:.6rem 0; line-height:1.7; }
+    .prose ul, .prose ol { margin:.5rem 0 .5rem 1.4rem; }
+    .prose li { margin:.25rem 0; line-height:1.6; }
+    .prose table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.9rem; }
+    .prose th { background:#1e3a5f; color:#fff; padding:.5rem .8rem; text-align:left; }
+    .prose td { padding:.4rem .8rem; border-bottom:1px solid #e5e7eb; }
+    .prose tr:nth-child(even) td { background:#f8fafc; }
+    .prose blockquote { border-left:4px solid #1e3a5f; padding:.5rem 1rem; color:#64748b; margin:1rem 0; background:#f8fafc; }
+    .prose code { background:#f1f5f9; padding:.1rem .35rem; border-radius:.25rem; font-size:.88rem; }
+    .prose pre  { background:#1e293b; color:#e2e8f0; padding:1rem; border-radius:.5rem; overflow-x:auto; margin:1rem 0; }
+    .prose pre code { background:none; color:inherit; }
+    .prose hr { border:none; border-top:1px solid #e5e7eb; margin:1.5rem 0; }
+    /* Slide transition */
+    .slide-enter-active, .slide-leave-active { transition: opacity .2s ease, transform .2s ease; }
+    .slide-enter-from { opacity:0; transform:translateX(30px); }
+    .slide-leave-to  { opacity:0; transform:translateX(-30px); }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+
+<div id="app">
+
+  <!-- Nav -->
+  <nav class="bg-[#1e3a5f] text-white px-6 py-3 flex items-center gap-4 shadow">
+    <button @click="goHome" class="font-bold text-lg tracking-tight hover:opacity-80">
+      MarketMind
+    </button>
+    <span class="text-blue-300 text-sm">Equity Research Dashboard</span>
+    <div class="ml-auto flex gap-2 text-xs text-blue-200">
+      <span v-if="route.ticker">
+        <button @click="goHome" class="hover:text-white">Home</button>
+        <span class="mx-1">/</span>
+        <button @click="goTicker(route.ticker)" class="hover:text-white">{{ route.ticker }}</button>
+        <span v-if="route.date" class="mx-1">/</span>
+        <span v-if="route.date">{{ route.date }}</span>
+      </span>
+    </div>
+  </nav>
+
+  <!-- ================================================================ HOME -->
+  <div v-if="view === 'home'" class="max-w-6xl mx-auto px-6 py-8">
+    <h1 class="text-2xl font-bold text-[#1e3a5f] mb-1">Research Reports</h1>
+    <p class="text-gray-500 text-sm mb-6">{{ tickers.length }} workspace{{ tickers.length !== 1 ? 's' : '' }}</p>
+
+    <div v-if="loading" class="text-gray-400 py-20 text-center">Loading workspaces…</div>
+    <div v-else-if="tickers.length === 0" class="text-gray-400 py-20 text-center">
+      No reports found. Run <code class="bg-gray-100 px-2 py-0.5 rounded">/mm:run workspaces/TICKER</code> to generate one.
+    </div>
+
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div
+        v-for="t in tickers" :key="t.ticker"
+        @click="goTicker(t.ticker)"
+        class="bg-white border border-gray-200 rounded-xl p-5 cursor-pointer hover:shadow-md hover:border-blue-300 transition"
+      >
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <div>
+            <div class="font-bold text-lg text-[#1e3a5f]">{{ t.ticker }}</div>
+            <div class="text-sm text-gray-500 truncate">{{ t.name }}</div>
+          </div>
+          <span :class="decisionClass(t.decision)" class="text-xs font-bold px-2.5 py-1 rounded-full shrink-0">
+            {{ t.decision || '—' }}
+          </span>
+        </div>
+        <div class="text-xs text-gray-400 mt-3 flex gap-3">
+          <span>{{ t.exchange }}</span>
+          <span class="text-gray-300">|</span>
+          <span>{{ t.sector }}</span>
+        </div>
+        <div class="text-xs text-gray-400 mt-1">Latest: {{ t.latest_date }}</div>
+        <div v-if="t.confidence" class="text-xs text-gray-400">
+          Confidence: {{ (t.confidence * 100).toFixed(0) }}%
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================= TICKER -->
+  <div v-if="view === 'ticker'" class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center gap-3 mb-6">
+      <button @click="goHome" title="Back to Home"
+        class="shrink-0 flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 bg-white hover:bg-[#1e3a5f] hover:border-[#1e3a5f] hover:text-white text-[#1e3a5f] transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div>
+        <h1 class="text-2xl font-bold text-[#1e3a5f]">{{ tickerInfo.name || route.ticker }}</h1>
+        <p class="text-sm text-gray-500">{{ tickerInfo.exchange }} · {{ tickerInfo.sector }}</p>
+      </div>
+    </div>
+
+    <div v-if="loading" class="text-gray-400 py-10 text-center">Loading…</div>
+    <div v-else-if="tickerDates.length === 0" class="text-gray-400 py-10 text-center">No reports available.</div>
+    <div v-else class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="text-left px-5 py-3 font-semibold text-gray-600">Date</th>
+            <th class="text-left px-5 py-3 font-semibold text-gray-600">Decision</th>
+            <th class="text-left px-5 py-3 font-semibold text-gray-600">Confidence</th>
+            <th class="text-left px-5 py-3 font-semibold text-gray-600">PDF</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="row in tickerDates" :key="row.date"
+            @click="goReport(route.ticker, row.date)"
+            class="border-b border-gray-100 hover:bg-blue-50 cursor-pointer"
+          >
+            <td class="px-5 py-3 font-mono">{{ row.date }}</td>
+            <td class="px-5 py-3">
+              <span :class="decisionClass(row.decision)" class="text-xs font-bold px-2 py-0.5 rounded-full">
+                {{ row.decision || '—' }}
+              </span>
+            </td>
+            <td class="px-5 py-3 text-gray-500">
+              {{ row.confidence != null ? (row.confidence * 100).toFixed(0) + '%' : '—' }}
+            </td>
+            <td class="px-5 py-3 text-gray-400">{{ row.has_pdf ? '✓' : '' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================================================= REPORT -->
+  <div v-if="view === 'report'" class="max-w-5xl mx-auto px-6 py-6">
+
+    <!-- Decision header -->
+    <div v-if="decision" class="bg-white border border-gray-200 rounded-xl p-5 mb-5 flex flex-wrap items-center gap-4">
+      <button @click="goTicker(route.ticker)" title="Back to report list"
+        class="shrink-0 flex items-center justify-center w-9 h-9 rounded-full border border-gray-200 bg-white hover:bg-[#1e3a5f] hover:border-[#1e3a5f] hover:text-white text-[#1e3a5f] transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div>
+        <div class="text-xs text-gray-400 uppercase tracking-wide mb-1">{{ route.ticker }} · {{ route.date }}</div>
+        <div class="text-2xl font-bold text-[#1e3a5f]">{{ decision.company_name || tickerInfo.name || route.ticker }}</div>
+      </div>
+      <span :class="decisionClass(decision.decision)" class="text-lg font-bold px-4 py-1.5 rounded-full ml-auto">
+        {{ decision.decision }}
+      </span>
+      <div v-if="decision.confidence" class="text-sm text-gray-500">
+        Confidence: {{ (decision.confidence * 100).toFixed(0) }}%
+      </div>
+    </div>
+
+    <!-- KPI bar -->
+    <div v-if="quant" class="bg-white border border-gray-200 rounded-xl p-4 mb-5 flex flex-wrap gap-6 text-sm">
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Close</span>
+        <span class="font-bold text-[#1e3a5f] text-base">${{ quant.latest_close }}</span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">1D Return</span>
+        <span :class="quant.returns['1d'] >= 0 ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+          {{ quant.returns['1d'] >= 0 ? '+' : '' }}{{ quant.returns['1d'] }}%
+        </span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">5D Return</span>
+        <span :class="quant.returns['5d'] >= 0 ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+          {{ quant.returns['5d'] >= 0 ? '+' : '' }}{{ quant.returns['5d'] }}%
+        </span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">RSI(14)</span>
+        <span class="font-semibold">{{ quant.technical.rsi_14 }}</span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">MACD Hist</span>
+        <span :class="quant.technical.macd_hist >= 0 ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+          {{ quant.technical.macd_hist >= 0 ? '+' : '' }}{{ quant.technical.macd_hist }}
+        </span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">SMA20</span>
+        <span class="font-semibold">{{ quant.technical.sma_20 }}</span>
+      </div>
+      <div class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">SMA50</span>
+        <span class="font-semibold">{{ quant.technical.sma_50 }}</span>
+      </div>
+      <div v-if="quant.technical.atr_14" class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">ATR(14)</span>
+        <span class="font-semibold">{{ quant.technical.atr_14 }}</span>
+      </div>
+    </div>
+
+    <!-- Peer return chart (from quant data) -->
+    <div v-if="quant && quant.relative_strength && quant.relative_strength.peer_5d_returns"
+         class="bg-white border border-gray-200 rounded-xl p-5 mb-5">
+      <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">5-Day Peer Returns</div>
+      <canvas id="peerChart" height="80"></canvas>
+    </div>
+
+    <!-- View mode tabs -->
+    <div class="flex gap-1 mb-4">
+      <button
+        v-for="mode in reportModes" :key="mode.id"
+        @click="reportMode = mode.id"
+        :class="reportMode === mode.id
+          ? 'bg-[#1e3a5f] text-white'
+          : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'"
+        class="px-4 py-1.5 rounded-lg text-sm font-medium transition"
+      >{{ mode.label }}</button>
+    </div>
+
+    <!-- DOCUMENT view -->
+    <div v-if="reportMode === 'document'" class="bg-white border border-gray-200 rounded-xl p-6 md:p-8">
+      <div v-if="loadingReport" class="text-gray-400 py-10 text-center">Loading report…</div>
+      <div v-else class="prose max-w-none" v-html="renderedReport"></div>
+    </div>
+
+    <!-- SLIDES view — vertical scroll with right-side dots -->
+    <div v-if="reportMode === 'slides'">
+      <div v-if="slides.length === 0" class="bg-white border border-gray-200 rounded-xl p-10 text-center text-gray-400">No slides available.</div>
+      <div v-else
+        class="relative border border-gray-200 rounded-xl overflow-hidden select-none"
+        style="height: 75vh;"
+        ref="slidesViewport"
+        @wheel.prevent="handleSlideWheel"
+      >
+        <!-- Sliding track — moves vertically -->
+        <div
+          class="transition-transform duration-500 ease-in-out"
+          :style="{ transform: `translateY(-${slideIndex * 75}vh)` }"
+        >
+          <div
+            v-for="(slide, i) in slides" :key="i"
+            :id="`slide-panel-${i}`"
+            class="overflow-y-auto bg-white"
+            style="height: 75vh;"
+          >
+            <!-- Sticky title bar -->
+            <div class="sticky top-0 z-10 bg-[#1e3a5f] text-white px-6 py-3 flex items-center justify-between">
+              <span class="font-semibold text-sm truncate pr-4">{{ slide.title }}</span>
+              <span class="text-blue-200 text-xs shrink-0">{{ i + 1 }} / {{ slides.length }}</span>
+            </div>
+            <!-- Slide content -->
+            <div class="p-6 md:p-8 prose max-w-none" v-html="slide.html"></div>
+          </div>
+        </div>
+
+        <!-- Right-side dot navigation -->
+        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-20">
+          <button
+            v-for="(s, i) in slides" :key="i"
+            @click="goToSlide(i)"
+            :title="s.title"
+            class="block rounded-full transition-all duration-300"
+            :class="i === slideIndex
+              ? 'bg-[#1e3a5f] w-3 h-3'
+              : 'bg-gray-300 hover:bg-[#2b5ea7] w-2 h-2 mx-[2px]'"
+          ></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PDF view -->
+    <div v-if="reportMode === 'pdf'">
+      <div v-if="!hasPdf" class="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400">
+        PDF not available for this report. Run the pipeline with PDF export enabled.
+      </div>
+      <iframe v-else
+        :src="pdfUrl"
+        class="w-full border border-gray-200 rounded-xl"
+        style="height:85vh;"
+      ></iframe>
+    </div>
+
+  </div><!-- /report view -->
+
+</div><!-- /app -->
+
+<script type="module">
+import { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+
+createApp({
+  setup() {
+
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+    const view        = ref('home')     // 'home' | 'ticker' | 'report'
+    const route       = ref({ ticker: null, date: null })
+
+    const tickers     = ref([])
+    const tickerInfo  = ref({})
+    const tickerDates = ref([])
+
+    const reportMarkdown = ref('')
+    const decision    = ref(null)
+    const quant       = ref(null)
+    const hasPdf      = ref(false)
+
+    const loading       = ref(false)
+    const loadingReport = ref(false)
+
+    const reportMode  = ref('document')  // 'document' | 'slides' | 'pdf'
+    const slideIndex  = ref(0)
+    let peerChartInst = null
+
+    // -----------------------------------------------------------------------
+    // Computed
+    // -----------------------------------------------------------------------
+
+    const reportModes = [
+      { id: 'document', label: 'Document' },
+      { id: 'slides',   label: 'Slides' },
+      { id: 'pdf',      label: 'PDF' },
+    ]
+
+    const renderedReport = computed(() =>
+      reportMarkdown.value ? marked.parse(reportMarkdown.value) : ''
+    )
+
+    const slides = computed(() => {
+      if (!reportMarkdown.value) return []
+      const sections = reportMarkdown.value.split(/\n(?=## )/)
+      return sections
+        .filter(s => s.trim())
+        .map(s => {
+          const titleMatch = s.match(/^## (.+)/)
+          const title = titleMatch ? titleMatch[1].trim() : 'Overview'
+          return { title, html: marked.parse(s) }
+        })
+    })
+
+    const pdfUrl = computed(() => {
+      if (!route.value.ticker || !route.value.date) return ''
+      return `/api/tickers/${route.value.ticker}/${route.value.date}/pdf`
+    })
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    function decisionClass(d) {
+      if (d === 'BUY')  return 'bg-green-100 text-green-700'
+      if (d === 'SELL') return 'bg-red-100 text-red-600'
+      if (d === 'HOLD') return 'bg-amber-100 text-amber-700'
+      return 'bg-gray-100 text-gray-500'
+    }
+
+    async function api(path) {
+      const r = await fetch(path)
+      if (!r.ok) throw new Error(`API error: ${r.status}`)
+      return r.json()
+    }
+
+    // -----------------------------------------------------------------------
+    // Navigation
+    // -----------------------------------------------------------------------
+
+    function goHome() {
+      window.location.hash = '#/'
+    }
+
+    function goTicker(ticker) {
+      window.location.hash = `#/ticker/${ticker}`
+    }
+
+    function goReport(ticker, date) {
+      window.location.hash = `#/ticker/${ticker}/${date}`
+    }
+
+    async function handleHash() {
+      const hash = window.location.hash || '#/'
+      const m2 = hash.match(/^#\/ticker\/([^/]+)\/(\d{4}-\d{2}-\d{2})/)
+      const m1 = hash.match(/^#\/ticker\/([^/]+)$/)
+
+      if (m2) {
+        route.value = { ticker: m2[1], date: m2[2] }
+        await loadReport(m2[1], m2[2])
+      } else if (m1) {
+        route.value = { ticker: m1[1], date: null }
+        await loadTicker(m1[1])
+      } else {
+        route.value = { ticker: null, date: null }
+        await loadHome()
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Data loaders
+    // -----------------------------------------------------------------------
+
+    async function loadHome() {
+      view.value = 'home'
+      loading.value = true
+      try {
+        tickers.value = await api('/api/tickers')
+      } finally {
+        loading.value = false
+      }
+    }
+
+    async function loadTicker(ticker) {
+      view.value = 'ticker'
+      loading.value = true
+      try {
+        const data = await api(`/api/tickers/${ticker}`)
+        tickerInfo.value = { name: data.name, exchange: data.exchange, sector: data.sector }
+        tickerDates.value = data.dates
+      } finally {
+        loading.value = false
+      }
+    }
+
+    async function loadReport(ticker, date) {
+      view.value = 'report'
+      reportMode.value = 'document'
+      slideIndex.value = 0
+      loadingReport.value = true
+      decision.value = null
+      quant.value = null
+      hasPdf.value = false
+      reportMarkdown.value = ''
+
+      // Load in parallel
+      const [mdResp, decisionData, quantData] = await Promise.allSettled([
+        fetch(`/api/tickers/${ticker}/${date}/report`).then(r => r.ok ? r.text() : ''),
+        api(`/api/tickers/${ticker}/${date}/decision`),
+        api(`/api/tickers/${ticker}/${date}/quant`),
+      ])
+
+      if (mdResp.status === 'fulfilled')  reportMarkdown.value = mdResp.value
+      if (decisionData.status === 'fulfilled') decision.value = decisionData.value
+      if (quantData.status === 'fulfilled')    quant.value = quantData.value
+
+      // Check PDF availability
+      const pdfCheck = await fetch(`/api/tickers/${ticker}/${date}/pdf`, { method: 'HEAD' })
+      hasPdf.value = pdfCheck.ok
+
+      // Also fetch ticker info for breadcrumb
+      try {
+        const info = await api(`/api/tickers/${ticker}`)
+        tickerInfo.value = { name: info.name, exchange: info.exchange, sector: info.sector }
+      } catch (_) {}
+
+      loadingReport.value = false
+
+      // Render peer chart after DOM update
+      await nextTick()
+      renderPeerChart()
+    }
+
+    function renderPeerChart() {
+      const canvas = document.getElementById('peerChart')
+      if (!canvas || !quant.value?.relative_strength?.peer_5d_returns) return
+
+      if (peerChartInst) { peerChartInst.destroy(); peerChartInst = null }
+
+      const peerData = quant.value.relative_strength.peer_5d_returns
+      const labels = Object.keys(peerData)
+      const values = Object.values(peerData)
+      const colors = values.map(v => v >= 0 ? 'rgba(22,163,74,0.75)' : 'rgba(220,38,38,0.75)')
+
+      peerChartInst = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { ticks: { callback: v => v + '%' }, grid: { color: '#f1f5f9' } },
+            x: { grid: { display: false } }
+          }
+        }
+      })
+    }
+
+    // -----------------------------------------------------------------------
+    // Slide navigation — vertical scroll style
+    // -----------------------------------------------------------------------
+
+    let slideScrolling = false
+
+    function prevSlide() {
+      if (slideIndex.value > 0) goToSlide(slideIndex.value - 1)
+    }
+    function nextSlide() {
+      if (slideIndex.value < slides.value.length - 1) goToSlide(slideIndex.value + 1)
+    }
+
+    function goToSlide(i) {
+      slideIndex.value = i
+      // Reset inner scroll of target slide to top
+      nextTick(() => {
+        const el = document.getElementById(`slide-panel-${i}`)
+        if (el) el.scrollTop = 0
+      })
+    }
+
+    function handleSlideWheel(e) {
+      // Allow inner slide to scroll first; only navigate when at edge
+      const panel = document.getElementById(`slide-panel-${slideIndex.value}`)
+      if (panel) {
+        const atTop    = panel.scrollTop <= 0
+        const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 2
+        if (e.deltaY > 0 && !atBottom) { panel.scrollTop += e.deltaY; return }
+        if (e.deltaY < 0 && !atTop)    { panel.scrollTop += e.deltaY; return }
+      }
+      if (slideScrolling) return
+      slideScrolling = true
+      if (e.deltaY > 0) nextSlide()
+      else              prevSlide()
+      setTimeout(() => { slideScrolling = false }, 600)
+    }
+
+    function onKeydown(e) {
+      if (view.value !== 'report' || reportMode.value !== 'slides') return
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextSlide()
+      if (e.key === 'ArrowUp'   || e.key === 'ArrowLeft')  prevSlide()
+    }
+
+    // Re-render chart when switching back to report view
+    watch(reportMode, async (m) => {
+      if (m === 'document' || m === 'slides') {
+        await nextTick()
+        renderPeerChart()
+      }
+    })
+
+    // -----------------------------------------------------------------------
+    // Lifecycle
+    // -----------------------------------------------------------------------
+
+    onMounted(() => {
+      window.addEventListener('hashchange', handleHash)
+      window.addEventListener('keydown', onKeydown)
+      handleHash()
+    })
+
+    onUnmounted(() => {
+      window.removeEventListener('hashchange', handleHash)
+      window.removeEventListener('keydown', onKeydown)
+    })
+
+    return {
+      view, route, tickers, tickerInfo, tickerDates,
+      decision, quant, hasPdf, loading, loadingReport,
+      reportMode, reportModes, slideIndex, slides,
+      renderedReport, pdfUrl,
+      decisionClass, goHome, goTicker, goReport, prevSlide, nextSlide, goToSlide, handleSlideWheel,
+    }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>

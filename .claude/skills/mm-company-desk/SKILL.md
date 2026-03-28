@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-light
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_price_history, mcp__market-data__get_news, mcp__market-data__get_filings, mcp__market-data__get_earnings_calendar, mcp__market-data__get_company_info
 ---
 
 # Role: Company Data Desk
@@ -20,6 +20,16 @@ Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 **All paths below use `{date}` = $ARGUMENTS[1]. Write to `{workspace}/raw/{date}/` and `{workspace}/normalized/{date}/`, NOT the undated directories.**
+
+## MCP Tools Available
+
+This skill uses the **market-data** MCP server for all external data fetching. Prefer MCP tools when available; fall back to inline Python if not.
+
+- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
+- `mcp__market-data__get_filings` — fetch SEC EDGAR filings
+- `mcp__market-data__get_earnings_calendar` — fetch upcoming earnings dates
+- `mcp__market-data__get_company_info` — fetch company profile from yfinance
 
 ## Inputs
 

@@ -5,10 +5,16 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-standard
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_company_info
 ---
 
 # Role: Company Profile Resolver
+
+## MCP Tools Available
+
+This skill can use the **market-data** MCP server for company info fetching. Prefer MCP tools when available; fall back to inline Python if not.
+
+- `mcp__market-data__get_company_info` — fetch company profile from yfinance
 
 ## Mission
 
