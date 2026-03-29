@@ -73,14 +73,20 @@ def finalize(workspace: str, date: str) -> dict:
         if e.get("success") is False
     ]
 
-    # Review info
+    # Review info — score_history.json may be a plain list [...] or {"history": [...]}
     review_iterations = 0
     final_scores = None
-    if score_history and "history" in score_history:
-        review_iterations = len(score_history["history"])
-        if score_history["history"]:
-            last = score_history["history"][-1]
-            final_scores = last.get("scores")
+    if score_history:
+        if isinstance(score_history, list):
+            history = score_history
+        elif isinstance(score_history, dict) and "history" in score_history:
+            history = score_history["history"]
+        else:
+            history = []
+        review_iterations = len(history)
+        if history:
+            last = history[-1]
+            final_scores = last.get("scores") or last.get("dimension_scores")
 
     # Decision info
     decision_label = (decision or {}).get("decision")
@@ -181,7 +187,8 @@ def main():
     with open(run_log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Clean up eval_stage_log.json
+    # Clean up eval_stage_log.json — safe because the orchestrator calls
+    # finalize AFTER stage_timer end for reflect, so the log is complete.
     stage_log_path = Path(workspace) / "eval_stage_log.json"
     if stage_log_path.exists():
         try:

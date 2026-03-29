@@ -99,6 +99,8 @@ params = {
 }
 ```
 
+**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_market_news`. Always enforce: `articles = articles[:config["news"]["max_market_news"]]`.
+
 Save raw response to `{workspace}/raw/{date}/news/market_headlines.json`.
 
 If NewsAPI is unavailable, use **WebSearch** as fallback to collect market headlines.

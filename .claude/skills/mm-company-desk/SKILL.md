@@ -57,6 +57,8 @@ params = {
 
 Lookback window: `news.lookback_hours_daily` (default: 36 hours) for daily mode.
 
+**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_company_news`. Always enforce: `articles = articles[:config["news"]["max_company_news"]]`.
+
 Save raw response to `{workspace}/raw/{date}/news/company_news.json`.
 
 ### 2. Fetch SEC EDGAR Filings

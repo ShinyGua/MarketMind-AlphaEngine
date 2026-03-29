@@ -349,6 +349,8 @@ Verify `{workspace}/decision/{date}/final_decision.json` exists.
 
 **This is the ONLY stage that pauses for user input.** All other stages run autonomously.
 
+**Stage timer**: Run `stage_timer.py start` before presenting the prompt. Run `stage_timer.py end` after writing `user_review.json` (or after the user skips). The timer captures wall-clock wait time including user think time — this is expected.
+
 Present the completed report to the user and collect feedback:
 
 ```
@@ -419,13 +421,7 @@ The release gate script reads all grader results and deterministically produces:
 - `{workspace}/eval/{date}/release_gate.json` — `passed`, `warning`, or `failed`
 - `{workspace}/eval/{date}/regression_flag.json` — only if factuality or evidence grader failed (regression: reviewer missed it)
 
-#### 14b. Run Log Finalization
-
-```bash
-.venv/bin/python3 eval/finalize_run.py {workspace} {date}
-```
-
-#### 14c. Learning Loop (improve future runs)
+#### 14b. Learning Loop (improve future runs)
 
 Generate memory context for future analyst runs:
 ```bash
@@ -442,6 +438,14 @@ The memory writer (via MCP memory server) will:
 - If `regression_flag.json` exists, create a high-importance procedural memory about the reviewer gap
 
 Update status.json: append "reflect" to stages_completed.
+
+#### 14c. Run Log Finalization (AFTER stage_timer end)
+
+**IMPORTANT**: This step runs AFTER `stage_timer.py end {workspace} reflect true`, so that the run log captures complete reflect timing. Do NOT call finalize_run.py inside the reflect stage timer window.
+
+```bash
+.venv/bin/python3 eval/finalize_run.py {workspace} {date}
+```
 
 **Pipeline complete.**
 
@@ -464,6 +468,12 @@ Pipeline complete for {TICKER} ({date})
 ## Resume Logic
 
 Before starting, read `status.json`. If `run_date` matches today → resume (skip completed stages). If `run_date` is a different day → start fresh (reset `stages_completed`, update `run_date`).
+
+**Stage log cleanup on fresh start**: When starting a fresh run (new date or empty `stages_completed`), delete `{workspace}/eval_stage_log.json` if it exists. This prevents stale entries from a previous interrupted run from leaking into the new run's stage timings.
+
+```bash
+rm -f {workspace}/eval_stage_log.json
+```
 
 ## Error Handling
 
