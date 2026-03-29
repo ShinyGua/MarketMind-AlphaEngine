@@ -19,6 +19,9 @@ tools/*/.tmp-state/
 # Legacy experiment artifacts (pre-v5)
 exp/
 logs/
+memory/episodic/index.jsonl
+memory/semantic/index.jsonl
+memory/procedural/index.jsonl
 writing/
 
 # Root-level config (local overrides, not committed)
