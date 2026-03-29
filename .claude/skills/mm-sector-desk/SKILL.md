@@ -53,7 +53,13 @@ params = {
 }
 ```
 
-Save to `{workspace}/raw/news/sector_news.json`.
+**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_sector_news` entries. NewsAPI may return more results than requested — always enforce the cap:
+
+```python
+articles = articles[:config["news"]["max_sector_news"]]
+```
+
+Save to `{workspace}/raw/{date}/news/sector_news.json`.
 
 ### 2. Fetch Peer Price Data
 
