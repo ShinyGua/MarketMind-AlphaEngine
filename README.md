@@ -37,7 +37,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 
 - **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then a moderator identifies disagreements and assigns targeted cross-critique pairs to produce a balanced thesis through structured debate rather than a single-agent summary
 - **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety** that anchors the BUY/HOLD/SELL decision to price-vs-value — not just momentum and news
-- **Investment-Bank-Style PDF**: Generates JPM-style research reports with annotated charts, narrative paragraphs, visual hierarchy, and professional typography via LaTeX
+- **Investment-Bank-Style PDF**: Generates JPM-style research reports — Page-1 rating box, embedded annotated charts, styled tables, and bilingual (EN/中文) typography — via a deterministic Markdown → HTML/CSS → PDF pipeline (WeasyPrint)
 - **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
@@ -55,7 +55,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 - [Claude Code](https://code.claude.com) CLI installed
 - [Ralph Loop plugin](https://github.com/anthropics/claude-code) (recommended for long-running execution)
 - Python 3.10+
-- LaTeX (`xelatex`) for PDF generation. On macOS: `brew install --cask mactex`
+- PDF generation needs WeasyPrint's native libs (Pango, cairo, GDK-PixBuf). On macOS: `brew install pango gdk-pixbuf libffi`; on Debian/Ubuntu: `apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0`. For Chinese (CJK) reports, install a CJK font (e.g. `fonts-wqy-microhei` or Noto Sans CJK). (`weasyprint` itself is installed by `setup.sh`.)
 
 ### Setup
 
@@ -64,8 +64,9 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 git clone git@github.com:ShinyGua/MarketMind-AlphaEngine.git
 cd MarketMind-AlphaEngine
 
-# 2. Create the Python environment
+# 2. Create the Python environment + pin the repo root
 source setup.sh
+export MM_ROOT="$(pwd)"
 
 # 3. (Optional) Add your API keys to config.yaml
 cp config.example.yaml config.yaml
@@ -73,12 +74,12 @@ cp config.example.yaml config.yaml
 # API secrets are typically supplied via environment variables
 
 # 4. (Optional) Export API keys before launching Claude Code
-export NEWSAPI_API_KEY="your_newsapi_key"
+export NEWSAPI_KEY="your_newsapi_key"
 export FRED_API_KEY="your_fred_key"
 # Leaving keys unset is allowed; WebSearch fallback still works
 
-# 5. Launch Claude Code with the plugin
-claude --plugin-dir "$PWD/plugin" --dangerously-skip-permissions
+# 5. Launch Claude Code with the plugin (run from the repo root)
+claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
 ```
 
 ### NewsAPI Key Setup
@@ -87,20 +88,20 @@ If you want higher-quality news coverage than the fallback web search, create a 
 
 1. Register at [newsapi.org/register](https://newsapi.org/register)
 2. Verify your email and copy your API key from the NewsAPI dashboard/docs examples
-3. Export it in your shell as `NEWSAPI_API_KEY`
+3. Export it in your shell as `NEWSAPI_KEY`
 
 This project reads the key from the environment variable named in [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml), under:
 
 ```yaml
 data_sources:
   news:
-    api_key_env: NEWSAPI_API_KEY
+    api_key_env: NEWSAPI_KEY
 ```
 
 That means the value should go into your shell environment, for example:
 
 ```bash
-export NEWSAPI_API_KEY="your_newsapi_key"
+export NEWSAPI_KEY="your_newsapi_key"
 ```
 
 ### Usage
@@ -138,10 +139,11 @@ The `/mm:init` flow:
 |  Init workspace context                                              |
 |       |                                                              |
 |       v                                                              |
-|  Collect (3 desks in parallel)                                       |
+|  Collect (4 collectors in parallel)                                  |
 |       |-- Market desk: macro headlines, indices, macro assets        |
 |       |-- Company desk: company news, filings, catalysts             |
 |       |-- Sector desk: sector news, peer prices                      |
+|       |-- Web research: web/NASDAQ news with source provenance       |
 |       |                                                              |
 |       v                                                              |
 |  Normalize evidence cards + time-series tables                       |
@@ -170,7 +172,7 @@ The `/mm:init` flow:
 |  Investment decision                                                 |
 |       | BUY / HOLD / SELL + confidence + risks                       |
 |       v                                                              |
-|  Export markdown + JSON + charts + LaTeX PDF                         |
+|  Export markdown + JSON + charts + PDF (WeasyPrint)                  |
 |       |                                                              |
 |       v                                                              |
 |  User Review (only stage that pauses for input)                      |
@@ -189,14 +191,14 @@ The `/mm:init` flow:
 
 | Stage | What Happens | Agents |
 |-------|--------------|--------|
-| **Collect** | Macro, company, and sector data from yfinance, NewsAPI, and EDGAR | 3 desks in parallel |
+| **Collect** | Macro, company, and sector data from yfinance, NewsAPI, and EDGAR, plus web/NASDAQ news with source provenance | 4 collectors in parallel |
 | **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python | `mm-quant-analyst` |
 | **Valuation** | Scenario DCF + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
 | **Debate** | Independent memos, moderator-assigned critique pairs, and targeted debate | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
 | **Decide** | BUY/HOLD/SELL decision with confidence, reasons, and risks | `mm-decision-maker` |
-| **Export** | Annotated charts plus LaTeX output into a JPM-style PDF report | `mm-pdf-exporter` |
+| **Export** | Annotated SVG charts + Markdown→HTML/CSS→PDF (WeasyPrint) into a JPM-style report | `mm-pdf-exporter` |
 | **User Review** | Pause for user feedback — agreement, corrections, personal insights | user (human-in-the-loop) |
 | **Reflect** | Evaluate run quality via code graders, store user feedback + long-term memory | eval pipeline + memory |
 
@@ -227,6 +229,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-market-desk/        # Macro data collection
 │       ├── mm-company-desk/       # Company news + filings + fundamentals
 │       ├── mm-sector-desk/        # Sector + peer data
+│       ├── mm-web-research/       # Web/NASDAQ news with source provenance
 │       ├── mm-quant-analyst/      # Technical indicator computation
 │       ├── mm-valuation-engine/   # Scenario DCF + comps + margin of safety
 │       ├── mm-market-analyst/     # Market environment analysis
@@ -239,7 +242,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-report-writer/      # Research report generation
 │       ├── mm-report-reviewer/    # Multi-dimensional quality scoring
 │       ├── mm-decision-maker/     # BUY/HOLD/SELL decision
-│       ├── mm-pdf-exporter/       # Chart generation + LaTeX -> PDF
+│       ├── mm-pdf-exporter/       # Chart generation + Markdown -> HTML/CSS -> PDF
 │       ├── mm-progress-monitor/   # Background progress tracking
 │       ├── mm-memory-writer/      # Memory extraction from completed runs
 │       └── mm-init/               # Workspace initialization
@@ -270,8 +273,10 @@ MarketMind-AlphaEngine/
 ├── logs/
 │   └── run_log.jsonl              # Append-only pipeline run history (not committed)
 ├── templates/
-│   ├── equity_research.cls        # JPM-style LaTeX document class
-│   └── charts.py                  # Annotated chart generator (matplotlib)
+│   ├── render_pdf.py              # Markdown -> HTML/CSS -> PDF renderer (WeasyPrint)
+│   ├── report.css                 # JPM-style stylesheet (cover, tables, CJK)
+│   ├── report.html.j2             # Report HTML template (cover + rating box)
+│   └── charts.py                  # Annotated chart generator (matplotlib, SVG)
 ├── workspaces/                    # Company workspaces (date-stamped)
 │   ├── shared/market_context/     # Reusable macro data
 │   └── {TICKER}/                  # Per-company workspace
@@ -342,7 +347,10 @@ review:
 | NewsAPI | Optional | Market, sector, and company news (free tier) |
 | SEC EDGAR | No | 10-K, 10-Q, 8-K filings, and insider transactions |
 | FRED | Optional | Macro indicators such as US10Y, USD, and VIX |
-| WebSearch | No | Fallback for news and web-based verification when keys are unavailable |
+| NASDAQ | No | US-name news + quote via `api.nasdaq.com` (unofficial), with nasdaq.com pages as fallback — collected by `mm-web-research` |
+| WebSearch / WebFetch | No | Provenance-tagged web news (`mm-web-research`) and verification, any market |
+
+**Source hierarchy:** institutional/MCP → NewsAPI → NASDAQ (US names) → general web search. The NewsAPI key is read from the `NEWSAPI_KEY` environment variable.
 
 ---
 
@@ -356,17 +364,18 @@ review:
 - [x] **Long-Term Memory System**: Episodic, semantic, and procedural memory layers across runs
 - [x] **Automated Evaluation Pipeline**: Code-based graders, run log, and aggregated metrics for quality tracking
 - [x] **Quantitative Valuation Engine**: Formula-first scenario DCF + peer comps + margin of safety, with an internal-consistency audit grader, anchoring decisions to price-vs-value
+- [x] **Institutional PDF Rendering**: Deterministic Markdown → HTML/CSS → PDF (WeasyPrint) — Page-1 rating box, embedded annotated SVG charts, styled tables, running headers/footers, and a self-degrading committed renderer (no LaTeX, no per-run scripts)
+- [x] **Bilingual Output**: English + Chinese reports and PDFs via the `language` config, with CJK rendered cleanly end-to-end (body + charts)
+- [x] **Web Presentation**: Browser report viewer (`/mm:dashboard`) with Document, **Slides** (auto-split by section, keyboard navigation + nav dots), and embedded-PDF modes — all driven by the same report content
 
 ### TODO
 
-- [ ] **Web Presentation**: Interactive HTML slide deck aligned with PDF content (reveal.js or custom)
 - [ ] **Advanced Quantitative Methods**: Factor models, rolling beta/correlation, and event study framework
 - [ ] **Portfolio Mode**: Multi-company orchestration, sector-level reports, and portfolio-level risk views
 - [ ] **Historical Comparison**: Compare the latest report against previous runs and track thesis evolution
 - [ ] **Sentiment Analysis**: Social sentiment, options flow, and institutional positioning
 - [ ] **Real-Time Dashboard**: Live monitoring with auto-refresh
 - [ ] **Chinese Market Support**: Full A-share coverage with local data sources such as Tushare and AKShare
-- [ ] **Report Translation**: Bilingual output (English + Chinese) via configuration
 - [ ] **Automated Scheduling**: Cron-based daily report generation
 - [ ] **Custom Analyst Personas**: Configurable risk appetite, directional bias, and horizon overlays
 

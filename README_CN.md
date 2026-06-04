@@ -37,7 +37,7 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 
 - **多智能体辩论**：3-6 位分析师分别独立分析同一只股票，再由主持者识别分歧、指定交叉质询对，通过结构化辩论形成更平衡的投资观点，而不是单一 Agent 的总结
 - **量化估值引擎**：公式驱动的 DCF（CAPM WACC、Gordon 永续价值、乐观/基准/悲观三档情景、WACC×永续增长率敏感性矩阵），加上带分位数基准的可比公司估值，产出内在价值区间和**安全边际**，使 BUY/HOLD/SELL 决策锚定在「价格 vs 价值」上，而不仅依赖动量与新闻
-- **投行风格 PDF**：通过 LaTeX 生成 JPM 风格研究报告，包含带注释图表、叙事段落、清晰的信息层次和专业排版
+- **投行风格 PDF**：通过确定性的 Markdown → HTML/CSS → PDF 流水线（WeasyPrint）生成 JPM 风格研究报告——首页评级框、内嵌标注图表、带样式表格，以及中英双语排版
 - **选择性辩论**：由主持者定向分配交叉评审对，相比所有分析师两两互评的全量 N×N 辩论，在分析师人数增加时可节省 50-90% 的 token 消耗
 - **日期归档历史**：每次运行都按 `{YYYY-MM-DD}/` 目录保留结果，因此可以对同一家公司进行连续日度分析而不丢失历史研究记录
 - **智能交易日逻辑**：自动识别正确的数据截面，处理盘前、周末和节假日等情况
@@ -55,7 +55,7 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 - 已安装 [Claude Code](https://code.claude.com) CLI
 - 已安装 [Ralph Loop plugin](https://github.com/anthropics/claude-code)（推荐，用于长时间连续执行）
 - Python 3.10 及以上
-- 用于生成 PDF 的 LaTeX（`xelatex`）。macOS 可执行：`brew install --cask mactex`
+- 生成 PDF 需要 WeasyPrint 的原生依赖（Pango、cairo、GDK-PixBuf）。macOS：`brew install pango gdk-pixbuf libffi`；Debian/Ubuntu：`apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0`。中文报告需安装 CJK 字体（如 `fonts-wqy-microhei` 或 Noto Sans CJK）。（`weasyprint` 本身由 `setup.sh` 安装。）
 
 ### 安装与启动
 
@@ -64,8 +64,9 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 git clone git@github.com:ShinyGua/MarketMind-AlphaEngine.git
 cd MarketMind-AlphaEngine
 
-# 2. 创建 Python 环境
+# 2. 创建 Python 环境，并固定仓库根目录
 source setup.sh
+export MM_ROOT="$(pwd)"
 
 # 3. （可选）配置 API key
 cp config.example.yaml config.yaml
@@ -73,12 +74,12 @@ cp config.example.yaml config.yaml
 # API 密钥通常通过环境变量提供
 
 # 4. （可选）在启动前导出 API key
-export NEWSAPI_API_KEY="your_newsapi_key"
+export NEWSAPI_KEY="your_newsapi_key"
 export FRED_API_KEY="your_fred_key"
 # 即使不设置也可以运行，系统会自动回退到 WebSearch
 
-# 5. 启动 Claude Code 并加载插件
-claude --plugin-dir "$PWD/plugin" --dangerously-skip-permissions
+# 5. 启动 Claude Code 并加载插件（在仓库根目录下运行）
+claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
 ```
 
 ### NewsAPI 申请与填写位置
@@ -87,20 +88,20 @@ claude --plugin-dir "$PWD/plugin" --dangerously-skip-permissions
 
 1. 打开 [newsapi.org/register](https://newsapi.org/register) 注册账号
 2. 完成邮箱验证后，在 NewsAPI 控制台或官方示例中复制你的 API key
-3. 在终端里把它设置为环境变量 `NEWSAPI_API_KEY`
+3. 在终端里把它设置为环境变量 `NEWSAPI_KEY`
 
 本项目读取的键名定义在 [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml) 这里：
 
 ```yaml
 data_sources:
   news:
-    api_key_env: NEWSAPI_API_KEY
+    api_key_env: NEWSAPI_KEY
 ```
 
 也就是说，密钥应填写到你的 shell 环境变量里，而不是直接硬编码进 `config.yaml`。示例：
 
 ```bash
-export NEWSAPI_API_KEY="your_newsapi_key"
+export NEWSAPI_KEY="your_newsapi_key"
 ```
 
 ### 使用方法
@@ -138,10 +139,11 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 |  初始化工作区上下文                                                  |
 |       |                                                              |
 |       v                                                              |
-|  Collect（3 个 desk 并行）                                           |
+|  Collect（4 个采集器并行）                                          |
 |       |-- Market desk: 宏观新闻、指数、宏观资产                      |
 |       |-- Company desk: 公司新闻、监管披露、催化事件                 |
 |       |-- Sector desk: 行业新闻、可比公司价格数据                    |
+|       |-- Web research: 带来源溯源的网络/NASDAQ 新闻                |
 |       |                                                              |
 |       v                                                              |
 |  Normalize：整理证据卡片与时间序列表                                 |
@@ -170,7 +172,7 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 |  投资决策                                                             |
 |       | BUY / HOLD / SELL + 置信度 + 风险项                          |
 |       v                                                              |
-|  导出 markdown + JSON + 图表 + LaTeX PDF                             |
+|  导出 markdown + JSON + 图表 + PDF（WeasyPrint）                     |
 |       |                                                              |
 |       v                                                              |
 |  用户反馈（唯一暂停等待输入的阶段）                                  |
@@ -189,14 +191,14 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 
 | 阶段 | 发生了什么 | 负责角色 |
 |------|------------|----------|
-| **Collect** | 从 yfinance、NewsAPI、EDGAR 收集宏观、公司与行业数据 | 3 个 desk 并行 |
+| **Collect** | 从 yfinance、NewsAPI、EDGAR 收集宏观、公司与行业数据，并采集带来源溯源的网络/NASDAQ 新闻 | 4 个采集器并行 |
 | **Quant** | 用 Python 计算 RSI、MACD、SMA、ATR、相对强弱等指标 | `mm-quant-analyst` |
 | **Valuation** | 基于 yfinance 基本面数据计算情景 DCF + 可比公司 + 安全边际 | `mm-valuation-engine` |
 | **Debate** | 分析师独立写 memo，主持者分配交叉质询对，并组织定向辩论 | 3-6 位分析师 |
 | **Draft** | 生成带证据追踪的 JPM 风格叙事研究报告 | `mm-report-writer` |
 | **Review** | 进行多维度打分并驱动迭代修订 | `mm-report-reviewer` |
 | **Decide** | 输出带置信度、理由和风险项的 BUY/HOLD/SELL 决策 | `mm-decision-maker` |
-| **Export** | 生成标注图表并通过 LaTeX 导出 JPM 风格 PDF 报告 | `mm-pdf-exporter` |
+| **Export** | 生成标注 SVG 图表，并通过 Markdown→HTML/CSS→PDF（WeasyPrint）导出 JPM 风格报告 | `mm-pdf-exporter` |
 | **User Review** | 暂停收集用户反馈 — 是否认同、修正意见、个人洞察 | 用户（human-in-the-loop） |
 | **Reflect** | 通过代码评分器评估运行质量、存储用户反馈和长期记忆 | eval 流水线 + memory |
 
@@ -227,6 +229,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-market-desk/        # 宏观数据采集
 │       ├── mm-company-desk/       # 公司新闻、披露文件与基本面采集
 │       ├── mm-sector-desk/        # 行业与同业数据采集
+│       ├── mm-web-research/       # 带来源溯源的网络/NASDAQ 新闻采集
 │       ├── mm-quant-analyst/      # 技术指标计算
 │       ├── mm-valuation-engine/   # 情景 DCF + 可比公司 + 安全边际
 │       ├── mm-market-analyst/     # 市场环境分析
@@ -239,7 +242,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-report-writer/      # 研究报告生成
 │       ├── mm-report-reviewer/    # 多维质量打分
 │       ├── mm-decision-maker/     # BUY/HOLD/SELL 决策输出
-│       ├── mm-pdf-exporter/       # 图表生成与 LaTeX -> PDF
+│       ├── mm-pdf-exporter/       # 图表生成与 Markdown -> HTML/CSS -> PDF
 │       ├── mm-progress-monitor/   # 后台进度监控
 │       ├── mm-memory-writer/      # 运行后记忆提取与存储
 │       └── mm-init/               # 工作区初始化
@@ -270,8 +273,10 @@ MarketMind-AlphaEngine/
 ├── logs/
 │   └── run_log.jsonl              # 只追加的流水线运行历史（不提交）
 ├── templates/
-│   ├── equity_research.cls        # JPM 风格 LaTeX 文档类
-│   └── charts.py                  # 标注图表生成器（matplotlib）
+│   ├── render_pdf.py              # Markdown -> HTML/CSS -> PDF 渲染器（WeasyPrint）
+│   ├── report.css                 # JPM 风格样式表（封面、表格、CJK）
+│   ├── report.html.j2             # 报告 HTML 模板（封面 + 评级框）
+│   └── charts.py                  # 标注图表生成器（matplotlib，SVG）
 ├── workspaces/                    # 公司工作区（按日期归档）
 │   ├── shared/market_context/     # 可复用的宏观数据
 │   └── {TICKER}/                  # 单公司工作区
@@ -342,7 +347,10 @@ review:
 | NewsAPI | 可选 | 市场、行业与公司新闻（免费版） |
 | SEC EDGAR | 否 | 10-K、10-Q、8-K 披露文件和内幕交易数据 |
 | FRED | 可选 | 美国 10 年期国债、美元、VIX 等宏观指标 |
-| WebSearch | 否 | 当 API key 不可用时，用于新闻和网页核验回退 |
+| NASDAQ | 否 | 美股新闻与报价，经 `api.nasdaq.com`（非官方），失败时回退到 nasdaq.com 页面——由 `mm-web-research` 采集 |
+| WebSearch / WebFetch | 否 | 带来源溯源的网络新闻（`mm-web-research`）与核验，适用于任意市场 |
+
+**数据源优先级：** 机构/MCP → NewsAPI → NASDAQ（美股）→ 通用网络搜索。NewsAPI key 从环境变量 `NEWSAPI_KEY` 读取。
 
 ---
 
@@ -356,17 +364,18 @@ review:
 - [x] **长期记忆系统**：跨运行的情景记忆、语义记忆和过程记忆三层架构
 - [x] **自动化评测流水线**：代码评分器、运行日志和聚合指标，持续追踪报告质量
 - [x] **量化估值引擎**：公式驱动的情景 DCF + 可比公司 + 安全边际，配套内部一致性审计评分器，使决策锚定在「价格 vs 价值」上
+- [x] **机构级 PDF 渲染**：确定性的 Markdown → HTML/CSS → PDF（WeasyPrint）——首页评级框、内嵌标注 SVG 图表、带样式表格、页眉页脚，由统一提交的渲染器生成（无 LaTeX、无逐次运行脚本），并具备优雅降级
+- [x] **双语输出**：通过 `language` 配置生成中英文报告与 PDF，CJK 在正文与图表中全链路正确渲染
+- [x] **Web 展示层**：浏览器报告查看器（`/mm:dashboard`），提供文档、**幻灯片**（按章节自动拆分、键盘导航 + 导航圆点）与内嵌 PDF 三种模式，均由同一份报告内容驱动
 
 ### TODO
 
-- [ ] **Web 展示层**：与 PDF 内容一致的交互式 HTML 幻灯片（reveal.js 或自定义方案）
 - [ ] **高级量化方法**：因子模型、滚动 beta/correlation、事件研究框架
 - [ ] **投资组合模式**：多公司协同编排、行业级报告、组合层面风险视角
 - [ ] **历史对比分析**：对比最新报告与历史报告，追踪投资论点演变
 - [ ] **情绪分析**：社交媒体情绪、期权资金流、机构持仓倾向
 - [ ] **实时仪表盘**：支持自动刷新和实时监控
 - [ ] **中国市场支持**：接入 Tushare、AKShare 等本地数据源，覆盖 A 股
-- [ ] **报告翻译**：通过配置切换中英双语输出
 - [ ] **自动调度**：基于 Cron 的每日自动生成
 - [ ] **自定义分析师人格**：可配置风险偏好、方向倾向和投资期限视角
 

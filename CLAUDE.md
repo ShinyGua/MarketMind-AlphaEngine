@@ -19,7 +19,7 @@ Output language is determined by the `language` field in config (`en` or `ch`). 
 
 **All Python calls MUST use `.venv/bin/python3`** (relative to project root). Never use bare `python3`.
 
-The system `python3` may lack required packages (pyyaml, yfinance, pandas, ta, fpdf2). The `.venv/` directory contains all dependencies.
+The system `python3` may lack required packages (pyyaml, yfinance, pandas, ta, fpdf2, weasyprint, jinja2). The `.venv/` directory contains all dependencies. (PDF export also needs WeasyPrint's native libs — Pango/cairo/GDK-PixBuf — and a CJK font for Chinese reports.)
 
 Setup: `source setup.sh` (creates `.venv/` with all dependencies).
 
@@ -86,6 +86,9 @@ Run these desks in parallel:
 - **mm-market-desk**: Macro headlines, index data, macro asset prices (yfinance, FRED)
 - **mm-company-desk**: Company news, SEC filings, catalyst calendar (NewsAPI, EDGAR)
 - **mm-sector-desk**: Sector news, peer price data (NewsAPI, yfinance)
+- **mm-web-research**: Web-sourced news with provenance (Claude WebSearch/WebFetch); for US names pulls from **NASDAQ** (`api.nasdaq.com` first, `nasdaq.com` pages as fallback)
+
+**Source hierarchy** (institutional/MCP > NewsAPI > NASDAQ for US > general web search): the desks own the top tiers, mm-web-research owns the lower tiers and captures source URL/date/excerpt per item. The normalize stage deduplicates cards across all four collectors (canonical URL + title) before building the evidence digest.
 
 ### Stage 3: Normalize
 - Convert raw data into evidence cards (JSON)
@@ -153,7 +156,9 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 ### Stage 10: Export
 - Write final markdown report to `final/`
 - Write structured JSON report to `final/`
-- (Future: PDF and web PPT export)
+- **mm-pdf-exporter** generates the JPM-style PDF: `templates/charts.py` renders annotated SVG charts, then `templates/render_pdf.py` converts the markdown → HTML/CSS → PDF via **WeasyPrint** (committed templates `report.css` + `report.html.j2`; no LaTeX). Page-1 rating box from JSON, embedded charts, styled tables, running headers/footers, bilingual EN/中文.
+- Output: `exports/{date}/pdf/report.pdf` (+ `report.html` for debugging, `charts/*.svg`)
+- (Future: web PPT export)
 
 ### Stage 11: Reflect (Non-Critical)
 - Run code-based graders (factuality, evidence coverage, consistency, cost)
@@ -285,6 +290,10 @@ Later values override earlier values. The system checks for `config.yaml` first;
 | NewsAPI | Free tier, key required | Market news, sector news, company news |
 | SEC EDGAR | Free, no key | Company filings (10-K, 10-Q, 8-K), insider transactions |
 | FRED | Free, key required | Macro indicators (US10Y, USD index, VIX) |
+| NASDAQ | Free, no key (`api.nasdaq.com`, unofficial) | US-name news + quote (mm-web-research); falls back to nasdaq.com pages |
+| Web search | Claude WebSearch/WebFetch | Provenance-tagged web news (mm-web-research), any market |
+
+Source hierarchy: institutional/MCP > NewsAPI > NASDAQ (US) > general web search. The NewsAPI key is read from the `NEWSAPI_KEY` environment variable (passed through `.mcp.json`).
 
 API keys are configured via environment variables specified in `config.yaml` under `data_sources.*.api_key_env`.
 
@@ -428,6 +437,7 @@ When memory context is loaded, it supplements (not replaces) current evidence. T
 | mm-market-desk | mm-light | No | Macro + market data collection |
 | mm-company-desk | mm-light | No | Company news + filings + catalysts |
 | mm-sector-desk | mm-light | No | Sector news + peer data |
+| mm-web-research | mm-light | No | Web/NASDAQ news collection with source provenance |
 | mm-quant-analyst | mm-light | No | Technical indicator computation |
 | mm-valuation-engine | mm-light | No | Scenario DCF + comps + margin of safety (runs `valuation/`) |
 | mm-market-analyst | mm-standard | No | Market environment analysis memo |
