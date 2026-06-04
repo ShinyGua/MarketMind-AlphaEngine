@@ -79,10 +79,18 @@ into your `~/.codex/config.toml`, then:
 
 - Launch `codex` from the **repository root** (the server `command`/`args` are
   repo-relative), or substitute absolute paths.
-- `export NEWSAPI_KEY=… FRED_API_KEY=…` first. Both are optional (the desks fall
-  back to web search when unset), but an **unset `NEWSAPI_KEY` yields thinner
-  evidence** — set it for collection parity with Claude. `mm-web-research`
-  back-fills toward `data_sources.web_research.min_cards` regardless.
+- API keys come from the project `.env` (the market-data server self-loads it;
+  canonical `NEWSAPI_KEY`, `NEWSAPI_API_KEY` accepted as an alias). Both are
+  optional (the desks fall back to web search when unset), but an **unset
+  `NEWSAPI_KEY` yields thinner evidence** — set it for collection parity with
+  Claude. `mm-web-research` back-fills toward
+  `data_sources.web_research.min_cards` regardless.
+- **Network egress:** Codex's `workspace-write` sandbox blocks outbound network by
+  default. Live data needs `[sandbox_workspace_write] network_access = true`
+  (in `~/.codex/config.toml`); the headless driver sets it per stage. Without it,
+  desks fall back with `dns_failed`. The collect stage first runs
+  `scripts/check_data_sources.py`, writing key-presence/DNS/per-source status to
+  `raw/{date}/diagnostics/data_sources.json` (never the key values).
 
 If MCP is not attached, fall back to the local Python servers/modules
 (`mcp/*_server.py`) or read/write the workspace files directly.

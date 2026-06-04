@@ -143,6 +143,17 @@ In Codex, list skills with `/skills`. Only **`mm-init`** and **`mm-orchestrator`
 
 Deterministic stages (valuation, charts/PDF, dedup, graders) run as committed Python; LLM stages (desks, analysts, writer, …) run as parallel `codex exec` calls; the depth gate redoes any thin memo/report.
 
+> **Live data needs network egress.** Codex's `workspace-write` sandbox blocks
+> outbound network by default, so the collection desks silently fall back to
+> WebSearch/cache (you'll see `dns_failed` in the diagnostics). The headless driver
+> sets `-c sandbox_workspace_write.network_access=true` per stage; for interactive
+> `codex`, the `[sandbox_workspace_write] network_access = true` block in
+> `.agents/references/codex-config.toml` does the same. The collect stage first runs
+> `scripts/check_data_sources.py`, which records key presence (never values), DNS,
+> and per-source status (`auth_ok` / `dns_failed` / `auth_failed` / `rate_limited` /
+> `no_key`) to `raw/{date}/diagnostics/data_sources.json` — check it when a run looks
+> fallback-heavy.
+
 ### Usage
 
 ```text
