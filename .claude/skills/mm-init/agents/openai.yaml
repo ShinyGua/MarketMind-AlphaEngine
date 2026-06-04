@@ -1,0 +1,6 @@
+# Codex skill metadata — https://developers.openai.com/codex/skills
+# name/description fall back to SKILL.md frontmatter (no duplication).
+interface:
+  default_prompt: "Initialize a new MarketMind equity-research workspace for a company (asks which ticker, verifies via web search, scaffolds config)."
+policy:
+  allow_implicit_invocation: true

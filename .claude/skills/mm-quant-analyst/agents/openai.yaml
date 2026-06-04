@@ -1,0 +1,6 @@
+# Codex skill metadata — https://developers.openai.com/codex/skills
+# name/description fall back to SKILL.md frontmatter (no duplication).
+policy:
+  # internal pipeline stage — orchestrated by mm-orchestrator, not run standalone.
+  # discoverable + explicitly invocable ($mm-...), but never auto-matched.
+  allow_implicit_invocation: false

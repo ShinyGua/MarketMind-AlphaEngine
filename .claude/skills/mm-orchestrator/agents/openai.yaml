@@ -1,0 +1,11 @@
+# Codex skill metadata — https://developers.openai.com/codex/skills
+# name/description fall back to SKILL.md frontmatter (no duplication).
+interface:
+  default_prompt: "Run the full MarketMind equity-research pipeline for a company workspace (15 stages from data collection to a BUY/HOLD/SELL report)."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: mcp
+      value: workspace
+      description: MarketMind workspace artifact I/O MCP server
