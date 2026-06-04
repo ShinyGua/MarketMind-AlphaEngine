@@ -74,10 +74,11 @@ cp config.example.yaml config.yaml
 # 编辑 config.yaml 中的数据源配置
 # API 密钥通常通过环境变量提供
 
-# 4. （可选）在启动前导出 API key
-export NEWSAPI_KEY="your_newsapi_key"
-export FRED_API_KEY="your_fred_key"
-# 即使不设置也可以运行，系统会自动回退到 WebSearch
+# 4. （可选）配置 API key —— 推荐放在仓库根目录的 .env 文件里。
+#    market-data MCP 服务器会在启动时自动加载，无需 export，且跨会话保留。
+cp .env.example .env
+# 编辑 .env，填入 NEWSAPI_KEY / FRED_API_KEY
+# （shell export 仍然有效且优先级更高；不设置也可以运行，系统会自动回退到 WebSearch）
 
 # 5. 启动 Claude Code 并加载插件（在仓库根目录下运行）
 claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
@@ -89,9 +90,9 @@ claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
 
 1. 打开 [newsapi.org/register](https://newsapi.org/register) 注册账号
 2. 完成邮箱验证后，在 NewsAPI 控制台或官方示例中复制你的 API key
-3. 在终端里把它设置为环境变量 `NEWSAPI_KEY`
+3. 把它填入 `.env` 的 `NEWSAPI_KEY`（或在 shell 里 export）
 
-本项目读取的键名定义在 [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml) 这里：
+本项目读取的键名定义在 [`config.example.yaml`](config.example.yaml) 这里：
 
 ```yaml
 data_sources:
@@ -99,11 +100,20 @@ data_sources:
     api_key_env: NEWSAPI_KEY
 ```
 
-也就是说，密钥应填写到你的 shell 环境变量里，而不是直接硬编码进 `config.yaml`。示例：
+推荐把密钥放在仓库根目录的 `.env` 文件里（复制 `.env.example`）。market-data MCP
+服务器会在启动时自动加载 `.env`，因此无需手动 export：
 
 ```bash
-export NEWSAPI_KEY="your_newsapi_key"
+# .env
+NEWSAPI_KEY=your_newsapi_key
+FRED_API_KEY=your_fred_key
 ```
+
+`NEWSAPI_API_KEY` 也可作为 `NEWSAPI_KEY` 的别名。shell 里的 `export NEWSAPI_KEY=...`
+依然有效，且优先级高于 `.env`。
+
+> **注意：** MCP 服务器只在启动时读取一次 `.env`，所以改完 key 后需要重启
+> Claude Code / Codex 才会生效。
 
 ### 用 Codex CLI 运行（Claude Code 之外的另一种方式）
 
@@ -112,8 +122,8 @@ MarketMind 也可在 [Codex CLI](https://developers.openai.com/codex) 下运行�
 ```bash
 # 1. 注册 MCP 服务器：把 .agents/references/codex-config.toml 里的三个
 #    [mcp_servers.*] 表合并进 ~/.codex/config.toml
-# 2.（可选）导出 API key，然后在仓库根目录启动 Codex
-#    （MCP 服务器的 command/args 路径是相对仓库根目录的）
+# 2.（可选）把 API key 放进 .env（自动加载），然后在仓库根目录启动 Codex
+#    （MCP 服务器的 command/args 路径是相对仓库根目录的）。也可改用 shell export：
 export NEWSAPI_KEY="your_newsapi_key"   # 可选；未设置时回退到网络搜索
 codex
 ```
@@ -376,7 +386,7 @@ review:
 | NASDAQ | 否 | 美股新闻与报价，经 `api.nasdaq.com`（非官方），失败时回退到 nasdaq.com 页面——由 `mm-web-research` 采集 |
 | WebSearch / WebFetch | 否 | 带来源溯源的网络新闻（`mm-web-research`）与核验，适用于任意市场 |
 
-**数据源优先级：** 机构/MCP → NewsAPI → NASDAQ（美股）→ 通用网络搜索。NewsAPI key 从环境变量 `NEWSAPI_KEY` 读取。
+**数据源优先级：** 机构/MCP → NewsAPI → NASDAQ（美股）→ 通用网络搜索。NewsAPI 与 FRED 的 key 从环境变量 `NEWSAPI_KEY` / `FRED_API_KEY` 读取，market-data MCP 服务器会在启动时自动从仓库根目录的 `.env` 文件加载（shell export 优先级更高）。
 
 ---
 
