@@ -74,10 +74,13 @@ cp config.example.yaml config.yaml
 # Edit config.yaml for provider settings
 # API secrets are typically supplied via environment variables
 
-# 4. (Optional) Export API keys before launching Claude Code
-export NEWSAPI_KEY="your_newsapi_key"
-export FRED_API_KEY="your_fred_key"
-# Leaving keys unset is allowed; WebSearch fallback still works
+# 4. (Optional) Add API keys — the recommended path is a .env file at the repo
+#    root. The market-data MCP server loads it automatically at startup, so no
+#    shell export is needed and keys survive across sessions.
+cp .env.example .env
+# Edit .env and fill in NEWSAPI_KEY / FRED_API_KEY
+# (shell exports still work and take precedence; leaving keys unset is allowed —
+#  WebSearch fallback covers the gap)
 
 # 5. Launch Claude Code with the plugin (run from the repo root)
 claude --plugin-dir "$MM_ROOT/plugin" --dangerously-skip-permissions
@@ -89,9 +92,9 @@ If you want higher-quality news coverage than the fallback web search, create a 
 
 1. Register at [newsapi.org/register](https://newsapi.org/register)
 2. Verify your email and copy your API key from the NewsAPI dashboard/docs examples
-3. Export it in your shell as `NEWSAPI_KEY`
+3. Put it in your `.env` as `NEWSAPI_KEY` (or export it in your shell)
 
-This project reads the key from the environment variable named in [`config.example.yaml`](/Volumes/970SSD/Code/Git/MarketMind-AlphaEngine/config.example.yaml), under:
+This project reads the key from the environment variable named in [`config.example.yaml`](config.example.yaml), under:
 
 ```yaml
 data_sources:
@@ -99,11 +102,21 @@ data_sources:
     api_key_env: NEWSAPI_KEY
 ```
 
-That means the value should go into your shell environment, for example:
+The recommended place for the value is a `.env` file at the repo root (copy
+`.env.example`). The market-data MCP server loads `.env` at startup, so you don't
+have to export anything:
 
 ```bash
-export NEWSAPI_KEY="your_newsapi_key"
+# .env
+NEWSAPI_KEY=your_newsapi_key
+FRED_API_KEY=your_fred_key
 ```
+
+`NEWSAPI_API_KEY` is also accepted as an alias for `NEWSAPI_KEY`. A shell
+`export NEWSAPI_KEY=...` still works and takes precedence over `.env`.
+
+> **Note:** the MCP server reads `.env` once when it starts, so after editing keys
+> restart Claude Code / Codex for them to take effect.
 
 ### Run with Codex CLI (alternative to Claude Code)
 
@@ -112,8 +125,9 @@ MarketMind also runs under [Codex CLI](https://developers.openai.com/codex). The
 ```bash
 # 1. Register the MCP servers: merge the three [mcp_servers.*] tables from
 #    .agents/references/codex-config.toml into ~/.codex/config.toml
-# 2. (Optional) export API keys, then launch Codex FROM THE REPO ROOT
-#    (the MCP server command/args paths are repo-relative)
+# 2. (Optional) put API keys in .env (loaded automatically), then launch Codex
+#    FROM THE REPO ROOT (the MCP server command/args paths are repo-relative).
+#    A shell export still works as an alternative:
 export NEWSAPI_KEY="your_newsapi_key"   # optional; web-search fallback otherwise
 codex
 ```
@@ -376,7 +390,7 @@ review:
 | NASDAQ | No | US-name news + quote via `api.nasdaq.com` (unofficial), with nasdaq.com pages as fallback — collected by `mm-web-research` |
 | WebSearch / WebFetch | No | Provenance-tagged web news (`mm-web-research`) and verification, any market |
 
-**Source hierarchy:** institutional/MCP → NewsAPI → NASDAQ (US names) → general web search. The NewsAPI key is read from the `NEWSAPI_KEY` environment variable.
+**Source hierarchy:** institutional/MCP → NewsAPI → NASDAQ (US names) → general web search. The NewsAPI and FRED keys are read from the `NEWSAPI_KEY` / `FRED_API_KEY` environment variables, which the market-data MCP server auto-loads from a `.env` file at the repo root at startup (shell exports take precedence).
 
 ---
 

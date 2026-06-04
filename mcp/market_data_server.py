@@ -25,6 +25,12 @@ from mcp.server.stdio import stdio_server
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.rate_limiter import LIMITERS  # noqa: E402
 
+# Load API keys from the project .env so NEWSAPI_KEY / FRED_API_KEY resolve even
+# when Claude Code didn't expand them into the launch environment. File values
+# are a fallback — anything already in os.environ wins.
+from shared.dotenv import load_dotenv  # noqa: E402
+load_dotenv()
+
 server = Server("market-data")
 
 # ── helpers ─────────────────────────────────────────────────────────────
