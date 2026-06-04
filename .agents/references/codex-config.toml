@@ -1,0 +1,31 @@
+# MarketMind-AlphaEngine — Codex CLI MCP server config
+# ---------------------------------------------------------------------------
+# Codex reads MCP servers from ~/.codex/config.toml (TOML), NOT Claude's
+# .mcp.json. Copy the three [mcp_servers.*] tables below into your
+# ~/.codex/config.toml so the mm-* skills' mcp__market-data / mcp__workspace /
+# mcp__memory tools resolve. These are translated verbatim from .mcp.json.
+#
+# IMPORTANT:
+#   * The command/args paths are RELATIVE to Codex's launch directory.
+#     Launch `codex` from the repository root, or replace the relative paths
+#     with absolute ones (e.g. /abs/path/to/MarketMind-AlphaEngine/.venv/bin/python3
+#     and the matching absolute server-script paths).
+#   * Export the API keys before launching: `export NEWSAPI_KEY=... FRED_API_KEY=...`
+#     (FRED/NewsAPI are optional — the desks fall back to WebSearch when unset).
+#   * If a key env-var is unset, leave it as "" rather than removing the line.
+# ---------------------------------------------------------------------------
+
+[mcp_servers.market-data]
+command = ".venv/bin/python3"
+args = ["mcp/market_data_server.py"]
+env = { NEWSAPI_KEY = "${NEWSAPI_KEY}", FRED_API_KEY = "${FRED_API_KEY}" }
+
+[mcp_servers.workspace]
+command = ".venv/bin/python3"
+args = ["mcp/workspace_server.py"]
+env = { WORKSPACES_DIR = "workspaces" }
+
+[mcp_servers.memory]
+command = ".venv/bin/python3"
+args = ["mcp/memory_server.py"]
+env = { MEMORY_DIR = "memory" }
