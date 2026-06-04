@@ -42,7 +42,7 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 - **决策评审团（投票 → 收敛 → 退出）**：最终决策由多轮评审团产生——每位分析师角色各投一票（BUY/HOLD/SELL，并附带置信度自评与对冲叠加），确定性评分器度量收敛程度，循环持续到评审团达成一致或触及硬性轮次上限。随后主席据「按置信度加权的倾向」写出最终结论，并保留少数派异议
 - **日期归档历史**：每次运行都按 `{YYYY-MM-DD}/` 目录保留结果，因此可以对同一家公司进行连续日度分析而不丢失历史研究记录
 - **智能交易日逻辑**：自动识别正确的数据截面，处理盘前、周末和节假日等情况
-- **MCP 服务器架构**：3 个 Model Context Protocol 服务器（market-data、workspace、memory）为 Agent 提供结构化的数据、文件和持久记忆工具访问
+- **MCP 服务器架构**：3 个 Model Context Protocol 服务器（market-data、mm-workspace、memory）为 Agent 提供结构化的数据、文件和持久记忆工具访问
 - **长期记忆系统**：情景记忆、语义记忆和过程记忆三层架构，使系统能跨运行回顾历史分析、学习到的模式和优化后的流程
 - **自动化评测流水线**：代码评分器对每次运行进行多维度打分，配合运行日志和聚合指标持续追踪报告质量
 - **免费数据源优先**：完全支持免费 API（yfinance、NewsAPI 免费版、SEC EDGAR、FRED），没有 API key 时可自动退化到 WebSearch
@@ -295,7 +295,7 @@ MarketMind-AlphaEngine/
 │   ├── .claude-plugin/            # 插件元数据
 │   └── commands/                  # 面向用户的命令（/mm:init, /mm:run, /mm:status）
 ├── .mcp.json                      # Claude Code MCP 服务器注册
-├── mcp/                           # MCP 服务器（market-data、workspace、memory）
+├── mcp/                           # MCP 服务器（market-data、mm-workspace、memory）
 │   ├── market_data_server.py      # 含 get_fundamentals（DCF/可比公司输入）
 │   ├── workspace_server.py
 │   ├── memory_server.py
@@ -405,7 +405,7 @@ review:
 
 ### 已完成
 
-- [x] **MCP 服务器架构**：3 个 MCP 服务器（market-data、workspace、memory）为 Agent 提供结构化工具访问
+- [x] **MCP 服务器架构**：3 个 MCP 服务器（market-data、mm-workspace、memory）为 Agent 提供结构化工具访问
 - [x] **长期记忆系统**：跨运行的情景记忆、语义记忆和过程记忆三层架构
 - [x] **自动化评测流水线**：代码评分器、运行日志和聚合指标，持续追踪报告质量
 - [x] **量化估值引擎**：公式驱动的情景 DCF + 可比公司 + 安全边际，配套内部一致性审计评分器，使决策锚定在「价格 vs 价值」上

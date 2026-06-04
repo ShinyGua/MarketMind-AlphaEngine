@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-heavy
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite, mcp__workspace__update_status
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite, mcp__mm-workspace__update_status
 ---
 
 # IRON LAW: NEVER STOP UNTIL PIPELINE IS COMPLETE
@@ -101,7 +101,7 @@ Rules (applied per the company's `market_profile`, via `exchange_calendars`):
 - Before the open, on a weekend, or on an exchange holiday → use the previous session
 - The helper self-degrades to US weekend-only logic if `exchange_calendars` is unavailable, so it never blocks the pipeline
 
-Store the result via `mcp__workspace__update_status` with `run_date: "{date}"`. Use this date for ALL path references.
+Store the result via `mcp__mm-workspace__update_status` with `run_date: "{date}"`. Use this date for ALL path references.
 
 **Path convention**: Every stage reads/writes under `{workspace}/{stage_dir}/{date}/` instead of `{workspace}/{stage_dir}/`.
 Exception: `profile/` is undated (static company reference data).
@@ -114,10 +114,10 @@ When dispatching skills, pass date as the second argument: `{workspace} {date}`
 3. Create date subdirectories for all stages
 4. FOR EACH stage that is NOT in stages_completed (in order):
    a. Execute the stage (see Stage Details below) — pass {workspace} and {date} to each skill
-   b. Update status.json via MCP tool `mcp__workspace__update_status` with `ticker`, `stage` (current stage name), and `completed_stage` (the stage just finished). The MCP tool validates that `completed_stage` is in the STAGES whitelist and deduplicates automatically. **NEVER write status.json directly via inline Python or the Write tool** — always go through the MCP tool so validation is enforced.
+   b. Update status.json via MCP tool `mcp__mm-workspace__update_status` with `ticker`, `stage` (current stage name), and `completed_stage` (the stage just finished). The MCP tool validates that `completed_stage` is in the STAGES whitelist and deduplicates automatically. **NEVER write status.json directly via inline Python or the Write tool** — always go through the MCP tool so validation is enforced.
    c. >>> IMMEDIATELY GO TO THE NEXT STAGE — DO NOT STOP <<<
 5. When all 15 stages are in stages_completed:
-   a. Call `mcp__workspace__update_status` with `stage: "completed"`
+   a. Call `mcp__mm-workspace__update_status` with `stage: "completed"`
    b. Display final summary
    c. DONE — only now may you return control
 

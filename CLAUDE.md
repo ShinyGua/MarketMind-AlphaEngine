@@ -363,7 +363,7 @@ Wraps all external data source calls with rate limiting and fallback logic.
 | `get_fundamentals` | yfinance | Valuation ratios + financial statements (for DCF/comps) |
 | `get_earnings_calendar` | yfinance | Upcoming earnings dates |
 
-### workspace-mcp (`mcp/workspace_server.py`)
+### mm-workspace-mcp (`mcp/workspace_server.py`)
 Manages workspace artifact I/O with path-traversal protection.
 
 **Tools**: `write_artifact`, `update_status`, `create_workspace`, `create_date_dirs`

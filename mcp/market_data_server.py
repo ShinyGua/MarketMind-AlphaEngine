@@ -250,11 +250,34 @@ async def list_tools() -> list[mcp.types.Tool]:
 
 # ── tool implementations ────────────────────────────────────────────────
 
+_EMPTY_OHLCV = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
+
+
+def _ohlcv_from_frame(frame, pd) -> dict:
+    """Extract an OHLCV dict from a single-level (Open/High/Low/Close/Volume) frame.
+    Missing columns degrade to all-None rather than raising."""
+    n = len(frame.index)
+
+    def col(name):
+        return frame[name] if name in frame.columns else [None] * n
+
+    return {
+        "dates": [d.isoformat() for d in frame.index],
+        "open": [round(float(v), 2) if pd.notna(v) else None for v in col("Open")],
+        "high": [round(float(v), 2) if pd.notna(v) else None for v in col("High")],
+        "low": [round(float(v), 2) if pd.notna(v) else None for v in col("Low")],
+        "close": [round(float(v), 2) if pd.notna(v) else None for v in col("Close")],
+        "volume": [int(v) if pd.notna(v) else None for v in col("Volume")],
+    }
+
+
 async def _get_price_history(arguments: dict) -> list[mcp.types.TextContent]:
     import yfinance as yf
     import pandas as pd
 
     tickers = arguments["tickers"]
+    if isinstance(tickers, str):
+        tickers = [tickers]
     period = arguments["period"]
     interval = arguments["interval"]
 
@@ -271,39 +294,21 @@ async def _get_price_history(arguments: dict) -> list[mcp.types.TextContent]:
 
     data: dict[str, dict] = {}
 
-    if len(tickers) == 1:
-        # yf.download returns flat columns for a single ticker
-        ticker = tickers[0]
-        if df.empty:
-            data[ticker] = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
-        else:
-            dates = [d.isoformat() for d in df.index]
-            data[ticker] = {
-                "dates": dates,
-                "open": [round(float(v), 2) if pd.notna(v) else None for v in df["Open"]],
-                "high": [round(float(v), 2) if pd.notna(v) else None for v in df["High"]],
-                "low": [round(float(v), 2) if pd.notna(v) else None for v in df["Low"]],
-                "close": [round(float(v), 2) if pd.notna(v) else None for v in df["Close"]],
-                "volume": [int(v) if pd.notna(v) else None for v in df["Volume"]],
-            }
-    else:
-        for ticker in tickers:
-            try:
-                sub = df[ticker]
-                if sub.empty:
-                    data[ticker] = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
-                    continue
-                dates = [d.isoformat() for d in sub.index]
-                data[ticker] = {
-                    "dates": dates,
-                    "open": [round(float(v), 2) if pd.notna(v) else None for v in sub["Open"]],
-                    "high": [round(float(v), 2) if pd.notna(v) else None for v in sub["High"]],
-                    "low": [round(float(v), 2) if pd.notna(v) else None for v in sub["Low"]],
-                    "close": [round(float(v), 2) if pd.notna(v) else None for v in sub["Close"]],
-                    "volume": [int(v) if pd.notna(v) else None for v in sub["Volume"]],
-                }
-            except KeyError:
-                data[ticker] = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
+    # yfinance with group_by="ticker" returns MultiIndex columns (ticker, field)
+    # even for ONE ticker, so always select the ticker's sub-frame when MultiIndex
+    # before reading Open/High/…; a flat frame (older yfinance / single string) is
+    # used as-is. This unifies single- and multi-ticker and avoids KeyError: 'Open'.
+    multi = isinstance(df.columns, pd.MultiIndex)
+    for ticker in tickers:
+        if df is None or df.empty:
+            data[ticker] = dict(_EMPTY_OHLCV)
+            continue
+        try:
+            sub = df[ticker] if multi else df
+        except KeyError:
+            data[ticker] = dict(_EMPTY_OHLCV)
+            continue
+        data[ticker] = dict(_EMPTY_OHLCV) if sub.empty else _ohlcv_from_frame(sub, pd)
 
     total = sum(len(v["dates"]) for v in data.values())
     return _ok({
@@ -375,73 +380,94 @@ async def _get_news(arguments: dict) -> list[mcp.types.TextContent]:
     })
 
 
+# SEC requires a descriptive User-Agent with contact info on every request.
+_SEC_UA = "MarketMind/1.0 (research@marketmind.dev)"
+_CIK_CACHE: dict[str, str] = {}  # TICKER -> zero-padded 10-digit CIK
+
+
+def _resolve_cik(ticker: str, requests) -> str | None:
+    """Map a ticker to its zero-padded 10-digit CIK via SEC's company_tickers map
+    (fetched once, cached). Returns None if the ticker isn't found."""
+    t = ticker.upper()
+    if not _CIK_CACHE:
+        resp = requests.get("https://www.sec.gov/files/company_tickers.json",
+                            headers={"User-Agent": _SEC_UA}, timeout=15)
+        if resp.status_code >= 400:
+            return None
+        for row in resp.json().values():
+            _CIK_CACHE[str(row["ticker"]).upper()] = str(row["cik_str"]).zfill(10)
+    return _CIK_CACHE.get(t)
+
+
 async def _get_filings(arguments: dict) -> list[mcp.types.TextContent]:
     import requests
     from datetime import timedelta
 
     ticker = arguments["ticker"]
-    company_name = arguments.get("company_name")
-    filing_types = arguments.get("filing_types", ["10-K", "10-Q", "8-K", "4"])
+    filing_types = set(arguments.get("filing_types", ["10-K", "10-Q", "8-K", "4"]))
     limit = arguments.get("limit", 5)
     lookback_days = arguments.get("lookback_days", 30)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     await LIMITERS["edgar"].acquire()
 
-    query = company_name if company_name else ticker
-    end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    start_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
-    forms = ",".join(f'"{ft}"' for ft in filing_types)
-
-    url = "https://efts.sec.gov/LATEST/search-index"
-    params = {
-        "q": query,
-        "dateRange": "custom",
-        "startdt": start_date,
-        "enddt": end_date,
-        "forms": forms,
-    }
-    headers = {"User-Agent": "MarketMind/1.0 (research@marketmind.dev)"}
-
+    # Canonical, deterministic path: the EDGAR submissions API keyed by CIK
+    # (data.sec.gov/submissions/CIK{cik}.json). Replaces the brittle full-text
+    # search call (quoted forms + bogus dateRange) that errored in practice.
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        cik = _resolve_cik(ticker, requests)
+        if not cik:
+            return _ok({"fallback_needed": True, "reason": "cik_not_found",
+                        "provider": "sec_edgar", "ticker": ticker})
+        resp = requests.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
+                            headers={"User-Agent": _SEC_UA}, timeout=15)
         if resp.status_code >= 400:
             return _ok({"fallback_needed": True, "reason": _classify_request(resp=resp),
                         "provider": "sec_edgar", "status_code": resp.status_code})
-        body = resp.json()
+        sub = resp.json()
     except (requests.exceptions.RequestException, OSError) as exc:
         return _ok({"fallback_needed": True, "reason": _classify_request(exc=exc),
                     "provider": "sec_edgar"})
 
-    filings = []
-    hits = body.get("hits", body.get("filings", []))
-    if isinstance(hits, dict):
-        hits = hits.get("hits", [])
+    company_name = sub.get("name")
+    recent = (sub.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form", [])
+    dates = recent.get("filingDate", [])
+    accns = recent.get("accessionNumber", [])
+    docs = recent.get("primaryDocument", [])
+    descs = recent.get("primaryDocDescription", [])
+    cik_int = int(cik)
 
-    for hit in hits[:limit]:
-        source = hit.get("_source", hit)
+    filings = []
+    for i, form in enumerate(forms):  # arrays are newest-first
+        if filing_types and form not in filing_types:
+            continue
+        fdate = dates[i] if i < len(dates) else None
+        if fdate and fdate < cutoff:
+            continue
+        accn = accns[i] if i < len(accns) else ""
+        doc = docs[i] if i < len(docs) else ""
+        accn_nodash = accn.replace("-", "")
+        if doc:
+            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accn_nodash}/{doc}"
+        elif accn:
+            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accn_nodash}/{accn}-index.htm"
+        else:
+            url = None
         filings.append({
-            "form_type": source.get("form_type") or source.get("forms") or source.get("type"),
-            "filed_date": source.get("file_date") or source.get("filed_date") or source.get("date_filed"),
-            "company_name": source.get("entity_name") or source.get("company_name") or source.get("display_names", [None])[0],
-            "description": source.get("display_description") or source.get("description", ""),
-            "url": _build_filing_url(source),
+            "form_type": form,
+            "filed_date": fdate,
+            "company_name": company_name,
+            "description": descs[i] if i < len(descs) else "",
+            "url": url,
         })
+        if len(filings) >= limit:
+            break
 
     return _ok({
         "filings": filings,
         "metadata": {"source": "sec_edgar", "count": len(filings), "fetched_at": _ISO_NOW()},
     })
-
-
-def _build_filing_url(source: dict) -> str | None:
-    """Construct an EDGAR filing URL from hit metadata."""
-    file_num = source.get("file_num")
-    accession = source.get("accession_no") or source.get("accession_number")
-    if accession:
-        clean = accession.replace("-", "")
-        return f"https://www.sec.gov/Archives/edgar/data/{file_num}/{clean}/{accession}-index.htm" if file_num else \
-               f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&accession={accession}"
-    return source.get("file_url") or source.get("url")
 
 
 async def _get_macro_series(arguments: dict) -> list[mcp.types.TextContent]:
