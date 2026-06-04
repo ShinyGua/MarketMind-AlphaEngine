@@ -2,7 +2,7 @@
 
 ## Description
 
-Execute the complete MarketMind equity research pipeline for a company workspace. Runs 14 stages mostly autonomously, with a single pause at stage 13 (`user_review`) to collect user feedback. Produces a final research report with BUY/HOLD/SELL decision, then runs evaluation and long-term memory updates.
+Execute the complete MarketMind equity research pipeline for a company workspace. Runs 15 stages mostly autonomously, with a single pause at stage 14 (`user_review`) to collect user feedback. Produces a final research report with BUY/HOLD/SELL decision, then runs evaluation and long-term memory updates.
 
 ## Arguments
 
@@ -95,7 +95,7 @@ In this fallback mode, the orchestrator itself will write TodoWrite after each s
 1. Read `.claude/skills/mm-orchestrator/SKILL.md` — this is your complete instruction set
 2. Follow its IRON LAW and Execution Protocol for workspace `{WORKSPACE_PATH}`
 3. Use `.venv/bin/python3` for all Python commands
-4. Execute ALL 14 stages sequentially (stage 13 pauses for user review; all others run autonomously)
+4. Execute ALL 15 stages sequentially (stage 14 pauses for user review; all others run autonomously)
 5. After each stage: update `{WORKSPACE_PATH}/status.json`, then immediately do the next stage
 6. Dispatch sub-skills via Agent tool (for parallel stages like collect and discuss_memos)
 

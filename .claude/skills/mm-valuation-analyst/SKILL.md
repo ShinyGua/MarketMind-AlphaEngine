@@ -26,12 +26,18 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 ## Inputs
 
+- `{workspace}/valuation/{date}/valuation_summary.json` — **primary input**: computed DCF intrinsic-value range (bull/base/bear), margin of safety, verdict, peer comps benchmarks (quartiles + company percentile), WACC and assumptions, confidence flag
+- `{workspace}/valuation/{date}/comps.csv` — per-name peer multiples table (optional detail)
 - `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — price data, returns
 - `{workspace}/profile/company_profile.json` — market cap, sector (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, valuation, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+
+**The valuation engine has already done the math.** Your job is to *interpret* `valuation_summary.json`, not recompute it. Build your thesis from its numbers (intrinsic range, margin of safety, comps percentile). WebSearch is now an **optional cross-check** only — use it to sanity-check the computed multiples or add consensus-estimate color, never as the primary source.
+
+**If the summary is `applicable: false`** (ETF/fund) or `confidence: "low"` (sparse data), say so plainly and lean on relative/comps signals or qualitative judgment instead of overstating a thin DCF.
 
 ## Behavior Modes
 
@@ -39,7 +45,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 Write to: `{workspace}/discussion/{date}/analyst_memos/valuation_analyst.md`
 
-Use WebSearch to look up current valuation metrics: `"{TICKER} P/E ratio forward earnings valuation"`.
+Read `valuation_summary.json` first and anchor every claim to its computed figures.
 
 The memo MUST contain:
 
@@ -47,25 +53,27 @@ The memo MUST contain:
 # Valuation Analysis
 
 ## Core Valuation View
-<Is the stock cheap, fair, or expensive at current levels? 1-2 paragraph thesis.>
+<Cheap, fair, or expensive at the current price? State the engine's `verdict` and `margin_of_safety` up front, then a 1-2 paragraph thesis. e.g. "Base-case DCF intrinsic value ~$X vs price $Y → margin of safety Z% (verdict: expensive)." Note the engine `confidence`.>
 
-## Valuation Metrics
-- Forward P/E: XX.Xx (vs sector median XX.Xx)
-- EV/Revenue: XX.Xx
-- PEG Ratio: XX.Xx (if available)
-<Compare to historical range and peers>
+## Intrinsic Value (DCF)
+- Intrinsic range: bear $X / base $Y / bull $Z  (from `intrinsic_range`)
+- WACC: X.X% · terminal growth: X.X% · base FCFF growth: X.X%  (from `dcf`)
+- Margin of safety vs price: Z%
+<Comment on whether the base case looks conservative or aggressive; flag if `tv_fraction_in_band` is false (terminal value carrying too much of the EV).>
 
-## Peer Valuation Comparison
-<How does the valuation stack up vs direct peers? Is the premium/discount justified?>
+## Peer Comps
+- EV/EBITDA: company X.Xx vs peer median Y.Yx (company at the Pth percentile)
+- Forward P/E: company X.Xx vs peer median Y.Yx
+<From `comps` benchmarks. Is the premium/discount to peers justified by growth/margins? Reference `comps_implied_value` if present.>
 
 ## Price Target Logic
-<If you were setting a price target, what would it be and why? Show the math or framework.>
+<Anchor to the DCF base case and/or the peer-median implied value. State the number and which method drives it.>
 
 ## Valuation Risk
-<What valuation scenario would make this stock a sell? At what multiple does it become dangerous?>
+<What scenario flips the verdict? Use the bear-case intrinsic value and the sensitivity to WACC / terminal growth. At what multiple or growth does it become a clear sell (or clear buy)?>
 
 ## Biggest Uncertainty
-<The single biggest unknown affecting fair value>
+<The single biggest unknown affecting fair value — often the growth or margin assumption the DCF is most sensitive to.>
 
 ## Time Horizon Judgment
 <Does the valuation thesis favor short-term trading or long-term holding?>
@@ -83,7 +91,8 @@ Each critique must include: valuation perspective on the other analyst's thesis 
 
 ## Quality Rules
 
-- Always reference specific multiples and numbers, not vague "expensive" or "cheap"
-- Compare to both sector median and the stock's own historical range
-- The price target must have explicit reasoning, not just a number
-- If valuation data is unavailable via WebSearch, note the gap honestly
+- Anchor to `valuation_summary.json` — quote its intrinsic range, margin of safety, and comps percentiles. Do not invent numbers or substitute WebSearch figures for the computed ones.
+- Always reference specific multiples and numbers, not vague "expensive" or "cheap".
+- The price target must have explicit reasoning tied to the DCF base case or peer-median implied value, not just a number.
+- Honestly flag low confidence, `applicable: false`, or `tv_fraction_in_band: false` rather than overstating a thin or fragile model.
+- A negative margin of safety is a genuine sell signal — state it plainly; do not soften an expensive verdict.

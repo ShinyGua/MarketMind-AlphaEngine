@@ -16,6 +16,7 @@ from shared.contracts import (
     regression_flag_path as _regression_flag_path,
     user_review_path as _user_review_path,
     grader_result_path,
+    valuation_summary_path as _valuation_summary_path,
 )
 
 
@@ -47,7 +48,9 @@ def finalize(workspace: str, date: str) -> dict:
     factuality = load_json(grader_result_path(ws, date, "factuality"))
     evidence = load_json(grader_result_path(ws, date, "evidence"))
     consistency = load_json(grader_result_path(ws, date, "consistency"))
+    valuation_grade = load_json(grader_result_path(ws, date, "valuation"))
     cost = load_json(grader_result_path(ws, date, "cost"))
+    valuation_summary = load_json(_valuation_summary_path(ws, date))
 
     # 5. Read status.json
     status_path = ws / "status.json"
@@ -113,6 +116,13 @@ def finalize(workspace: str, date: str) -> dict:
             "thesis_lean": consistency.get("thesis_lean"),
             "confidence_calibration": consistency.get("confidence_calibration"),
         }
+    if valuation_grade is not None:
+        graders["valuation"] = {
+            "pass": valuation_grade.get("pass"),
+            "applicable": valuation_grade.get("applicable"),
+            "confidence": valuation_grade.get("confidence"),
+            "warnings": len(valuation_grade.get("warnings", [])),
+        }
     if cost is not None:
         graders["cost"] = {
             "estimated_total_tokens": cost.get("estimated_total_tokens"),
@@ -159,6 +169,13 @@ def finalize(workspace: str, date: str) -> dict:
         "final_review_scores": final_scores,
         "decision": decision_label,
         "confidence": confidence,
+        "valuation": {
+            "verdict": (valuation_summary or {}).get("verdict"),
+            "margin_of_safety": (valuation_summary or {}).get("margin_of_safety"),
+            "intrinsic_value_base": (valuation_summary or {}).get("intrinsic_value_base"),
+            "applicable": (valuation_summary or {}).get("applicable"),
+            "confidence": (valuation_summary or {}).get("confidence"),
+        } if valuation_summary else None,
         "graders": graders,
         "all_graders_pass": all_graders_pass,
         "release_status": release_status,

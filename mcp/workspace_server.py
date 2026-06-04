@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.contracts import (  # noqa: E402
     STAGES,
     evidence_digest_path, shared_context_path, quant_summary_path,
+    valuation_summary_path,
     thesis_map_path, decision_path, memory_context_path, detect_final_report,
 )
 
@@ -62,7 +63,7 @@ def _dates_for_ticker(ticker: str) -> list[str]:
     """Return sorted YYYY-MM-DD dates present under any subdirectory."""
     base = WORKSPACES_DIR / ticker
     dates: set[str] = set()
-    for sub in ("raw", "normalized", "quant", "discussion", "drafts",
+    for sub in ("raw", "normalized", "quant", "valuation", "discussion", "drafts",
                 "reviews", "decision", "final", "exports", "eval"):
         d = base / sub
         if d.is_dir():
@@ -109,6 +110,7 @@ _DATE_ARTIFACT_MAP = {
     "shared_context.json":  lambda t, d: shared_context_path(WORKSPACES_DIR / t, d),
     "evidence_digest.json": lambda t, d: evidence_digest_path(WORKSPACES_DIR / t, d),
     "quant_summary.json":   lambda t, d: quant_summary_path(WORKSPACES_DIR / t, d),
+    "valuation_summary.json": lambda t, d: valuation_summary_path(WORKSPACES_DIR / t, d),
     "thesis_map.json":      lambda t, d: thesis_map_path(WORKSPACES_DIR / t, d),
     "final_decision.json":  lambda t, d: decision_path(WORKSPACES_DIR / t, d),
 }
@@ -251,8 +253,9 @@ def _tool_create_date_dirs(args: dict) -> dict:
     dirs = [
         f"raw/{date}/news", f"raw/{date}/filings", f"raw/{date}/prices",
         f"raw/{date}/ownership", f"raw/{date}/calendar",
+        f"raw/{date}/fundamentals/peers",
         f"normalized/{date}/evidence_cards", f"normalized/{date}/time_series",
-        f"normalized/{date}/tables", f"quant/{date}",
+        f"normalized/{date}/tables", f"quant/{date}", f"valuation/{date}",
         f"discussion/{date}/analyst_memos", f"discussion/{date}/debate/round_1",
         f"drafts/{date}", f"reviews/{date}/final_reviews",
         f"reviews/{date}/revision_briefs", f"decision/{date}", f"final/{date}",

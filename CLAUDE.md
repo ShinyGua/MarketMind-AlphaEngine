@@ -7,6 +7,7 @@ Automated equity research system that generates daily and weekly stock analysis 
 You are MarketMind-AlphaEngine, a multi-agent research pipeline that:
 - Collects market, sector, and company data from free public APIs
 - Runs lightweight quantitative analysis (technical indicators, relative strength)
+- Computes a quantitative valuation (scenario DCF, peer comps, margin of safety)
 - Conducts structured multi-analyst discussion to form a thesis
 - Writes institutional-quality research reports
 - Reviews reports against quality thresholds with iterative revision
@@ -48,7 +49,7 @@ The system will ask which company to analyze, verify via web search, and create 
 /mm:run workspaces/NVDA
 ```
 
-This launches the autonomous pipeline — it runs all 14 stages continuously, tracking progress via TodoWrite. Stage 13 (user_review) pauses to collect user feedback; all other stages run autonomously. The final stage (reflect) runs code-based graders, produces a release gate verdict, and writes long-term memories including user feedback. If interrupted, re-run the same command to resume.
+This launches the autonomous pipeline — it runs all 15 stages continuously, tracking progress via TodoWrite. The `user_review` stage pauses to collect user feedback; all other stages run autonomously. The final stage (reflect) runs code-based graders, produces a release gate verdict, and writes long-term memories including user feedback. If interrupted, re-run the same command to resume.
 
 ### Check Status
 
@@ -64,7 +65,7 @@ Shows all workspaces and their pipeline progress.
 
 ```text
 resolve_config → init_workspace → collect(parallel) → normalize
-    → quant → discuss → draft → review_loop → decide → export → reflect
+    → quant → valuation → discuss → draft → review_loop → decide → export → reflect
 ```
 
 ### Stage 0: Resolve Config
@@ -98,7 +99,15 @@ Run these desks in parallel:
 - Relative strength vs index, sector, peers
 - Output: `quant/{date}/technical_indicators.csv`, `quant/{date}/quant_summary.json`
 
-### Stage 5: Multi-Analyst Discussion (Debate Loop)
+### Stage 5: Valuation (Scenario DCF + Comps)
+- **mm-valuation-engine** runs the formula-first engine in `valuation/` (`dcf.py`, `comps.py`, `run_valuation.py`)
+- Inputs: yfinance fundamentals collected by the company desk (`raw/{date}/fundamentals/`), via the `get_fundamentals` MCP tool
+- Computes a bull/base/bear **DCF** (CAPM WACC, Gordon terminal value, odd-dimension WACC×terminal-growth sensitivity grid whose center cell equals the base case), peer **comps** with quartile benchmarking, and a **margin of safety** vs the current price → verdict cheap/fair/expensive
+- Free-tier and self-degrading: ETFs/funds → `applicable: false`; sparse data → `confidence: "low"` with an `inputs_missing` list (never aborts the pipeline)
+- Output: `valuation/{date}/valuation_summary.json`, `valuation/{date}/comps.csv`, `valuation/{date}/dcf_sensitivity.csv`
+- Consumed downstream by mm-valuation-analyst, mm-decision-maker (margin of safety → conviction), and mm-report-writer (Valuation section)
+
+### Stage 6: Multi-Analyst Discussion (Debate Loop)
 
 Follows a structured debate protocol inspired by multi-agent collaboration:
 
@@ -126,27 +135,27 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
   - `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases, key risks, unsupported claims, writer guidance
   - `discussion/{date}/debate_summary.md` — human-readable summary of where analysts agreed and disagreed, and why
 
-### Stage 6: Draft Report
+### Stage 7: Draft Report
 - **mm-report-writer** generates daily or weekly report from:
   - Evidence cards, quant summary, thesis map, company profile
 
-### Stage 7: Review Loop
+### Stage 8: Review Loop
 - **mm-report-reviewer** scores on: factuality, evidence_coverage, decision_quality
 - If score < threshold → generate `revision_brief.json` → writer rewrites targeted sections
 - Max loops defined in config (default: 3)
 
-### Stage 8: Investment Decision
+### Stage 9: Investment Decision
 - **mm-decision-maker** produces `final_decision.json`:
   - BUY / HOLD / SELL label
   - Confidence score
   - Top reasons, key risks, disconfirming signals
 
-### Stage 9: Export
+### Stage 10: Export
 - Write final markdown report to `final/`
 - Write structured JSON report to `final/`
 - (Future: PDF and web PPT export)
 
-### Stage 10: Reflect (Non-Critical)
+### Stage 11: Reflect (Non-Critical)
 - Run code-based graders (factuality, evidence coverage, consistency, cost)
 - Finalize run log entry (`logs/run_log.jsonl`)
 - **mm-memory-writer** extracts and stores episodic/semantic/procedural memories
@@ -181,6 +190,7 @@ workspaces/
       news/
       filings/
       prices/
+      fundamentals/             # company + peers/ valuation inputs (yfinance)
       ownership/
       calendar/
 
@@ -193,6 +203,11 @@ workspaces/
       technical_indicators.csv
       relative_strength.csv
       quant_summary.json
+
+    valuation/{YYYY-MM-DD}/      # Date-stamped valuation (DCF + comps)
+      valuation_summary.json
+      comps.csv
+      dcf_sensitivity.csv
 
     discussion/{YYYY-MM-DD}/     # Date-stamped analyst discussion
       analyst_memos/
@@ -281,6 +296,7 @@ All inter-stage data exchange uses JSON files written to the workspace. Key sche
 
 - **Evidence Card**: `normalized/{date}/evidence_cards/*.json` — standardized source items with scores
 - **Quant Summary**: `quant/{date}/quant_summary.json` — technical indicators and flags
+- **Valuation Summary**: `valuation/{date}/valuation_summary.json` — DCF intrinsic range, margin of safety, verdict, comps, confidence
 - **Thesis Map**: `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases
 - **Review Output**: `reviews/{date}/final_reviews/*.json` — pass/fail, dimension scores, rewrite actions
 - **Final Decision**: `decision/{date}/final_decision.json` — BUY/HOLD/SELL with evidence
@@ -295,7 +311,7 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 |------|-------|----------|
 | mm-heavy | claude-opus-4-6 | Orchestration, discussion moderation, review, decision |
 | mm-standard | claude-opus-4-6 | Company resolution, report writing, analyst memos |
-| mm-light | claude-sonnet-4-6 | Data collection desks, quant computation |
+| mm-light | claude-sonnet-4-6 | Data collection desks, quant + valuation computation |
 
 ---
 
@@ -312,14 +328,15 @@ Wraps all external data source calls with rate limiting and fallback logic.
 | `get_news` | NewsAPI | News articles (falls back to WebSearch) |
 | `get_filings` | SEC EDGAR | Company SEC filings |
 | `get_macro_series` | FRED | Macro time series data |
-| `get_company_info` | yfinance | Company profile and fundamentals |
+| `get_company_info` | yfinance | Company profile (sector, industry, market cap) |
+| `get_fundamentals` | yfinance | Valuation ratios + financial statements (for DCF/comps) |
 | `get_earnings_calendar` | yfinance | Upcoming earnings dates |
 
 ### workspace-mcp (`mcp/workspace_server.py`)
 Manages workspace artifact I/O with path-traversal protection.
 
 **Tools**: `write_artifact`, `update_status`, `create_workspace`, `create_date_dirs`
-**Resources**: `workspace://{ticker}/{path}` — URI-addressable workspace files (profile, quant, evidence, thesis_map, decision)
+**Resources**: `workspace://{ticker}/{path}` — URI-addressable workspace files (profile, quant, valuation, evidence, thesis_map, decision)
 **Prompts**: `pipeline_status_summary`, `workspace_overview`
 
 ### memory-mcp (`mcp/memory_server.py`)
@@ -345,12 +362,9 @@ Cross-run memory system with three types stored as JSONL under `memory/`:
 
 **Storage**: `memory/{type}/index.jsonl` — append-only, one JSON line per memory unit
 
-**Retrieval**: `memory/retrieval.py` scores memories by `importance x confidence x recency_decay(days)` and returns top-k. Injected at three points:
-- Before analyst memos (Stage 6): episodic + semantic for ticker/sector
-- Before report writing (Stage 9): procedural + recent episodic
-- Before review (Stage 10): procedural only
+**Retrieval**: `memory/retrieval.py` scores memories by `importance x confidence x recency_decay(days)` and returns top-k. Injected before analyst memos (episodic + semantic for ticker/sector), report writing (procedural + recent episodic), and review (procedural only).
 
-**Memory writer**: `mm-memory-writer` skill runs in Stage 14 (reflect) to extract memories from completed pipeline runs, including user review feedback from Stage 13.
+**Memory writer**: `mm-memory-writer` skill runs in the final reflect stage to extract memories from completed pipeline runs, including user review feedback from the user-review stage.
 
 ---
 
@@ -362,9 +376,10 @@ Automated evaluation pipeline under `eval/`:
 
 | Grader | What It Checks |
 |--------|---------------|
-| `factuality_grader.py` | Report numbers match quant_summary.json |
+| `factuality_grader.py` | Report numbers match quant_summary.json + valuation_summary.json |
 | `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
 | `consistency_grader.py` | Decision aligns with thesis_map consensus |
+| `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety) |
 | `cost_tracker.py` | Token/cost estimation per run |
 
 ### Run Log
@@ -414,6 +429,7 @@ When memory context is loaded, it supplements (not replaces) current evidence. T
 | mm-company-desk | mm-light | No | Company news + filings + catalysts |
 | mm-sector-desk | mm-light | No | Sector news + peer data |
 | mm-quant-analyst | mm-light | No | Technical indicator computation |
+| mm-valuation-engine | mm-light | No | Scenario DCF + comps + margin of safety (runs `valuation/`) |
 | mm-market-analyst | mm-standard | No | Market environment analysis memo |
 | mm-company-analyst | mm-standard | No | Company fundamentals analysis memo |
 | mm-risk-analyst | mm-standard | No | Risk identification memo |

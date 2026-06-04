@@ -34,7 +34,7 @@ def evaluate(workspace: Path, date: str) -> dict:
     """Run release gate logic. Returns the gate result dict."""
 
     # Gate graders participate in pass/fail logic
-    gate_graders = ["factuality", "evidence", "consistency"]
+    gate_graders = ["factuality", "evidence", "consistency", "valuation"]
     # Metric-only graders provide info but don't affect release status
     metric_graders = ["cost"]
 
@@ -59,7 +59,7 @@ def evaluate(workspace: Path, date: str) -> dict:
 
     # Determine release status
     critical_graders = ["factuality", "evidence"]
-    advisory_graders = ["consistency"]
+    advisory_graders = ["consistency", "valuation"]
 
     critical_fail = any(summary.get(g) == "fail" for g in critical_graders)
     advisory_fail = any(summary.get(g) == "fail" for g in advisory_graders)
@@ -139,6 +139,11 @@ def _extract_key_metric(name: str, result: dict):
         ) else str(result.get("coverage_ratio", "?"))
     if name == "consistency":
         return f"decision={result.get('decision', '?')}, lean={result.get('thesis_lean', '?')}"
+    if name == "valuation":
+        if result.get("applicable") is False:
+            return "n/a (non-equity)"
+        nwarn = len(result.get("warnings", []))
+        return f"{'pass' if result.get('pass') else 'fail'}, conf={result.get('confidence', '?')}, {nwarn} warn"
     if name == "cost":
         tokens = result.get("estimated_total_tokens", "?")
         cost = result.get("estimated_cost_usd", "?")

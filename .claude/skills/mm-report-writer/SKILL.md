@@ -31,7 +31,7 @@ Mode: $ARGUMENTS[2] (optional — "initial" for first draft, "revision" for targ
 
 For initial mode, read `workspace://{TICKER}/{date}/draft_packet` via MCP resource. This returns:
 - `evidence_digest` — all evidence cards in one object
-- `shared_context` — quant, profile, peers, catalysts
+- `shared_context` — quant, valuation, profile, peers, catalysts
 - `thesis_map` — debate synthesis (consensus, disagreements, writer_guidance)
 - `debate_summary` — human-readable debate summary
 - `memory_context` — procedural memories (known pitfalls) + episodic memories (prior decisions), or null
@@ -71,6 +71,9 @@ Write to: `{workspace}/drafts/{date}/daily_v1.md`
 
 ## Price Action & Technical Snapshot
 <Current price, returns (1d/5d/1m/3m), key technical levels, RSI, MACD status, volume. Reference quant_summary.json directly.>
+
+## Valuation
+<From `shared_context.valuation` (valuation_summary.json). State the verdict (cheap/fair/expensive) and margin of safety vs the current price. Give the DCF intrinsic range (bear/base/bull) with the WACC and terminal growth used, and a short comps line (company EV/EBITDA and forward P/E vs peer median + percentile). If valuation is `applicable: false` (ETF/fund) or `confidence: "low"`, say so in one line instead of forcing a number. Do not invent figures — use only what the summary provides.>
 
 ## Sector & Peers
 <How the company performed vs sector and peers. Any notable peer developments.>
@@ -120,5 +123,6 @@ Write the revised draft to `{workspace}/drafts/{date}/` with an incremented vers
 - Do not fabricate data or events not present in evidence cards
 - Do not ignore writer_guidance from thesis_map.json — it contains debate-tested instructions
 - Reference specific numbers from quant_summary.json, not approximations
+- Valuation figures (intrinsic range, margin of safety, multiples) must come from valuation_summary.json — never fabricate or WebSearch them; if it is not applicable / low confidence, state that plainly
 - If the debate showed a fundamental disagreement, present both sides
 - Catalyst dates must be accurate as per catalysts.json

@@ -17,8 +17,23 @@ def load_json(path: Path):
         return None
 
 
-def determine_thesis_lean(disagreements: list[dict]) -> str:
-    """Count bull vs bear evidence_balance across disagreements to determine overall lean."""
+def determine_thesis_lean(thesis: dict) -> str:
+    """Determine the thesis's overall directional lean.
+
+    Prefers the moderator's authoritative ``net_directional_lean`` field when
+    present; otherwise falls back to counting ``evidence_balance`` across
+    disagreements. Returns one of "bull", "bear", "mixed".
+    """
+    net_lean = str(thesis.get("net_directional_lean", "")).lower().strip()
+    if net_lean in ("bullish", "bull"):
+        return "bull"
+    if net_lean in ("bearish", "bear"):
+        return "bear"
+    if net_lean in ("neutral", "mixed", "even"):
+        return "mixed"
+
+    # Fallback: count bull vs bear evidence_balance across disagreements.
+    disagreements = thesis.get("disagreements", [])
     bull_count = 0
     bear_count = 0
     for d in disagreements:
@@ -45,8 +60,13 @@ def check_decision_alignment(decision_label: str, thesis_lean: str) -> tuple[boo
     decision_label = decision_label.upper()
 
     if decision_label == "HOLD":
-        # HOLD is always consistent with any evidence
-        return True, "HOLD is consistent with any evidence lean"
+        # HOLD never hard-fails (the grader cannot judge lean *strength*
+        # deterministically — that is the reviewer's job), but a HOLD that
+        # diverges from an explicit directional lean is surfaced as a note so
+        # it is not silently rubber-stamped.
+        if thesis_lean in ("bull", "bear"):
+            return True, f"NOTE: HOLD diverges from {thesis_lean} thesis lean — confirm it is not bias-driven HOLD-defaulting"
+        return True, "HOLD is consistent with balanced/mixed evidence lean"
 
     if thesis_lean == "mixed":
         # Mixed evidence is consistent with any decision
@@ -137,9 +157,8 @@ def grade(workspace: str, date: str) -> dict:
 
     result["decision"] = decision_label
 
-    # Determine thesis lean from disagreements
-    disagreements = thesis.get("disagreements", [])
-    thesis_lean = determine_thesis_lean(disagreements)
+    # Determine thesis lean (prefers net_directional_lean, falls back to disagreements)
+    thesis_lean = determine_thesis_lean(thesis)
     result["thesis_lean"] = thesis_lean
 
     # Check decision-thesis alignment

@@ -175,7 +175,7 @@ Call the Skill tool with exactly these parameters:
 
 `/mm:run` handles progress monitor setup, ownership coordination, and pipeline execution. Bypassing it causes the progress checklist to not appear.
 
-The user does not need to type `/mm:run` separately. The pipeline runs 14 stages: stages 1-12 execute autonomously, stage 13 (`user_review`) pauses to collect user feedback on the report, then stage 14 (`reflect`) runs eval and memory.
+The user does not need to type `/mm:run` separately. The pipeline runs 15 stages: stages 1-13 execute autonomously, stage 14 (`user_review`) pauses to collect user feedback on the report, then stage 15 (`reflect`) runs eval and memory.
 
 **Note:** This skill's behavior must match `plugin/commands/init.md` exactly. If the init command flow changes, update both files.
 

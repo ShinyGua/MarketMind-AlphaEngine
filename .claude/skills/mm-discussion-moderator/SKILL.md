@@ -130,6 +130,15 @@ For claims that were flagged as "unsupported" in critiques:
 - Is the evidence from a reliable source?
 - Is the claim still standing or effectively rebutted?
 
+### 5b. Determine Net Directional Lean
+
+After mapping consensus and disagreements, state a single **net evidence-weighted lean** for the whole debate:
+- `bullish` — the strongest_bull_case out-evidences the strongest_bear_case
+- `bearish` — the strongest_bear_case out-evidences the strongest_bull_case (this is a real, common outcome — do not avoid it)
+- `neutral` — the two sides are genuinely balanced after weighing by evidence quality
+
+`neutral` is reserved for genuine balance, **not** for "there was disagreement" or "the debate didn't resolve." A debate where one side is clearly better-evidenced is bullish or bearish even if no single disagreement was settled cleanly. This lean is the decision-maker's primary directional input, so an unresolved-but-net-bearish debate must be coded `bearish`, not laundered into `neutral`.
+
 ### 6. Produce thesis_map.json
 
 Write to: `{workspace}/discussion/thesis_map.json`
@@ -164,7 +173,9 @@ Write to: `{workspace}/discussion/thesis_map.json`
     "<specific instruction for the report writer based on debate conclusions>"
   ],
   "debate_quality_score": 8.0,
-  "dominant_time_horizon": "short_term|swing|long_term"
+  "dominant_time_horizon": "short_term|swing|long_term",
+  "net_directional_lean": "bullish|bearish|neutral",
+  "net_lean_rationale": "<one sentence: which side carried more evidence-weighted argument, and why>"
 }
 ```
 
@@ -204,6 +215,7 @@ Write to: `{workspace}/discussion/debate_summary.md`
 
 - Never suppress minority views — if one analyst has a strong dissenting position, it must appear in the output
 - Weight arguments by evidence quality, not by how many analysts hold a view
+- Code each disagreement's `evidence_balance` by which side is better-evidenced. "even" means the evidence is genuinely two-sided — never use it as a synonym for "unresolved" or "the analysts didn't agree." If one side has the stronger evidence, code it `bull` or `bear`. The same discipline applies to `net_directional_lean`
 - Flag any claim that was scored below 5 in debate critiques
 - The writer_guidance must be actionable — "be balanced" is too vague; "address the valuation concern raised by risk analyst with specific P/E data" is useful
 - Validate quantitative claims against quant_summary.json — flag any that don't match
