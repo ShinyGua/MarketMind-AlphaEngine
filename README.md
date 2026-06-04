@@ -4,7 +4,7 @@
     <strong>Multi-Agent Equity Research System with Investment Bank Style Reports</strong>
   </p>
   <p align="center">
-    Automated daily & weekly stock analysis · Multi-analyst debate · BUY/HOLD/SELL decisions · JPM-style PDF reports
+    Automated daily & weekly stock analysis · Multi-analyst debate · Scenario DCF + comps valuation · BUY/HOLD/SELL decisions · JPM-style PDF reports
   </p>
 </p>
 
@@ -36,6 +36,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 ### What Makes It Different?
 
 - **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then a moderator identifies disagreements and assigns targeted cross-critique pairs to produce a balanced thesis through structured debate rather than a single-agent summary
+- **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety** that anchors the BUY/HOLD/SELL decision to price-vs-value — not just momentum and news
 - **Investment-Bank-Style PDF**: Generates JPM-style research reports with annotated charts, narrative paragraphs, visual hierarchy, and professional typography via LaTeX
 - **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
@@ -106,7 +107,7 @@ export NEWSAPI_API_KEY="your_newsapi_key"
 
 ```text
 /mm:init                          # Create a new company workspace (interactive)
-/mm:run workspaces/NVDA           # Run the full 14-stage research pipeline
+/mm:run workspaces/NVDA           # Run the full 15-stage research pipeline
 /mm:status                        # Check all workspace statuses
 ```
 
@@ -149,6 +150,9 @@ The `/mm:init` flow:
 |  Quant snapshot                                                      |
 |       | RSI, MACD, SMA, ATR, relative strength                       |
 |       v                                                              |
+|  Valuation (scenario DCF + comps)                                    |
+|       | intrinsic-value range, margin of safety, verdict            |
+|       v                                                              |
 |  Discussion loop                                                     |
 |       |-- Independent analyst memos (parallel)                       |
 |       |-- Moderator selects critique pairs                           |
@@ -187,6 +191,7 @@ The `/mm:init` flow:
 |-------|--------------|--------|
 | **Collect** | Macro, company, and sector data from yfinance, NewsAPI, and EDGAR | 3 desks in parallel |
 | **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python | `mm-quant-analyst` |
+| **Valuation** | Scenario DCF + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
 | **Debate** | Independent memos, moderator-assigned critique pairs, and targeted debate | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
@@ -202,7 +207,7 @@ The `/mm:init` flow:
 | 1 | `company_analyst` | Fundamentals, company events, catalysts | ✓ |
 | 2 | `risk_analyst` | Bear case, downside risks, failure conditions | ✓ |
 | 3 | `market_analyst` | Macro context, sector positioning, alpha vs beta | ✓ |
-| 4 | `valuation_analyst` | P/E, DCF, valuation framework, price target | |
+| 4 | `valuation_analyst` | Interprets the valuation engine's DCF range, comps, and margin of safety | |
 | 5 | `technical_analyst` | Chart patterns, momentum, trading signals | |
 | 6 | `catalyst_analyst` | Event timing, earnings calendar, near-term catalysts | |
 
@@ -216,13 +221,14 @@ Enable additional analysts by uncommenting roles in `config.yaml`.
 MarketMind-AlphaEngine/
 ├── .claude/
 │   ├── agents/                    # Model tier definitions (heavy/standard/light)
-│   └── skills/                    # 20 agent skills
+│   └── skills/                    # 21 agent skills
 │       ├── mm-orchestrator/       # Pipeline driver (iron law: never stop)
 │       ├── mm-company-resolver/   # Ticker -> profile + peers
 │       ├── mm-market-desk/        # Macro data collection
-│       ├── mm-company-desk/       # Company news + filings
+│       ├── mm-company-desk/       # Company news + filings + fundamentals
 │       ├── mm-sector-desk/        # Sector + peer data
 │       ├── mm-quant-analyst/      # Technical indicator computation
+│       ├── mm-valuation-engine/   # Scenario DCF + comps + margin of safety
 │       ├── mm-market-analyst/     # Market environment analysis
 │       ├── mm-company-analyst/    # Company fundamentals analysis
 │       ├── mm-risk-analyst/       # Risk identification + counter-arguments
@@ -242,16 +248,21 @@ MarketMind-AlphaEngine/
 │   └── commands/                  # User-facing commands (/mm:init, /mm:run, /mm:status)
 ├── .mcp.json                      # MCP server registration for Claude Code
 ├── mcp/                           # MCP servers (market-data, workspace, memory)
-│   ├── market_data_server.py
+│   ├── market_data_server.py      # incl. get_fundamentals (DCF/comps inputs)
 │   ├── workspace_server.py
 │   ├── memory_server.py
 │   └── shared/
 │       ├── contracts.py           # Single source of truth (stages, paths, naming)
 │       ├── schemas.py
 │       └── rate_limiter.py
+├── valuation/                     # Formula-first valuation engine
+│   ├── dcf.py                     # WACC, FCFF projection, terminal value, sensitivity grid
+│   ├── comps.py                   # Peer multiples + quartile benchmarking
+│   ├── run_valuation.py           # Stage runner -> valuation_summary.json
+│   └── tests/                     # Unit tests (pytest)
 ├── memory/                        # Long-term memory store (episodic/semantic/procedural)
 ├── eval/                          # Evaluation pipeline (graders, run log, metrics)
-│   ├── graders/                   # Factuality, evidence, consistency, cost graders
+│   ├── graders/                   # Factuality, evidence, consistency, valuation, cost graders
 │   ├── release_gate.py            # Deterministic pass/warning/failed verdict
 │   ├── stage_timer.py             # Stage start/end timestamp recorder
 │   ├── finalize_run.py            # Assembles run log entry from all artifacts
@@ -278,9 +289,10 @@ MarketMind-AlphaEngine/
 ```text
 workspaces/NVDA/
 ├── profile/                       # Static company reference (undated)
-├── raw/{YYYY-MM-DD}/              # Raw data per trading day
+├── raw/{YYYY-MM-DD}/              # Raw data per trading day (news, prices, fundamentals)
 ├── normalized/{YYYY-MM-DD}/       # Evidence cards
 ├── quant/{YYYY-MM-DD}/            # Technical indicators
+├── valuation/{YYYY-MM-DD}/        # DCF + comps + margin of safety
 ├── discussion/{YYYY-MM-DD}/       # Analyst memos + debate
 ├── drafts/{YYYY-MM-DD}/           # Report drafts
 ├── reviews/{YYYY-MM-DD}/          # Quality scores + revision briefs
@@ -309,6 +321,12 @@ discussion:
     - risk_analyst
     - market_analyst
     # - valuation_analyst    # uncomment to enable
+valuation:                   # scenario DCF + comps (Stage 6)
+  enabled: true
+  equity_risk_premium: 0.05
+  default_terminal_growth: 0.025
+  projection_years: 5
+  scenario_growth_delta: 0.03   # bull/bear offset around the base case
 review:
   min_overall_score: 8.0
   min_factuality: 9.0
@@ -320,7 +338,7 @@ review:
 
 | Source | API Key Required | Used For |
 |--------|:----------------:|----------|
-| yfinance | No | Stock prices, indices, peers, and macro assets |
+| yfinance | No | Stock prices, indices, peers, macro assets, and fundamentals (DCF/comps inputs) |
 | NewsAPI | Optional | Market, sector, and company news (free tier) |
 | SEC EDGAR | No | 10-K, 10-Q, 8-K filings, and insider transactions |
 | FRED | Optional | Macro indicators such as US10Y, USD, and VIX |
@@ -337,6 +355,7 @@ review:
 - [x] **MCP Server Architecture**: 3 MCP servers (market-data, workspace, memory) for structured agent tool access
 - [x] **Long-Term Memory System**: Episodic, semantic, and procedural memory layers across runs
 - [x] **Automated Evaluation Pipeline**: Code-based graders, run log, and aggregated metrics for quality tracking
+- [x] **Quantitative Valuation Engine**: Formula-first scenario DCF + peer comps + margin of safety, with an internal-consistency audit grader, anchoring decisions to price-vs-value
 
 ### TODO
 
