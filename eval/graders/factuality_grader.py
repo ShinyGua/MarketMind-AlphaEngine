@@ -43,6 +43,35 @@ def extract_quant_values(quant: dict) -> list[dict]:
     return entries
 
 
+def extract_valuation_values(val: dict) -> list[dict]:
+    """Flatten valuation_summary.json into checkable entries.
+
+    Only emits entries for an applicable valuation with present numbers, so
+    ETF/fund or sparse runs add no checks (and cannot drag the pass ratio down).
+    """
+    entries = []
+    if not val or not val.get("applicable"):
+        return entries
+
+    base = val.get("intrinsic_value_base")
+    if isinstance(base, (int, float)):
+        entries.append({"field": "intrinsic_value_base", "value": base, "category": "price"})
+
+    rng = val.get("intrinsic_range") or {}
+    for k in ("bear", "bull"):
+        v = rng.get(k)
+        if isinstance(v, (int, float)):
+            entries.append({"field": f"intrinsic_{k}", "value": v, "category": "price"})
+
+    mos = val.get("margin_of_safety")
+    if isinstance(mos, (int, float)):
+        # stored as a fraction (e.g. -0.36); reports state it as a percent (-36%)
+        entries.append({"field": "margin_of_safety", "value": round(mos * 100, 2),
+                        "category": "percentage"})
+
+    return entries
+
+
 def search_price_in_report(text: str, value: float, tolerance: float = 0.5) -> float | None:
     """Search for $XXX.XX patterns and return the closest match within tolerance."""
     matches = re.findall(r"\$\s*([\d,]+\.?\d*)", text)
@@ -123,6 +152,7 @@ def grade(workspace: str, date: str) -> dict:
     ws = Path(workspace)
     report_path = detect_final_report(ws, date)
     quant_path = ws / "quant" / date / "quant_summary.json"
+    valuation_path = ws / "valuation" / date / "valuation_summary.json"
 
     result = {
         "grader": "factuality",
@@ -149,8 +179,13 @@ def grade(workspace: str, date: str) -> dict:
     if report_text is None or quant is None:
         return result
 
+    # quant numbers are mandatory; valuation numbers are additive (skipped when N/A)
     entries = extract_quant_values(quant)
+    entries += extract_valuation_values(load_json(valuation_path))
     result["total_checks"] = len(entries)
+
+    # valuation fields tolerate coarser rounding in prose than quant indicators
+    _VAL_PRICE_FIELDS = {"intrinsic_value_base", "intrinsic_bear", "intrinsic_bull"}
 
     for entry in entries:
         field = entry["field"]
@@ -159,12 +194,15 @@ def grade(workspace: str, date: str) -> dict:
         report_value = None
 
         if category == "price":
+            tol = 1.0 if field in _VAL_PRICE_FIELDS else 0.5
             # Try dollar pattern first, then indicator search
-            report_value = search_price_in_report(report_text, source_value, tolerance=0.5)
+            report_value = search_price_in_report(report_text, source_value, tolerance=tol)
             if report_value is None:
-                report_value = search_indicator_in_report(report_text, field, source_value, tolerance=0.5)
+                report_value = search_indicator_in_report(report_text, field, source_value, tolerance=tol)
         elif category == "percentage":
-            report_value = search_percentage_in_report(report_text, source_value, tolerance=0.1)
+            # margin of safety is often rounded to a whole percent in the report
+            tol = 1.0 if field == "margin_of_safety" else 0.1
+            report_value = search_percentage_in_report(report_text, source_value, tolerance=tol)
         elif category == "indicator":
             report_value = search_indicator_in_report(report_text, field, source_value, tolerance=0.5)
 
