@@ -51,7 +51,7 @@ data = yf.download(tickers, period="6mo", interval="1d", group_by="ticker")
 # Save each ticker's OHLCV to CSV
 ```
 
-Save to `workspaces/shared/market_context/raw/{ticker}_prices.csv`.
+Save to `workspaces/shared/market_context/{date}/raw/{ticker}_prices.csv`.
 
 ### 2. Fetch Macro Asset Prices
 
@@ -64,7 +64,7 @@ macro_assets = ["GLD", "USO", "BTC-USD", "^VIX"]  # from market_context_link.jso
 data = yf.download(macro_assets, period="3mo", interval="1d", group_by="ticker")
 ```
 
-Save to `workspaces/shared/market_context/raw/{asset}_prices.csv`.
+Save to `workspaces/shared/market_context/{date}/raw/{asset}_prices.csv`.
 
 ### 3. Fetch FRED Data (if API key available)
 
@@ -78,7 +78,7 @@ fred = Fred(api_key=os.environ["FRED_API_KEY"])
 us10y = fred.get_series("DGS10", observation_start="<3 months ago>")
 ```
 
-Save to `workspaces/shared/market_context/raw/fred_{series}.csv`.
+Save to `workspaces/shared/market_context/{date}/raw/fred_{series}.csv`.
 
 If FRED is unavailable, skip and log a warning — yfinance VIX and treasury ETFs provide fallback coverage.
 
@@ -94,12 +94,12 @@ url = "https://newsapi.org/v2/top-headlines"
 params = {
     "category": "business",
     "language": config.get("language", "en"),
-    "pageSize": config["news"]["max_market_news"],
+    "pageSize": config["data_sources"]["news"]["max_market_news"],
     "apiKey": os.environ["NEWSAPI_KEY"]
 }
 ```
 
-**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_market_news`. Always enforce: `articles = articles[:config["news"]["max_market_news"]]`.
+**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_market_news`. Always enforce: `articles = articles[:config["data_sources"]["news"]["max_market_news"]]`.
 
 Save raw response to `{workspace}/raw/{date}/news/market_headlines.json`.
 
@@ -136,13 +136,13 @@ Evidence card schema:
 }
 ```
 
-Save to `{workspace}/normalized/evidence_cards/market_*.json`.
+Save to `{workspace}/normalized/{date}/evidence_cards/market_*.json`.
 
 ## Output
 
-- `workspaces/shared/market_context/raw/*.csv` — raw price data (shared across companies)
-- `{workspace}/raw/news/market_headlines.json` — raw news data
-- `{workspace}/normalized/evidence_cards/market_*.json` — evidence cards
+- `workspaces/shared/market_context/{date}/raw/*.csv` — raw price data (shared across companies)
+- `{workspace}/raw/{date}/news/market_headlines.json` — raw news data
+- `{workspace}/normalized/{date}/evidence_cards/market_*.json` — evidence cards
 
 ## Error Handling
 

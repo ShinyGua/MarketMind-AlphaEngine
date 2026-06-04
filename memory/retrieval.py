@@ -101,8 +101,11 @@ def load_memory_config(workspace: Path) -> dict:
         with open(config_path, "r", encoding="utf-8") as fh:
             cfg = json.load(fh)
         mem_cfg = cfg.get("memory", {})
+        # config nests top_k under memory.retrieval.top_k; accept a flat
+        # memory.top_k too for back-compat.
+        retr_cfg = mem_cfg.get("retrieval", {})
         return {
-            "top_k": mem_cfg.get("top_k", defaults["top_k"]),
+            "top_k": retr_cfg.get("top_k", mem_cfg.get("top_k", defaults["top_k"])),
         }
     except (json.JSONDecodeError, OSError):
         return defaults

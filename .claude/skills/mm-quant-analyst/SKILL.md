@@ -38,8 +38,8 @@ Run a single Python script via Bash that computes all indicators. The script mus
 import pandas as pd
 import numpy as np
 
-# Load company price data
-df = pd.read_csv("{workspace}/raw/prices/daily_3mo.csv", index_col=0, parse_dates=True)
+# Load company price data (dated path; the 3mo file holds 6mo for warm-up)
+df = pd.read_csv("{workspace}/raw/{date}/prices/{TICKER}_3mo.csv", index_col=0, parse_dates=True)
 
 # RSI(14)
 delta = df["Close"].diff()
@@ -69,7 +69,7 @@ true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 atr_14 = true_range.rolling(14).mean()
 ```
 
-Save full indicator series to `{workspace}/quant/technical_indicators.csv`.
+Save full indicator series to `{workspace}/quant/{date}/technical_indicators.csv`.
 
 ### 2. Return Windows
 
@@ -89,7 +89,7 @@ Compare company returns to:
 Compute excess return over each benchmark for 5d and 1m windows.
 Rank the company among its peers for the 5d window.
 
-Save to `{workspace}/quant/relative_strength.csv`.
+Save to `{workspace}/quant/{date}/relative_strength.csv`.
 
 ### 4. Generate Flags
 
@@ -148,8 +148,8 @@ The `quant_summary.json` should report values from the **latest row only** — t
 
 ## Output
 
-- `{workspace}/quant/technical_indicators.csv` — full indicator time series
-- `{workspace}/quant/relative_strength.csv` — relative performance table
+- `{workspace}/quant/{date}/technical_indicators.csv` — full indicator time series
+- `{workspace}/quant/{date}/relative_strength.csv` — relative performance table
 - `{workspace}/quant/quant_summary.json` — snapshot for analysts and writer
 
 ## Number Formatting Rules

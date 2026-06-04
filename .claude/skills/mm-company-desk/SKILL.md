@@ -51,7 +51,7 @@ params = {
     "q": "<company_name> OR <ticker>",
     "language": config.get("language", "en"),  # from resolved_config
     "sortBy": "publishedAt",
-    "pageSize": config["news"]["max_company_news"],
+    "pageSize": config["data_sources"]["news"]["max_company_news"],
     "from": "<lookback_date>",
     "apiKey": os.environ["NEWSAPI_KEY"]
 }
@@ -59,7 +59,7 @@ params = {
 
 Lookback window: `news.lookback_hours_daily` (default: 36 hours) for daily mode.
 
-**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_company_news`. Always enforce: `articles = articles[:config["news"]["max_company_news"]]`.
+**Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_company_news`. Always enforce: `articles = articles[:config["data_sources"]["news"]["max_company_news"]]`.
 
 Save raw response to `{workspace}/raw/{date}/news/company_news.json`.
 
@@ -101,7 +101,7 @@ calendar = t.calendar
 earnings_dates = t.earnings_dates
 ```
 
-Save to `{workspace}/raw/calendar/catalysts.json`.
+Save to `{workspace}/raw/{date}/calendar/catalysts.json`.
 
 ### 4. Fetch Stock Price Data
 
@@ -168,7 +168,7 @@ Assess materiality:
 - Routine filings: low-medium (0.3-0.5)
 - General mentions: low (0.1-0.3)
 
-Save to `{workspace}/normalized/evidence_cards/company_*.json`.
+Save to `{workspace}/normalized/{date}/evidence_cards/company_*.json`.
 
 ## Output
 

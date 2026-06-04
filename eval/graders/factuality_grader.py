@@ -32,7 +32,7 @@ def extract_quant_values(quant: dict) -> list[dict]:
 
     tech = quant.get("technical") or {}
     indicator_fields = [
-        "rsi_14", "macd", "macd_signal", "macd_hist",
+        "rsi_14", "macd", "macd_signal", "macd_histogram",
         "sma_20", "sma_50", "ema_12", "ema_26", "atr_14",
     ]
     for field in indicator_fields:
@@ -113,7 +113,7 @@ def search_indicator_in_report(text: str, field: str, value: float, tolerance: f
         "rsi_14": ["RSI", "RSI(14)", "RSI 14"],
         "macd": ["MACD"],
         "macd_signal": ["MACD Signal", "signal line", "MACD signal"],
-        "macd_hist": ["MACD Histogram", "histogram", "MACD hist"],
+        "macd_histogram": ["MACD Histogram", "histogram", "MACD hist"],
         "sma_20": ["SMA(20)", "SMA 20", "SMA20"],
         "sma_50": ["SMA(50)", "SMA 50", "SMA50"],
         "ema_12": ["EMA(12)", "EMA 12", "EMA12"],

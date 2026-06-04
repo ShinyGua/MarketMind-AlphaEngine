@@ -43,7 +43,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 
 Write an independent company analysis memo. Do NOT read other analyst memos.
 
-Write to: `{workspace}/discussion/analyst_memos/company_analyst.md`
+Write to: `{workspace}/discussion/{date}/analyst_memos/company_analyst.md`
 
 The memo MUST contain:
 
