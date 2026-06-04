@@ -1,11 +1,12 @@
 """MarketMind MCP server — wraps all external data source calls.
 
-Exposes six tools over stdio:
+Exposes seven tools over stdio:
   get_price_history   — stock/index prices via yfinance
   get_news            — headlines via NewsAPI
   get_filings         — SEC EDGAR full-text search
   get_macro_series    — FRED economic series
   get_company_info    — company profile via yfinance
+  get_fundamentals    — valuation ratios + financial statements via yfinance
   get_earnings_calendar — earnings dates via yfinance
 """
 
@@ -160,6 +161,21 @@ TOOLS = [
     mcp.types.Tool(
         name="get_company_info",
         description="Fetch company profile (sector, industry, market cap, etc.) via yfinance.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+            },
+            "required": ["ticker"],
+        },
+    ),
+    mcp.types.Tool(
+        name="get_fundamentals",
+        description=(
+            "Fetch valuation ratios (PE, EV/EBITDA, EV/Rev, margins, growth, ROE, "
+            "beta) and recent annual financial statements (revenue, EBIT, D&A, "
+            "capex, tax) for a ticker via yfinance. Used to build DCF and comps."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -504,6 +520,123 @@ async def _get_earnings_calendar(arguments: dict) -> list[mcp.types.TextContent]
     })
 
 
+# ── fundamentals helpers ──────────────────────────────────────────────────
+
+# yfinance statement row labels vary across versions/tickers; try each candidate.
+_STATEMENT_ROWS = {
+    "revenue": ["Total Revenue", "TotalRevenue", "Operating Revenue"],
+    "ebit": ["EBIT", "Operating Income", "OperatingIncome", "Total Operating Income As Reported"],
+    "pretax_income": ["Pretax Income", "PretaxIncome", "Income Before Tax"],
+    "tax_provision": ["Tax Provision", "TaxProvision", "Income Tax Expense"],
+    "net_income": ["Net Income", "NetIncome", "Net Income Common Stockholders"],
+}
+_CASHFLOW_ROWS = {
+    "operating_cash_flow": ["Operating Cash Flow", "Total Cash From Operating Activities",
+                             "Cash Flow From Continuing Operating Activities"],
+    "capex": ["Capital Expenditure", "Capital Expenditures", "Purchase Of PPE"],
+    "dep_amort": ["Depreciation And Amortization", "Depreciation Amortization Depletion",
+                  "Depreciation", "Reconciled Depreciation"],
+}
+
+
+def _extract_rows(df, row_map: dict) -> list[dict]:
+    """Pull the most recent annual columns from a yfinance statement DataFrame.
+
+    Returns a list of per-year dicts, newest first, with the keys in row_map.
+    Missing rows/values come back as None rather than raising.
+    """
+    if df is None or not hasattr(df, "columns") or df.empty:
+        return []
+
+    def find_row(candidates):
+        for name in candidates:
+            if name in df.index:
+                return df.loc[name]
+        return None
+
+    series = {key: find_row(cands) for key, cands in row_map.items()}
+
+    out = []
+    for col in df.columns[:4]:  # most recent up to 4 fiscal years
+        year = col.year if hasattr(col, "year") else str(col)
+        entry = {"period": str(year)}
+        for key, s in series.items():
+            val = None
+            if s is not None:
+                try:
+                    raw = s.get(col)
+                    if raw is not None and not (isinstance(raw, float) and raw != raw):
+                        val = float(raw)
+                except Exception:
+                    val = None
+            entry[key] = val
+        out.append(entry)
+    return out
+
+
+async def _get_fundamentals(arguments: dict) -> list[mcp.types.TextContent]:
+    import yfinance as yf
+
+    ticker = arguments["ticker"]
+
+    await LIMITERS["yfinance"].acquire()
+
+    t = yf.Ticker(ticker)
+    info = t.info or {}
+
+    # Valuation ratios + key metrics straight from .info
+    _INFO_FIELDS = {
+        "quoteType": "quote_type",
+        "currency": "currency",
+        "marketCap": "market_cap",
+        "enterpriseValue": "enterprise_value",
+        "trailingPE": "trailing_pe",
+        "forwardPE": "forward_pe",
+        "priceToBook": "price_to_book",
+        "enterpriseToRevenue": "ev_to_revenue",
+        "enterpriseToEbitda": "ev_to_ebitda",
+        "profitMargins": "profit_margins",
+        "operatingMargins": "operating_margins",
+        "grossMargins": "gross_margins",
+        "revenueGrowth": "revenue_growth",
+        "earningsGrowth": "earnings_growth",
+        "returnOnEquity": "return_on_equity",
+        "freeCashflow": "free_cashflow",
+        "operatingCashflow": "operating_cashflow",
+        "totalCash": "total_cash",
+        "totalDebt": "total_debt",
+        "totalRevenue": "total_revenue",
+        "ebitda": "ebitda",
+        "sharesOutstanding": "shares_outstanding",
+        "beta": "beta",
+        "currentPrice": "current_price",
+    }
+    metrics = {}
+    for yf_key, out_key in _INFO_FIELDS.items():
+        metrics[out_key] = info.get(yf_key)
+
+    # Annual financial statements (best-effort; may be empty for funds/ETFs).
+    income_statement = []
+    cash_flow = []
+    try:
+        income_statement = _extract_rows(t.financials, _STATEMENT_ROWS)
+    except Exception:
+        income_statement = []
+    try:
+        cash_flow = _extract_rows(t.cashflow, _CASHFLOW_ROWS)
+    except Exception:
+        cash_flow = []
+
+    result = {
+        "ticker": ticker,
+        "metrics": metrics,
+        "income_statement": income_statement,  # newest first
+        "cash_flow": cash_flow,                # newest first
+        "metadata": {"source": "yfinance", "fetched_at": _ISO_NOW()},
+    }
+    return _ok(_round_floats(result, 4))
+
+
 # ── dispatcher ──────────────────────────────────────────────────────────
 
 _DISPATCH = {
@@ -512,6 +645,7 @@ _DISPATCH = {
     "get_filings": _get_filings,
     "get_macro_series": _get_macro_series,
     "get_company_info": _get_company_info,
+    "get_fundamentals": _get_fundamentals,
     "get_earnings_calendar": _get_earnings_calendar,
 }
 
