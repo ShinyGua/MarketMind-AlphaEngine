@@ -34,7 +34,7 @@ def evaluate(workspace: Path, date: str) -> dict:
     """Run release gate logic. Returns the gate result dict."""
 
     # Gate graders participate in pass/fail logic
-    gate_graders = ["factuality", "evidence", "consistency", "valuation"]
+    gate_graders = ["factuality", "evidence", "consistency", "valuation", "depth"]
     # Metric-only graders provide info but don't affect release status
     metric_graders = ["cost"]
 
@@ -59,7 +59,7 @@ def evaluate(workspace: Path, date: str) -> dict:
 
     # Determine release status
     critical_graders = ["factuality", "evidence"]
-    advisory_graders = ["consistency", "valuation"]
+    advisory_graders = ["consistency", "valuation", "depth"]
 
     critical_fail = any(summary.get(g) == "fail" for g in critical_graders)
     advisory_fail = any(summary.get(g) == "fail" for g in advisory_graders)

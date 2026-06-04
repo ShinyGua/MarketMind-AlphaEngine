@@ -270,6 +270,12 @@ Dispatch ALL listed analyst skills **in parallel** via Agent tool. For each role
 Example with default 3: mm-company-analyst, mm-risk-analyst, mm-market-analyst
 Example with 6: adds mm-valuation-analyst, mm-technical-analyst, mm-catalyst-analyst
 
+**Depth mandate:** each memo is a full analytical argument — core thesis + 3–5
+distinct supporting points (each its own paragraph with specific numbers and an
+`ev_…` id where relevant) + biggest uncertainty + horizon. A memo of a few
+sentences is incomplete. (Under Codex, run each analyst as a dedicated
+full-`SKILL.md` pass — see `AGENTS.md` "Depth parity".)
+
 Wait for all to complete.
 **Then immediately proceed to stage 8 (cross-critique debate).**
 
@@ -293,6 +299,17 @@ For each round N:
 **Then immediately proceed to stage 9.**
 
 ### 9. discuss_synthesis
+
+**Depth check (anti-shallow, before synthesis):**
+```bash
+.venv/bin/python3 eval/graders/depth_grader.py {workspace} {date} --memos-only
+```
+If `pass` is `false`, re-dispatch **only the analysts named in `thin_artifacts`**
+(map `company_analyst.md` → mm-company-analyst, etc.) with args `{workspace} {date} memo`
+and an explicit instruction to **expand the memo to full depth** (the rubric in
+stage 7). Do this **at most once**, then continue regardless. This catches a
+runtime (e.g. Codex) that stubbed the memos and forces a real redo.
+
 Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. Wait.
 The moderator already read all memos during the scan phase (stage 8) and stored summaries in `debate_assignments.json`. In synthesis mode, it should read ONLY the critique files from `discussion/{date}/debate/round_1/` plus the stored memo summaries — NOT re-read full memos.
 Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
@@ -307,6 +324,11 @@ Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 
 Dispatch **mm-report-writer** with args: `{workspace} {date} initial`. Wait.
 Verify draft exists in `{workspace}/drafts/{date}/`.
+
+**Depth mandate:** the draft must develop every section with substance (no stub
+sections); the report-reviewer and `depth_grader.py --report-only` enforce this
+in stage 11. Run the writer as a dedicated full-`SKILL.md` pass.
+
 **Then immediately proceed to stage 11.**
 
 ### 11. review
@@ -317,10 +339,17 @@ Verify draft exists in `{workspace}/drafts/{date}/`.
 ```
 
 Read `review.max_revision_loops` from config (default: 3). Loop:
-1. Dispatch **mm-report-reviewer** with args: `{workspace} {date}`. Wait.
-2. Read review output from `{workspace}/reviews/{date}/final_reviews/`.
-3. If pass → exit. If fail → dispatch **mm-report-writer** with args: `{workspace} {date} revision`. Increment counter.
-4. Stop after max loops.
+1. **Depth check (deterministic):**
+   ```bash
+   .venv/bin/python3 eval/graders/depth_grader.py {workspace} {date} --report-only
+   ```
+2. Dispatch **mm-report-reviewer** with args: `{workspace} {date}`. Wait.
+3. Read review output from `{workspace}/reviews/{date}/final_reviews/`.
+4. If the reviewer passes **and** the depth check passed → exit. Otherwise it failed:
+   dispatch **mm-report-writer** with args: `{workspace} {date} revision`, instructing
+   it to expand any stub sections named in the depth grader's `thin_artifacts`
+   (in addition to the reviewer's revision brief). Increment counter.
+5. Stop after max loops.
 **Then immediately proceed to stage 12.**
 
 ### 12. decide
@@ -405,6 +434,7 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/evidence_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/consistency_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/valuation_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/depth_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
 ```

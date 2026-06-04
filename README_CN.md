@@ -119,6 +119,15 @@ codex
 
 在 Codex 中用 `/skills` 查看技能。只有 **`mm-init`** 和 **`mm-orchestrator`** 是可隐式匹配的入口（例如*"为 NVDA 初始化工作区"*、*"对 workspaces/NVDA 运行 MarketMind 流水线"*）。内部各阶段技能为显式调用（`$mm-…`）——它们运行在被编排的流水线中，不可单独运行。完整的 Codex 配置见 `AGENTS.md` 与 `.agents/`。
 
+**推荐 —— 用无头驱动脚本以「对齐 Claude 的深度」运行整条流水线**。它把每个阶段作为独立的 `codex exec` 运行（每个阶段一个全新上下文，等价于 Claude 的 `context: fork`），从而让产出与 Claude 一致，而不会被压缩成残缺片段：
+
+```bash
+.venv/bin/python3 scripts/run_codex_pipeline.py workspaces/NVDA
+.venv/bin/python3 scripts/run_codex_pipeline.py workspaces/NVDA --dry-run   # 仅打印执行计划
+```
+
+确定性阶段（估值、图表/PDF、去重、评分器）作为已提交的 Python 直接运行；LLM 阶段（数据台、分析师、撰写器……）作为并行的 `codex exec` 运行；深度闸会重做任何过薄的 memo/报告。
+
 ### 使用方法
 
 ```text
@@ -383,6 +392,8 @@ review:
 - [x] **双语输出**：通过 `language` 配置生成中英文报告与 PDF，CJK 在正文与图表中全链路正确渲染
 - [x] **Web 展示层**：浏览器报告查看器（`/mm:dashboard`），提供文档、**幻灯片**（按章节自动拆分、键盘导航 + 导航圆点）与内嵌 PDF 三种模式，均由同一份报告内容驱动
 - [x] **Codex CLI 支持**：`mm-*` 技能作为 Codex 原生技能运行（`.agents/skills/` 符号链接 + 每个技能的 `agents/openai.yaml` 调用策略与 MCP 依赖），以 `AGENTS.md` 作为控制入口，并提供可直接粘贴的 `~/.codex/config.toml` MCP 配置
+- [x] **Codex 对齐驱动**：`scripts/run_codex_pipeline.py` 把每个 LLM 阶段作为独立的 `codex exec` 运行（每阶段全新上下文 —— 等价于 Claude 的 `context: fork`），确定性阶段用已提交的 Python、数据台/分析师并行执行，使 Codex 产出与 Claude 一致，而不会被压缩成残缺片段
+- [x] **确定性质量底线**：深度闸（`eval/graders/depth_grader.py`）会标记过薄的分析师 memo、残缺的报告小节与过少的证据，并接入复审循环（重做）与发布闸，使「准确但过薄」的产出无法静默通过
 
 ### TODO
 

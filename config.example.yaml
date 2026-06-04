@@ -69,6 +69,7 @@ data_sources:
   web_research:                 # mm-web-research subagent (Claude WebSearch/WebFetch)
     enabled: true
     max_results: 12
+    min_cards: 12               # evidence floor: if desk+web cards < this, run an extra query pass
     # source hierarchy: institutional/MCP > NewsAPI > NASDAQ (US) > general web search
     source_hierarchy: [mcp, newsapi, nasdaq, websearch]
 
@@ -151,6 +152,11 @@ review:
   min_overall_score: 8.0
   min_factuality: 9.0
   blocker_policy: hard_fail
+  depth:                        # deterministic anti-shallow floor (eval/graders/depth_grader.py)
+    min_memo_chars: 1200        # per analyst memo — a 3-sentence stub fails
+    min_section_chars: 300      # per report section — flags stub sections
+    min_evidence_cards: 12      # total evidence cards collected
+    min_exec_bullets: 3         # Executive Summary bullet count
 
 # --- Decision ---
 decision:

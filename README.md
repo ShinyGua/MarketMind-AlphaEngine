@@ -119,6 +119,15 @@ codex
 
 In Codex, list skills with `/skills`. Only **`mm-init`** and **`mm-orchestrator`** are auto-matched entry points (e.g. *"initialize a workspace for NVDA"*, *"run the MarketMind pipeline for workspaces/NVDA"*). The internal pipeline-stage skills are explicit-only (`$mm-…`) — they run inside the orchestrated pipeline, not standalone. See `AGENTS.md` and `.agents/` for the full Codex profile.
 
+**Recommended — run the full pipeline at Claude-parity depth** with the headless driver, which runs each stage as its own `codex exec` (fresh context per stage, the analog of Claude's `context: fork`) so output matches a Claude run instead of compressing into stubs:
+
+```bash
+.venv/bin/python3 scripts/run_codex_pipeline.py workspaces/NVDA
+.venv/bin/python3 scripts/run_codex_pipeline.py workspaces/NVDA --dry-run   # print the plan only
+```
+
+Deterministic stages (valuation, charts/PDF, dedup, graders) run as committed Python; LLM stages (desks, analysts, writer, …) run as parallel `codex exec` calls; the depth gate redoes any thin memo/report.
+
 ### Usage
 
 ```text
@@ -383,6 +392,8 @@ review:
 - [x] **Bilingual Output**: English + Chinese reports and PDFs via the `language` config, with CJK rendered cleanly end-to-end (body + charts)
 - [x] **Web Presentation**: Browser report viewer (`/mm:dashboard`) with Document, **Slides** (auto-split by section, keyboard navigation + nav dots), and embedded-PDF modes — all driven by the same report content
 - [x] **Codex CLI Support**: The `mm-*` skills run as native Codex skills (`.agents/skills/` symlink + per-skill `agents/openai.yaml` invocation policy + MCP dependencies), with `AGENTS.md` as the control surface and a ready-to-paste `~/.codex/config.toml` MCP config
+- [x] **Codex Parity Driver**: `scripts/run_codex_pipeline.py` runs each LLM stage as its own `codex exec` (fresh context per stage — the analog of Claude's `context: fork`) with deterministic stages in committed Python and parallel desks/analysts, so Codex output matches a Claude run instead of compressing into stubs
+- [x] **Deterministic Quality Floor**: a depth gate (`eval/graders/depth_grader.py`) flags shallow analyst memos, stub report sections, and scant evidence — wired into the review loop (redo) and the release gate — so accurate-but-thin output can't silently pass
 
 ### TODO
 
