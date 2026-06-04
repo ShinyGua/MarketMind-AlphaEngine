@@ -186,6 +186,26 @@ def grade(workspace: str, date: str) -> dict:
         f"Confidence={confidence}, debate_quality={debate_quality}, calibration={calibration}"
     )
 
+    # Panel alignment (note only — never hard-fails). If the multi-round decision
+    # panel ran, surface a final label that diverges from the panel's vote tally so
+    # a conviction-weighted override is explicit rather than silent.
+    panel = decision.get("panel")
+    if isinstance(panel, dict):
+        tally = panel.get("final_tally") or {}
+        if isinstance(tally, dict) and any(isinstance(v, (int, float)) for v in tally.values()):
+            panel_majority = max(tally, key=lambda k: tally.get(k, 0))
+            result["panel_majority"] = panel_majority
+            result["panel_exit_reason"] = panel.get("exit_reason")
+            if panel_majority and decision_label.upper() != str(panel_majority).upper():
+                result["details"].append(
+                    f"NOTE: decision {decision_label} diverges from panel vote majority "
+                    f"{panel_majority} — confirm it is a conviction-weighted override, not an error"
+                )
+            else:
+                result["details"].append(
+                    f"Decision aligns with panel vote majority ({panel_majority})"
+                )
+
     # Overall pass: alignment must be consistent, and no over-confidence flag
     all_ok = is_aligned and calibration != "over_confident"
     result["pass"] = all_ok
