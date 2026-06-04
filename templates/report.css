@@ -61,6 +61,8 @@ body {
 .badge.BUY  { background: var(--buygreen); }
 .badge.HOLD { background: var(--holdamber); }
 .badge.SELL { background: var(--sellred); }
+.overlay-tag { margin-left: 6pt; color: var(--textsub); font-weight: 600;
+  font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; }
 
 /* ---- Page-1 rating box ---- */
 .ratingbox {
