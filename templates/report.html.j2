@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <style>{{ css|safe }}</style>
+</head>
+<body>
+
+  <!-- Cover + running-header source -->
+  <div class="cover runhead" data-ticker="{{ ticker }}" data-date="{{ date }}">
+    <div class="cover-bar">
+      <div class="titlewrap">
+        <div class="company">{{ company }} ({{ ticker }})</div>
+        <div class="meta">{{ exchange }}{% if sector %} · {{ sector }}{% endif %} · {{ date }}</div>
+      </div>
+      <span class="mode">{{ S.mode }}</span>
+    </div>
+
+    <!-- Page-1 rating box (authoritative numbers from JSON) -->
+    <div class="ratingbox">
+      <table>
+        <tr>
+          <td><span class="k">{{ S.rating }}</span>
+              <span class="v"><span class="badge {{ decision }}">{{ decision }}</span></span></td>
+          <td><span class="k">{{ S.confidence }}</span><span class="v">{{ confidence }}</span></td>
+          <td><span class="k">{{ S.horizon }}</span><span class="v">{{ horizon }}</span></td>
+          <td><span class="k">{{ S.price }}</span><span class="v">{{ price }}</span></td>
+        </tr>
+        <tr>
+          <td><span class="k">{{ S.fair_value }}</span><span class="v">{{ fair_value }}</span></td>
+          <td><span class="k">{{ S.margin_of_safety }}</span>
+              <span class="v {{ mos_class }}">{{ margin_of_safety }}</span></td>
+          <td><span class="k">{{ S.market_cap }}</span><span class="v">{{ market_cap }}</span></td>
+          <td><span class="k">{{ S.valuation }}</span><span class="v">{{ verdict }}</span></td>
+        </tr>
+      </table>
+    </div>
+
+    {% if metrics %}
+    <div class="metrics">
+      {% for m in metrics %}<div class="m"><span class="k">{{ m.k }}</span> <span class="v {{ m.cls }}">{{ m.v }}</span></div>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Report body (markdown -> HTML), charts embedded inline -->
+  <div class="report-body">
+    {{ body_html|safe }}
+  </div>
+
+  <div class="disclaimer">{{ S.disclaimer }}<br>{{ S.sources_list }}</div>
+
+</body>
+</html>

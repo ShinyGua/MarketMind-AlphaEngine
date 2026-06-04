@@ -84,6 +84,12 @@ Score the report on a 1-10 scale for each dimension:
 - Are failure conditions identified?
 - Is overconfidence avoided?
 
+#### Presentation (weight: low)
+- Does the Executive Summary use the Page-1 format — 3-4 bullets, each a **bold lead clause** + supporting sentences (the "top call" first)?
+- Are the three chart anchors present and exact — `![...](charts/relative_chart.svg)`, `charts/price_chart.svg`, `charts/peer_chart.svg` — in Market Context, Price Action, and Sector & Peers respectively?
+- Does each table end with an italic source line?
+If any are missing, add a specific fix to the revision brief (it's a low-weight deduction, not a blocker).
+
 ### 3. Check for Blockers
 
 A blocker IMMEDIATELY fails the draft regardless of scores:

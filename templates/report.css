@@ -1,0 +1,133 @@
+/* MarketMind-AlphaEngine — JPM-style report stylesheet (WeasyPrint).
+   Palette ported from the retired equity_research.cls. */
+
+:root {
+  --jpmnavy:  #1B2A4A;
+  --jpmblue:  #2B5EA7;
+  --jpmlight: #EDF1F7;
+  --textmain: #2D2D2D;
+  --textsub:  #6B7280;
+  --textmuted:#9CA3AF;
+  --bglight:  #F8F9FB;
+  --rulelight:#D1D5DB;
+  --buygreen: #16A34A;
+  --holdamber:#D97706;
+  --sellred:  #DC2626;
+}
+
+/* ---- page geometry + running header/footer ---- */
+@page {
+  size: A4;
+  margin: 20mm 16mm 18mm 16mm;
+  @top-left   { content: string(doc-ticker); font-size: 8pt; color: var(--textsub); }
+  @top-right  { content: string(doc-date);   font-size: 8pt; color: var(--textsub); }
+  @bottom-left{ content: "MarketMind-AlphaEngine — for informational purposes only";
+                font-size: 7pt; color: var(--textmuted); }
+  @bottom-right { content: "Page " counter(page) " / " counter(pages);
+                  font-size: 7pt; color: var(--textmuted); }
+}
+@page :first { @top-left { content: none; } @top-right { content: none; } }
+
+/* Chinese reports: fontconfig resolves WenQuanYi (the only installed CJK face). */
+html[lang="ch"] body { font-family: "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif; }
+
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, "DejaVu Sans", sans-serif;
+  color: var(--textmain);
+  font-size: 9.5pt;
+  line-height: 1.5;
+}
+
+/* hidden spans that feed the running header */
+.runhead { string-set: doc-ticker attr(data-ticker), doc-date attr(data-date); }
+
+/* ---- cover ---- */
+.cover { string-set: doc-ticker attr(data-ticker), doc-date attr(data-date); }
+.cover-bar {
+  background: var(--jpmnavy); color: #fff;
+  padding: 14pt 16pt; border-radius: 3pt;
+  /* flex (not float) keeps the title flush to the top — a leading
+     float:right makes WeasyPrint reserve an empty band above the title. */
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.cover-bar .titlewrap { flex: 1; min-width: 0; }
+.cover-bar .company { font-size: 19pt; font-weight: 700; line-height: 1.15; }
+.cover-bar .meta { font-size: 9pt; color: #c7d2e4; margin-top: 3pt; }
+.cover-bar .mode { font-size: 8pt; letter-spacing: 1pt; white-space: nowrap;
+  margin-left: 14pt; padding-top: 2pt; text-transform: uppercase; color: #aebfd9; }
+
+.badge { display: inline-block; padding: 4pt 12pt; border-radius: 3pt;
+  font-weight: 700; font-size: 13pt; color: #fff; }
+.badge.BUY  { background: var(--buygreen); }
+.badge.HOLD { background: var(--holdamber); }
+.badge.SELL { background: var(--sellred); }
+
+/* ---- Page-1 rating box ---- */
+.ratingbox {
+  margin-top: 12pt; border: 1px solid var(--rulelight);
+  border-radius: 3pt; overflow: hidden;
+}
+.ratingbox table { width: 100%; border-collapse: collapse; }
+.ratingbox td { padding: 6pt 9pt; border: 1px solid var(--rulelight);
+  font-size: 9pt; vertical-align: top; }
+.ratingbox .k { color: var(--textsub); font-size: 7.5pt; text-transform: uppercase;
+  letter-spacing: .5pt; display: block; }
+.ratingbox .v { font-weight: 700; font-size: 11pt; }
+
+/* key-metrics strip */
+.metrics { margin: 10pt 0; padding: 8pt 0; border-top: 1px solid var(--rulelight);
+  border-bottom: 1px solid var(--rulelight); display: flex; flex-wrap: wrap; }
+.metrics .m { margin-right: 16pt; }
+.metrics .m .k { color: var(--textsub); font-size: 7.5pt; text-transform: uppercase; }
+.metrics .m .v { font-weight: 700; }
+
+/* summary bullets (■ lead) */
+.summary { margin-top: 6pt; }
+.summary p { margin: 6pt 0; padding-left: 14pt; text-indent: -14pt; }
+
+/* ---- body headings / sections ---- */
+h1 { display: none; } /* report title lives in the cover bar */
+h2 {
+  font-size: 13pt; color: var(--jpmnavy); font-weight: 700;
+  border-bottom: 2px solid var(--jpmnavy);
+  padding-bottom: 3pt; margin: 16pt 0 8pt;
+  break-after: avoid;
+}
+/* each top-level section starts a fresh page (except the first) */
+.report-body h2 { break-before: page; }
+.report-body > h2:first-of-type { break-before: avoid; }
+h3 { font-size: 10.5pt; color: var(--jpmblue); font-weight: 700; margin: 10pt 0 4pt; }
+p { margin: 5pt 0; }
+strong { color: var(--jpmnavy); }
+em { color: var(--textsub); }
+
+ul, ol { margin: 5pt 0 5pt 16pt; }
+li { margin: 2pt 0; }
+
+/* ---- tables ---- */
+table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 8.5pt;
+  break-inside: avoid; }
+th { background: var(--jpmnavy); color: #fff; font-weight: 700;
+  padding: 5pt 7pt; text-align: right; }
+th:first-child { text-align: left; }
+td { padding: 4pt 7pt; border-bottom: 1px solid var(--rulelight); text-align: right; }
+td:first-child { text-align: left; }
+tr:nth-child(even) td { background: var(--bglight); }
+
+/* ---- charts / figures ---- */
+img { max-width: 100%; height: auto; display: block; margin: 8pt auto; }
+figure { margin: 10pt 0; break-inside: avoid; }
+figcaption { font-size: 8pt; color: var(--textsub); text-align: center; margin-top: 3pt; }
+
+/* ---- decision callout (optional, from JSON) ---- */
+.decision-box { border-left: 4px solid var(--jpmnavy); background: var(--jpmlight);
+  padding: 8pt 12pt; margin: 10pt 0; border-radius: 0 3pt 3pt 0; }
+
+/* ---- source / disclaimer ---- */
+.source { font-size: 7.5pt; color: var(--textmuted); margin-top: 2pt; }
+.disclaimer { margin-top: 14pt; padding-top: 8pt; border-top: 1px solid var(--rulelight);
+  font-size: 7.5pt; color: var(--textsub); line-height: 1.4; }
+
+/* numeric coloring helpers (applied by renderer where it builds tables) */
+.pos { color: var(--buygreen); }
+.neg { color: var(--sellred); }
