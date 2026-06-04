@@ -166,6 +166,16 @@ decision:
   require_risk_section: true
   require_disconfirming_evidence: true
   min_evidence_count: 5
+  # Multi-round decision panel: each analyst role casts a ballot
+  # (vote + conviction self-rating + hedge overlay) per round; a deterministic
+  # convergence grader (eval/graders/panel_convergence_grader.py) decides
+  # iterate-vs-exit, with a hard max_rounds cap. enabled:false → legacy single-shot.
+  panel:
+    enabled: true
+    min_rounds: 1                 # never exit before this many rounds
+    max_rounds: 3                 # hard cap — auto-exit at the limit
+    convergence_threshold: 0.70   # conviction-weighted agreement needed to exit early
+    overlay_labels: [none, hedge, trim, stop]   # hedge stance, separate from BUY/HOLD/SELL
 
 # --- Report Style ---
 report_style:

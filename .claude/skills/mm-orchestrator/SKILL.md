@@ -353,8 +353,37 @@ Read `review.max_revision_loops` from config (default: 3). Loop:
 **Then immediately proceed to stage 12.**
 
 ### 12. decide
-Dispatch **mm-decision-maker** with args: `{workspace} {date}`. Wait.
-Verify `{workspace}/decision/{date}/final_decision.json` exists.
+
+Read `decision.panel` from config. **If `decision.panel.enabled` is false** (or the
+block is absent): dispatch **mm-decision-maker** with args: `{workspace} {date}`,
+wait, verify `final_decision.json` exists, and proceed to stage 13 (legacy
+single-shot path).
+
+**If `decision.panel.enabled` is true**, run the multi-round decision panel — each
+analyst role votes, a deterministic grader decides when to stop, then the chair
+writes the final decision. Read `decision.panel.max_rounds` (default 3). Loop
+`r = 1 … max_rounds`:
+
+1. **Ballots (parallel):** for each role in `discussion.analyst_roles`, dispatch
+   **mm-decision-panelist** with args: `{workspace} {date} {role} {r}`. Each casts a
+   ballot (vote + conviction self-rating + hedge overlay) to
+   `{workspace}/decision/{date}/panel/round_{r}/{role}_ballot.json`. Wait for all.
+2. **Chair tally:** dispatch **mm-decision-maker** with args: `{workspace} {date}
+   tally {r}` → writes `panel_summary_round_{r}.json` (vote split + retained
+   dissent). Wait.
+3. **Convergence (deterministic):**
+   ```bash
+   .venv/bin/python3 eval/graders/panel_convergence_grader.py {workspace} {date} {r}
+   ```
+   Read `{workspace}/decision/{date}/panel/convergence_round_{r}.json`. If its
+   `exit` is true → break the loop (it auto-exits at `max_rounds`; this is the hard
+   cap). Otherwise continue to round `r+1`; the next round's panelists read the
+   chair's `chair_notes`/dissent and may change their vote.
+
+After the loop, dispatch **mm-decision-maker** with args: `{workspace} {date}`
+(final mode) → reads the panel summaries + convergence files and writes the
+enriched `final_decision.json` (with `risk_overlay` + `panel` block). Wait and
+verify it exists.
 **Then immediately proceed to stage 13.**
 
 ### 13. export

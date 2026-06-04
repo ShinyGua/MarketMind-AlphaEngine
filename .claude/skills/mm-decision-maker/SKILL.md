@@ -23,8 +23,55 @@ The BUY/HOLD/SELL output is a **research view for human review, not investment a
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
+Mode: $ARGUMENTS[2] (optional — `tally` for a per-round panel tally; absent = final decision)
+Round: $ARGUMENTS[3] (only in `tally` mode — 1-based integer)
 
 **All paths below use `{date}` = $ARGUMENTS[1].**
+
+You are the **chair of the decision panel**. The panel runs in two roles:
+
+- **Mode A — `tally` (`$ARGUMENTS[2] == "tally"`):** read this round's ballots and
+  produce a neutral summary + retained dissent for the next round. You do **not**
+  decide convergence — a deterministic grader
+  (`eval/graders/panel_convergence_grader.py`) does that from the ballots. Jump to
+  **Mode A** below.
+- **Mode B — final (no `$ARGUMENTS[2]`):** the panel loop has ended; write the
+  final `final_decision.json`. This is the rest of this document (Process §1–§4),
+  now also reading the panel artifacts. When the panel is disabled
+  (`decision.panel.enabled: false`) there are no panel artifacts and you simply
+  decide from the thesis map as before.
+
+## Mode A: Per-round Panel Tally (`tally`)
+
+Read every ballot in `{workspace}/decision/{date}/panel/round_{N}/*_ballot.json`
+(`{N}` = $ARGUMENTS[3]). Each ballot has `{role, vote, conviction, risk_overlay,
+rationale, top_risk}`. Tally them and surface — do **not** resolve — the
+disagreement, so the next round's panelists know what to engage.
+
+Write to: `{workspace}/decision/{date}/panel/panel_summary_round_{N}.json`
+
+```json
+{
+  "round": 1,
+  "tally": {"BUY": 0, "HOLD": 0, "SELL": 0},
+  "overlay_tally": {"none": 0, "hedge": 0, "trim": 0, "stop": 0},
+  "majority_vote": "HOLD",
+  "mean_conviction": 0.0,
+  "dissenters": [
+    {"role": "risk_analyst", "vote": "SELL", "why": "<their top_risk / core objection>"}
+  ],
+  "unresolved_points": ["<the live disagreement(s) the next round must address>"],
+  "chair_notes": "<1-3 sentences: what would move the panel toward a cleaner call>"
+}
+```
+
+Rules for `tally` mode:
+- Count honestly; `majority_vote` is the most-voted label (break ties toward the
+  side carrying more conviction mass). Do not editorialize the vote here.
+- `dissenters` = every role whose vote differs from `majority_vote`. Never drop a
+  dissenter — the minority view must survive into the next round.
+- `chair_notes` is guidance for the panelists, not your own verdict. Stop here;
+  do not write `final_decision.json` in this mode.
 
 ## Inputs
 
@@ -37,6 +84,12 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/normalized/{date}/evidence_cards/*.json` — supporting evidence
 - `{workspace}/profile/company_profile.json` — company context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events
+- `{workspace}/decision/{date}/panel/panel_summary_round_*.json` — the panel's
+  per-round tallies (last one = final vote split); read the latest for the
+  conviction-weighted lean and the retained dissenters (panel mode only)
+- `{workspace}/decision/{date}/panel/convergence_round_*.json` — deterministic
+  convergence verdict per round (`convergence_score`, `exit_reason`); read the
+  last round's file for the `panel` block fields (panel mode only)
 
 **Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
@@ -53,6 +106,16 @@ Read all inputs. Build a mental model of:
 - What catalysts are upcoming?
 - What risks were identified and not rebutted?
 - Did the report pass review? What were the weaknesses?
+- **If the panel ran:** what did the roles vote? Read the latest
+  `panel_summary_round_*.json` — the `majority_vote`, the conviction-weighted
+  split, and the `dissenters`. Read the latest `convergence_round_*.json` for
+  `convergence_score` and `exit_reason` (`converged` vs `max_rounds`). Your final
+  label should reflect the **conviction-weighted** panel lean, not a head-count —
+  a 2-1 split where the lone dissenter has the strongest evidence is not a
+  majority mandate. Every **retained dissenter** must surface in `key_risks` or
+  `disconfirming_signals`. If the panel exited at `max_rounds` without converging,
+  say so in `debate_alignment` and keep confidence honest about the unresolved
+  split. Carry the panel's overlay consensus into `risk_overlay`.
 
 ### 2. Apply Decision Framework
 
@@ -95,6 +158,7 @@ Write to: `{workspace}/decision/{date}/final_decision.json`
 ```json
 {
   "decision": "BUY|HOLD|SELL",
+  "risk_overlay": "none|hedge|trim|stop",
   "confidence": 0.0,
   "horizon": "1d|1w|1m|3m",
   "decision_summary": "<2-3 sentence explanation of the decision>",
@@ -121,9 +185,28 @@ Write to: `{workspace}/decision/{date}/final_decision.json`
     "<another condition>"
   ],
   "stance_notes": "<note on whether this view is more appropriate for conservative long-term investors, tactical traders, or higher-risk directional traders>",
-  "debate_alignment": "<does this decision align with debate consensus, or is it a contrarian call? explain>"
+  "debate_alignment": "<does this decision align with debate consensus, or is it a contrarian call? explain>",
+  "panel": {
+    "rounds_run": 1,
+    "final_tally": {"BUY": 0, "HOLD": 0, "SELL": 0},
+    "convergence_score": 0.0,
+    "exit_reason": "converged|max_rounds|insufficient_ballots",
+    "retained_dissent": ["<minority view that survived the panel, and from which role>"]
+  }
 }
 ```
+
+**`risk_overlay`** is the panel's hedge stance — independent of the BUY/HOLD/SELL
+label. `none` = directional view, no hedge; `hedge` = hold the view with downside
+protection; `trim` = reduce exposure / take partial profit; `stop` = size down
+hard. Set it from the panel's `overlay_tally` consensus (or your own read when the
+panel is disabled).
+
+**`panel`** mirrors the panel loop: `rounds_run` and `final_tally` from the last
+`panel_summary_round_*.json`, `convergence_score`/`exit_reason` from the last
+`convergence_round_*.json`, and `retained_dissent` listing any minority view that
+did not converge. **Omit the `panel` block entirely when the panel is disabled**
+(`decision.panel.enabled: false`) — in that case the decision is single-shot.
 
 ## Decision Rules
 
@@ -135,6 +218,7 @@ Write to: `{workspace}/decision/{date}/final_decision.json`
 6. **Symmetric Burden**: A SELL requires no more evidence than a BUY would in the mirror-image situation. Do not hold directional shorts to a higher bar than directional longs. If you would call BUY on a given strength of bullish evidence, call SELL on the same strength of bearish evidence
 7. **Valuation-Anchored**: Treat the margin of safety as a directional input, symmetrically. A large positive margin of safety (cheap vs intrinsic value) supports BUY and lifts confidence; a large negative margin of safety (expensive) supports SELL and lifts confidence — a "good company" trading well above intrinsic value can still be a SELL/HOLD. When valuation conflicts with momentum/news, say so explicitly and explain which you weight more and why. Discount this anchor when valuation `confidence` is low or `applicable` is false
 8. **No Fabrication**: Only reference evidence cards, quant data, valuation figures, and analyst arguments that actually exist in the workspace
+9. **Panel-Faithful** (when the panel ran): the final label must reflect the panel's **conviction-weighted** lean, not a raw head-count, and not a split-the-difference HOLD. A retained dissenter with the strongest evidence can outweigh a low-conviction majority. Never silently drop a dissent — carry it into `key_risks`/`disconfirming_signals`. A `max_rounds` exit (unconverged) should temper confidence and be named in `debate_alignment`
 
 ## Quality Rules
 

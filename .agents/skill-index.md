@@ -32,7 +32,7 @@ explicitly (`$mm-…`) only for targeted debugging.
 | `discuss_synthesis` | `.claude/skills/mm-discussion-moderator/SKILL.md` |
 | `draft` | `.claude/skills/mm-report-writer/SKILL.md` |
 | `review` | `.claude/skills/mm-report-reviewer/SKILL.md` |
-| `decide` | `.claude/skills/mm-decision-maker/SKILL.md` |
+| `decide` | `.claude/skills/mm-decision-panelist/SKILL.md` (per-round ballots), `.claude/skills/mm-decision-maker/SKILL.md` (tally + final) |
 | `export` | `.claude/skills/mm-pdf-exporter/SKILL.md` |
 | `user_review` | `.claude/skills/mm-orchestrator/SKILL.md` |
 | `reflect` | `.claude/skills/mm-memory-writer/SKILL.md` plus `eval/` graders |
@@ -43,7 +43,8 @@ explicitly (`$mm-…`) only for targeted debugging.
 - `mm-company-analyst`: company fundamentals memo and debate.
 - `mm-company-desk`: company news, filings, catalyst calendar, fundamentals.
 - `mm-company-resolver`: ticker, company profile, peers, market context.
-- `mm-decision-maker`: final BUY/HOLD/SELL decision.
+- `mm-decision-maker`: decision-panel chair — per-round tally and final BUY/HOLD/SELL decision.
+- `mm-decision-panelist`: casts one analyst role's ballot (vote + conviction + hedge overlay) per panel round.
 - `mm-discussion-moderator`: thesis map and debate summary.
 - `mm-init`: interactive workspace initialization.
 - `mm-market-analyst`: macro and market environment memo.
