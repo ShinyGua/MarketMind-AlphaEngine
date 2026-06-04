@@ -27,6 +27,7 @@ ALL_STAGES = [
   "collect",
   "normalize",
   "quant",
+  "valuation",
   "discuss_memos",
   "discuss_debate",
   "discuss_synthesis",
@@ -44,6 +45,7 @@ STAGE_LABELS = {
   "collect":           { content: "Collect data (3 desks parallel)", activeForm: "Collecting market, company, and sector data..." },
   "normalize":         { content: "Normalize evidence cards",       activeForm: "Normalizing evidence cards..." },
   "quant":             { content: "Quant snapshot",                 activeForm: "Computing technical indicators..." },
+  "valuation":         { content: "Valuation (DCF + comps)",        activeForm: "Computing DCF, comps, and margin of safety..." },
   "discuss_memos":     { content: "Analyst memos (3 parallel)",     activeForm: "Writing independent analyst memos..." },
   "discuss_debate":    { content: "Cross-critique debate",          activeForm: "Running cross-critique debate rounds..." },
   "discuss_synthesis": { content: "Discussion synthesis",           activeForm: "Synthesizing debate into thesis map..." },
@@ -80,7 +82,7 @@ LOOP:
        - If stage is in stages_completed → status: "completed"
        - If stage is the NEXT uncompleted stage → status: "in_progress"
        - Otherwise → status: "pending"
-  5. Call TodoWrite with the full 14-stage list
+  5. Call TodoWrite with the full 15-stage list
   6. Check: if status.json stage == "completed" → EXIT loop (pipeline done)
   7. Sleep 5 seconds (use Bash: sleep 5)
   8. Go to 1

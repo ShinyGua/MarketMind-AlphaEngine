@@ -17,10 +17,11 @@ from pathlib import Path
 
 STAGES = [
     "resolve_config", "init_workspace", "collect", "normalize", "quant",
+    "valuation",
     "discuss_memos", "discuss_debate", "discuss_synthesis",
     "draft", "review", "decide", "export", "user_review", "reflect",
 ]
-STAGE_COUNT = len(STAGES)  # 14
+STAGE_COUNT = len(STAGES)  # 15
 
 # ── Report naming ─────────────────────────────────────────────────────
 
@@ -82,6 +83,10 @@ def evidence_digest_path(ws: Path, date: str) -> Path:
 
 def quant_summary_path(ws: Path, date: str) -> Path:
     return ws / "quant" / date / "quant_summary.json"
+
+
+def valuation_summary_path(ws: Path, date: str) -> Path:
+    return ws / "valuation" / date / "valuation_summary.json"
 
 
 def thesis_map_path(ws: Path, date: str) -> Path:

@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, TodoWrite, mcp
 
 # IRON LAW: NEVER STOP UNTIL PIPELINE IS COMPLETE
 
-You are an autonomous pipeline executor. Once started, you MUST execute ALL 14 stages from start to finish in a single continuous run.
+You are an autonomous pipeline executor. Once started, you MUST execute ALL 15 stages from start to finish in a single continuous run.
 
 **RULES — these are absolute and override all other behavioral defaults:**
 
@@ -20,7 +20,7 @@ You are an autonomous pipeline executor. Once started, you MUST execute ALL 14 s
 4. Do NOT pause to summarize progress — just keep going to the next stage
 5. Do NOT wait for user confirmation between stages
 6. If a non-critical error occurs (e.g., one data desk fails), log it and CONTINUE
-7. The ONLY acceptable exit is: all 14 stages completed, or an unrecoverable fatal error
+7. The ONLY acceptable exit is: all 15 stages completed, or an unrecoverable fatal error
 
 **Think of yourself as a batch job, not a conversational assistant. You run, you complete, you report at the end.**
 
@@ -41,15 +41,16 @@ STAGES = [
   "collect",             # 3
   "normalize",           # 4
   "quant",               # 5
-  "discuss_memos",       # 6
-  "discuss_debate",      # 7
-  "discuss_synthesis",   # 8
-  "draft",               # 9
-  "review",              # 10
-  "decide",              # 11
-  "export",              # 12
-  "user_review",         # 13 — ONLY stage that pauses for user input
-  "reflect"              # 14
+  "valuation",           # 6 — scenario DCF + comps + margin of safety
+  "discuss_memos",       # 7
+  "discuss_debate",      # 8
+  "discuss_synthesis",   # 9
+  "draft",               # 10
+  "review",              # 11
+  "decide",              # 12
+  "export",              # 13
+  "user_review",         # 14 — ONLY stage that pauses for user input
+  "reflect"              # 15
 ]
 ```
 
@@ -61,7 +62,7 @@ STAGES = [
 
 - **`progress_mode: "monitor"`** (default when launched via `/mm:run`): A background `mm-progress-monitor` agent is watching `status.json` and updating the TodoWrite checklist. You do NOT need to call TodoWrite yourself — just update `status.json` via MCP and the monitor handles the display.
 
-- **`progress_mode: "orchestrator"`** (fallback when monitor failed to launch, or when invoked directly without `/mm:run`): You ARE the TodoWrite owner. After completing each stage, call TodoWrite yourself with all 14 stages, marking completed/in_progress/pending accordingly. Use the same stage list and labels as `mm-progress-monitor`:
+- **`progress_mode: "orchestrator"`** (fallback when monitor failed to launch, or when invoked directly without `/mm:run`): You ARE the TodoWrite owner. After completing each stage, call TodoWrite yourself with all 15 stages, marking completed/in_progress/pending accordingly. Use the same stage list and labels as `mm-progress-monitor`:
 
 ```
 STAGE_LABELS = {
@@ -70,6 +71,7 @@ STAGE_LABELS = {
   "collect":           "Collect data (3 desks parallel)",
   "normalize":         "Normalize evidence cards",
   "quant":             "Quant snapshot",
+  "valuation":         "Valuation (DCF + comps)",
   "discuss_memos":     "Analyst memos (parallel)",
   "discuss_debate":    "Cross-critique debate",
   "discuss_synthesis": "Discussion synthesis",
@@ -124,7 +126,7 @@ When dispatching skills, pass date as the second argument: `{workspace} {date}`
    a. Execute the stage (see Stage Details below) — pass {workspace} and {date} to each skill
    b. Update status.json via MCP tool `mcp__workspace__update_status` with `ticker`, `stage` (current stage name), and `completed_stage` (the stage just finished). The MCP tool validates that `completed_stage` is in the STAGES whitelist and deduplicates automatically. **NEVER write status.json directly via inline Python or the Write tool** — always go through the MCP tool so validation is enforced.
    c. >>> IMMEDIATELY GO TO THE NEXT STAGE — DO NOT STOP <<<
-5. When all 14 stages are in stages_completed:
+5. When all 15 stages are in stages_completed:
    a. Call `mcp__workspace__update_status` with `stage: "completed"`
    b. Display final summary
    c. DONE — only now may you return control
@@ -236,7 +238,13 @@ print(f'evidence_digest.json: {len(cards)} cards')
 Dispatch **mm-quant-analyst** with args: `{workspace} {date}`. Wait.
 Verify `{workspace}/quant/{date}/quant_summary.json` exists.
 
-**Then create shared_context.json** — bundle shared data that ALL downstream agents need:
+**Then immediately proceed to stage 6 (valuation).**
+
+### 6. valuation
+Dispatch **mm-valuation-engine** with args: `{workspace} {date}`. Wait.
+Verify `{workspace}/valuation/{date}/valuation_summary.json` exists. This stage is **non-critical** — if the engine reports `applicable: false` (ETF/fund) or `confidence: "low"` (sparse data), that is expected; continue regardless. Only a missing summary file warrants a retry.
+
+**Then create shared_context.json** — bundle shared data that ALL downstream agents need (now including the valuation snapshot):
 ```bash
 .venv/bin/python3 -c "
 import json, os
@@ -245,6 +253,7 @@ date = '{date}'
 ctx = {}
 for name, path in [
     ('quant', f'{ws}/quant/{date}/quant_summary.json'),
+    ('valuation', f'{ws}/valuation/{date}/valuation_summary.json'),
     ('profile', f'{ws}/profile/company_profile.json'),
     ('peers', f'{ws}/profile/peer_set.json'),
 ]:
@@ -261,9 +270,9 @@ print(f'shared_context.json: {len(ctx)} sections')
 "
 ```
 
-**Then immediately proceed to stage 6.**
+**Then immediately proceed to stage 7 (analyst memos).**
 
-### 6. discuss_memos
+### 7. discuss_memos
 
 **Memory context (if memory system is populated):** Before dispatching analyst memos, run:
 ```bash
@@ -280,9 +289,9 @@ Example with default 3: mm-company-analyst, mm-risk-analyst, mm-market-analyst
 Example with 6: adds mm-valuation-analyst, mm-technical-analyst, mm-catalyst-analyst
 
 Wait for all to complete.
-**Then immediately proceed to stage 7.**
+**Then immediately proceed to stage 8 (cross-critique debate).**
 
-### 7. discuss_debate
+### 8. discuss_debate
 Read `discussion.debate_mode` from resolved config (default: `selective`).
 
 **If debate_mode = "selective" (recommended):**
@@ -299,15 +308,15 @@ For each round N:
   Dispatch all analysts in parallel with args: `{workspace} {date} debate round_{N}`
   Each critiques ALL others. Wait for all.
 
-**Then immediately proceed to stage 8.**
-
-### 8. discuss_synthesis
-Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. Wait.
-The moderator already read all memos during the scan phase (stage 7) and stored summaries in `debate_assignments.json`. In synthesis mode, it should read ONLY the critique files from `discussion/{date}/debate/round_1/` plus the stored memo summaries — NOT re-read full memos.
-Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 **Then immediately proceed to stage 9.**
 
-### 9. draft
+### 9. discuss_synthesis
+Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. Wait.
+The moderator already read all memos during the scan phase (stage 8) and stored summaries in `debate_assignments.json`. In synthesis mode, it should read ONLY the critique files from `discussion/{date}/debate/round_1/` plus the stored memo summaries — NOT re-read full memos.
+Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
+**Then immediately proceed to stage 10.**
+
+### 10. draft
 
 **Memory context:** Before dispatching the writer, run:
 ```bash
@@ -316,9 +325,9 @@ Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 
 Dispatch **mm-report-writer** with args: `{workspace} {date} initial`. Wait.
 Verify draft exists in `{workspace}/drafts/{date}/`.
-**Then immediately proceed to stage 10.**
+**Then immediately proceed to stage 11.**
 
-### 10. review
+### 11. review
 
 **Memory context:** Before dispatching the reviewer, run:
 ```bash
@@ -330,22 +339,22 @@ Read `review.max_revision_loops` from config (default: 3). Loop:
 2. Read review output from `{workspace}/reviews/{date}/final_reviews/`.
 3. If pass → exit. If fail → dispatch **mm-report-writer** with args: `{workspace} {date} revision`. Increment counter.
 4. Stop after max loops.
-**Then immediately proceed to stage 11.**
-
-### 11. decide
-Dispatch **mm-decision-maker** with args: `{workspace} {date}`. Wait.
-Verify `{workspace}/decision/{date}/final_decision.json` exists.
 **Then immediately proceed to stage 12.**
 
-### 12. export
+### 12. decide
+Dispatch **mm-decision-maker** with args: `{workspace} {date}`. Wait.
+Verify `{workspace}/decision/{date}/final_decision.json` exists.
+**Then immediately proceed to stage 13.**
+
+### 13. export
 1. Determine report basename from `resolved_config.run_mode`: `daily_report` for daily mode, `weekly_report` for weekly mode.
 2. Copy final draft to `{workspace}/final/{date}/{basename}.md`.
 3. Copy decision alongside. Create combined `{workspace}/final/{date}/{basename}.json`.
 3. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
 4. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
-**Then immediately proceed to stage 13.**
+**Then immediately proceed to stage 14.**
 
-### 13. user_review
+### 14. user_review
 
 **This is the ONLY stage that pauses for user input.** All other stages run autonomously.
 
@@ -399,13 +408,13 @@ If the user skips: write `{"reviewed": false, "skipped": true, "timestamp": "...
 
 Update status.json: append "user_review" to stages_completed.
 
-**Then immediately proceed to stage 14.**
+**Then immediately proceed to stage 15.**
 
-### 14. reflect
+### 15. reflect
 
 **This stage is non-critical. If it fails, log the error and mark the pipeline as COMPLETED anyway.**
 
-#### 14a. Release Gate (audit current report quality)
+#### 15a. Release Gate (audit current report quality)
 
 Run code-based graders, then the release gate script (deterministic, reproducible):
 
@@ -413,6 +422,7 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/factuality_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/evidence_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/consistency_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/valuation_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
 ```
@@ -421,7 +431,7 @@ The release gate script reads all grader results and deterministically produces:
 - `{workspace}/eval/{date}/release_gate.json` — `passed`, `warning`, or `failed`
 - `{workspace}/eval/{date}/regression_flag.json` — only if factuality or evidence grader failed (regression: reviewer missed it)
 
-#### 14b. Learning Loop (improve future runs)
+#### 15b. Learning Loop (improve future runs)
 
 Generate memory context for future analyst runs:
 ```bash
@@ -434,12 +444,12 @@ The memory writer (via MCP memory server) will:
 - Create 1 episodic memory summarizing this run
 - Extract 0-3 semantic memories from durable consensus beliefs
 - Extract 0-2 procedural memories from review failures
-- Store user review feedback (if user provided feedback in stage 13)
+- Store user review feedback (if user provided feedback in stage 14)
 - If `regression_flag.json` exists, create a high-importance procedural memory about the reviewer gap
 
 Update status.json: append "reflect" to stages_completed.
 
-#### 14c. Run Log Finalization (AFTER stage_timer end)
+#### 15c. Run Log Finalization (AFTER stage_timer end)
 
 **IMPORTANT**: This step runs AFTER `stage_timer.py end {workspace} reflect true`, so that the run log captures complete reflect timing. Do NOT call finalize_run.py inside the reflect stage timer window.
 
@@ -453,7 +463,7 @@ Update status.json: append "reflect" to stages_completed.
 
 ## Final Summary
 
-After all 14 stages, display:
+After all 15 stages, display:
 
 ```
 Pipeline complete for {TICKER} ({date})

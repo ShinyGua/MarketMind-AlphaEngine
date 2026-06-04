@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-light
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_price_history, mcp__market-data__get_news, mcp__market-data__get_filings, mcp__market-data__get_earnings_calendar, mcp__market-data__get_company_info
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_price_history, mcp__market-data__get_news, mcp__market-data__get_filings, mcp__market-data__get_earnings_calendar, mcp__market-data__get_company_info, mcp__market-data__get_fundamentals
 ---
 
 # Role: Company Data Desk
@@ -30,11 +30,13 @@ This skill uses the **market-data** MCP server for all external data fetching. P
 - `mcp__market-data__get_filings` — fetch SEC EDGAR filings
 - `mcp__market-data__get_earnings_calendar` — fetch upcoming earnings dates
 - `mcp__market-data__get_company_info` — fetch company profile from yfinance
+- `mcp__market-data__get_fundamentals` — fetch valuation ratios + financial statements (for the valuation engine)
 
 ## Inputs
 
 - `{workspace}/resolved_config.json` — config with news limits and lookback windows
 - `{workspace}/profile/company_profile.json` — ticker, name, sector
+- `{workspace}/profile/peer_set.json` — peer tickers (for peer fundamentals)
 
 ## Process
 
@@ -114,6 +116,20 @@ hist_5d = t.history(period="5d", interval="1h")
 
 Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`.
 
+### 4b. Fetch Fundamentals (company + peers)
+
+Fetch valuation ratios and financial statements for the company **and every peer** — these feed the Stage 5b valuation engine (DCF + comps). Use the MCP tool:
+
+```
+Call mcp__market-data__get_fundamentals with: ticker: {TICKER}
+```
+
+Save the response verbatim to `{workspace}/raw/{date}/fundamentals/{TICKER}.json`.
+
+Then read `{workspace}/profile/peer_set.json` and, for each entry in its `peers[]` list, call `get_fundamentals` with that peer's `ticker` and save to `{workspace}/raw/{date}/fundamentals/peers/{PEER_TICKER}.json`. Peers power the comps quartile benchmarking, so fetch all of them (typically 4–6).
+
+This is best-effort: if a fundamentals fetch fails or returns an `error` for a given ticker, skip that ticker and continue — the valuation engine degrades gracefully on missing peers or statements. Do **not** let a fundamentals failure abort the desk; price data remains the critical output.
+
 ### 5. Create Evidence Cards (Batch Mode)
 
 Process ALL collected news articles and filings in a SINGLE pass — do NOT create cards one by one.
@@ -161,6 +177,8 @@ Save to `{workspace}/normalized/evidence_cards/company_*.json`.
 - `{workspace}/raw/{date}/calendar/catalysts.json`
 - `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv`
 - `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`
+- `{workspace}/raw/{date}/fundamentals/{TICKER}.json`
+- `{workspace}/raw/{date}/fundamentals/peers/{PEER}.json` (one per peer)
 - `{workspace}/normalized/{date}/evidence_cards/comp_*.json`
 
 ## Error Handling
