@@ -41,6 +41,28 @@ def decision_path(ws: Path, date: str) -> Path:
     return ws / "decision" / date / "final_decision.json"
 
 
+# ── Decision-panel (multi-round vote → converge → exit) ──────────────
+
+def panel_dir(ws: Path, date: str) -> Path:
+    return ws / "decision" / date / "panel"
+
+
+def panel_round_dir(ws: Path, date: str, rnd: int) -> Path:
+    return panel_dir(ws, date) / f"round_{rnd}"
+
+
+def panel_ballot_path(ws: Path, date: str, rnd: int, role: str) -> Path:
+    return panel_round_dir(ws, date, rnd) / f"{role}_ballot.json"
+
+
+def panel_summary_path(ws: Path, date: str, rnd: int) -> Path:
+    return panel_dir(ws, date) / f"panel_summary_round_{rnd}.json"
+
+
+def panel_convergence_path(ws: Path, date: str, rnd: int) -> Path:
+    return panel_dir(ws, date) / f"convergence_round_{rnd}.json"
+
+
 def final_report_path(ws: Path, date: str, run_mode: str = "daily") -> Path:
     return ws / "final" / date / f"{report_basename(run_mode)}.md"
 
