@@ -5,6 +5,38 @@ This repository was authored for Claude Code (`CLAUDE.md`, `.claude/skills/`,
 native skills. Codex discovers the MarketMind skills, you operate them with
 Codex tools, and the same Python/MCP backend does the real work.
 
+## Running the full pipeline (parity mode — recommended)
+
+To run the whole pipeline at **Claude-parity quality**, use the headless driver
+instead of driving the orchestrator inline:
+
+```bash
+.venv/bin/python3 scripts/run_codex_pipeline.py workspaces/{TICKER}
+#   --dry-run            print the full ordered plan, execute nothing
+#   --from STAGE --to S  run a slice / resume
+#   --model M            codex model override for LLM stages
+```
+
+**Why this matters.** In Claude Code each stage runs as a `context: fork`
+subagent — a fresh, full-context turn — so analyst memos and the report come out
+deep. Driving the 15 stages **inline in one Codex session shares one context**,
+which compresses every stage into stubs (the failure you'd see as "Codex is
+worse than Claude"). The driver fixes this structurally: it runs each LLM stage
+as its **own `codex exec`** (one task per invocation = fresh context, the exact
+analog of Claude's fork), runs the already-deterministic stages
+(`valuation/`, `templates/`, `normalize/dedup_evidence.py`, `eval/graders/`)
+directly in Python, and fans out the independent stages (collect desks, analyst
+memos, debate critics) in parallel. The depth gate
+(`eval/graders/depth_grader.py`) runs inside it as a safety net (redo thin memos,
+fail thin reports).
+
+Prereqs: `codex` on PATH; the 3 MCP servers in `~/.codex/config.toml`
+(see `.agents/references/codex-config.toml`); launch from the repo root;
+`export NEWSAPI_KEY=…` for evidence parity. `--dry-run` needs none of these.
+
+Driving the orchestrator interactively (below) still works as a fallback, but
+each sub-skill must then be run as its own deep pass — see **Depth parity**.
+
 ## Skills (native Codex discovery)
 
 Codex auto-discovers skills under `.agents/skills/`, which is a **symlink to
@@ -47,8 +79,10 @@ into your `~/.codex/config.toml`, then:
 
 - Launch `codex` from the **repository root** (the server `command`/`args` are
   repo-relative), or substitute absolute paths.
-- `export NEWSAPI_KEY=… FRED_API_KEY=…` first (both optional; desks fall back to
-  web search when unset).
+- `export NEWSAPI_KEY=… FRED_API_KEY=…` first. Both are optional (the desks fall
+  back to web search when unset), but an **unset `NEWSAPI_KEY` yields thinner
+  evidence** — set it for collection parity with Claude. `mm-web-research`
+  back-fills toward `data_sources.web_research.min_cards` regardless.
 
 If MCP is not attached, fall back to the local Python servers/modules
 (`mcp/*_server.py`) or read/write the workspace files directly.
@@ -74,14 +108,38 @@ Skill files use Claude conventions; map them as follows:
 
 - **Arguments**: `$ARGUMENTS[0]` = workspace path (e.g. `workspaces/NVDA`),
   `$ARGUMENTS[1]` = `run_date` (`YYYY-MM-DD`). Pass these when running a stage.
+- **Arguments**: `$ARGUMENTS[2]` and beyond are stage-specific (e.g. analyst
+  mode `memo`/`debate`, writer mode `initial`/`revision`).
 - **Tools**: `Read`/`Glob`/`Grep`/`Bash`/`Write`/`Edit` → Codex shell tools +
   `apply_patch`; `rg` for search. `TodoWrite` → Codex plan/status updates.
-  `Agent` (forked sub-skills) → run the referenced stage directly, or use
-  current-session subagent tooling if exposed. `WebSearch`/`WebFetch` → Codex
-  web browsing. `mcp__*__*` → the `config.toml` servers above (or local-Python
-  fallback). `Skill` → read and follow the referenced `SKILL.md`.
+  `WebSearch`/`WebFetch` → Codex web browsing. `mcp__*__*` → the `config.toml`
+  servers above (or local-Python fallback). `Skill` → read and follow the
+  referenced `SKILL.md`.
+- **`Agent` (forked sub-skills) → a dedicated, full-depth pass — NOT an inline
+  shortcut.** This is the single most important translation. In Claude each
+  desk/analyst/writer runs as a `context: fork` subagent: a fresh, full-context
+  turn that loads the entire `SKILL.md` and produces a deep artifact. Replicate
+  that: for every dispatched sub-skill, **explicitly invoke it** (`$mm-…` or a
+  Codex subagent) so its full `SKILL.md` loads, give it your full attention, and
+  emit the **complete artifact the skill specifies**. Do **not** inline-stub,
+  batch, or summarize sub-stages.
 - Claude model-tier files in `.claude/agents/` describe task complexity only;
   they do not select Codex models.
+
+## Depth parity (do not produce shallow output)
+
+A Codex artifact must match the depth a forked Claude subagent would produce —
+running every stage is not enough if each is a stub. In particular:
+
+- **Analyst memos** are multi-paragraph arguments (typically 25–50 lines /
+  ≥1,200 chars each): a core thesis, 3–5 *distinct* supporting points each its
+  own paragraph with specific numbers and an `ev_…` id where relevant, the
+  biggest uncertainty, and the time-horizon judgment — never 2–3 sentences.
+- **The report** develops every section with substance; no stub sections.
+- The deterministic floor is `eval/graders/depth_grader.py` (thresholds in
+  `config.review.depth`). The orchestrator runs it after the memos and at review
+  and **redoes thin work**; the release gate flags it. Treat a depth failure as
+  a real defect, not noise — expand the thin artifact and re-run.
 
 ## Common verification commands
 
