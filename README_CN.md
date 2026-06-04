@@ -52,7 +52,7 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 
 ### 前置依赖
 
-- 已安装 [Claude Code](https://code.claude.com) CLI
+- 已安装 [Claude Code](https://code.claude.com) CLI —— 或 [Codex CLI](https://developers.openai.com/codex)（见[用 Codex CLI 运行](#用-codex-cli-运行claude-code-之外的另一种方式)）
 - 已安装 [Ralph Loop plugin](https://github.com/anthropics/claude-code)（推荐，用于长时间连续执行）
 - Python 3.10 及以上
 - 生成 PDF 需要 WeasyPrint 的原生依赖（Pango、cairo、GDK-PixBuf）。macOS：`brew install pango gdk-pixbuf libffi`；Debian/Ubuntu：`apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0`。中文报告需安装 CJK 字体（如 `fonts-wqy-microhei` 或 Noto Sans CJK）。（`weasyprint` 本身由 `setup.sh` 安装。）
@@ -103,6 +103,21 @@ data_sources:
 ```bash
 export NEWSAPI_KEY="your_newsapi_key"
 ```
+
+### 用 Codex CLI 运行（Claude Code 之外的另一种方式）
+
+MarketMind 也可在 [Codex CLI](https://developers.openai.com/codex) 下运行。`mm-*` 技能通过 `.agents/skills/`（指向 `.claude/skills/` 的符号链接）作为 **Codex 原生技能** 暴露，`AGENTS.md` 是始终加载的控制入口。
+
+```bash
+# 1. 注册 MCP 服务器：把 .agents/references/codex-config.toml 里的三个
+#    [mcp_servers.*] 表合并进 ~/.codex/config.toml
+# 2.（可选）导出 API key，然后在仓库根目录启动 Codex
+#    （MCP 服务器的 command/args 路径是相对仓库根目录的）
+export NEWSAPI_KEY="your_newsapi_key"   # 可选；未设置时回退到网络搜索
+codex
+```
+
+在 Codex 中用 `/skills` 查看技能。只有 **`mm-init`** 和 **`mm-orchestrator`** 是可隐式匹配的入口（例如*"为 NVDA 初始化工作区"*、*"对 workspaces/NVDA 运行 MarketMind 流水线"*）。内部各阶段技能为显式调用（`$mm-…`）——它们运行在被编排的流水线中，不可单独运行。完整的 Codex 配置见 `AGENTS.md` 与 `.agents/`。
 
 ### 使用方法
 
@@ -367,6 +382,7 @@ review:
 - [x] **机构级 PDF 渲染**：确定性的 Markdown → HTML/CSS → PDF（WeasyPrint）——首页评级框、内嵌标注 SVG 图表、带样式表格、页眉页脚，由统一提交的渲染器生成（无 LaTeX、无逐次运行脚本），并具备优雅降级
 - [x] **双语输出**：通过 `language` 配置生成中英文报告与 PDF，CJK 在正文与图表中全链路正确渲染
 - [x] **Web 展示层**：浏览器报告查看器（`/mm:dashboard`），提供文档、**幻灯片**（按章节自动拆分、键盘导航 + 导航圆点）与内嵌 PDF 三种模式，均由同一份报告内容驱动
+- [x] **Codex CLI 支持**：`mm-*` 技能作为 Codex 原生技能运行（`.agents/skills/` 符号链接 + 每个技能的 `agents/openai.yaml` 调用策略与 MCP 依赖），以 `AGENTS.md` 作为控制入口，并提供可直接粘贴的 `~/.codex/config.toml` MCP 配置
 
 ### TODO
 

@@ -52,7 +52,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 
 ### Prerequisites
 
-- [Claude Code](https://code.claude.com) CLI installed
+- [Claude Code](https://code.claude.com) CLI installed — or [Codex CLI](https://developers.openai.com/codex) (see [Run with Codex CLI](#run-with-codex-cli-alternative-to-claude-code))
 - [Ralph Loop plugin](https://github.com/anthropics/claude-code) (recommended for long-running execution)
 - Python 3.10+
 - PDF generation needs WeasyPrint's native libs (Pango, cairo, GDK-PixBuf). On macOS: `brew install pango gdk-pixbuf libffi`; on Debian/Ubuntu: `apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0`. For Chinese (CJK) reports, install a CJK font (e.g. `fonts-wqy-microhei` or Noto Sans CJK). (`weasyprint` itself is installed by `setup.sh`.)
@@ -103,6 +103,21 @@ That means the value should go into your shell environment, for example:
 ```bash
 export NEWSAPI_KEY="your_newsapi_key"
 ```
+
+### Run with Codex CLI (alternative to Claude Code)
+
+MarketMind also runs under [Codex CLI](https://developers.openai.com/codex). The `mm-*` skills are exposed as **native Codex skills** via `.agents/skills/` (a symlink to `.claude/skills/`), and `AGENTS.md` is the always-loaded control surface.
+
+```bash
+# 1. Register the MCP servers: merge the three [mcp_servers.*] tables from
+#    .agents/references/codex-config.toml into ~/.codex/config.toml
+# 2. (Optional) export API keys, then launch Codex FROM THE REPO ROOT
+#    (the MCP server command/args paths are repo-relative)
+export NEWSAPI_KEY="your_newsapi_key"   # optional; web-search fallback otherwise
+codex
+```
+
+In Codex, list skills with `/skills`. Only **`mm-init`** and **`mm-orchestrator`** are auto-matched entry points (e.g. *"initialize a workspace for NVDA"*, *"run the MarketMind pipeline for workspaces/NVDA"*). The internal pipeline-stage skills are explicit-only (`$mm-…`) — they run inside the orchestrated pipeline, not standalone. See `AGENTS.md` and `.agents/` for the full Codex profile.
 
 ### Usage
 
@@ -367,6 +382,7 @@ review:
 - [x] **Institutional PDF Rendering**: Deterministic Markdown → HTML/CSS → PDF (WeasyPrint) — Page-1 rating box, embedded annotated SVG charts, styled tables, running headers/footers, and a self-degrading committed renderer (no LaTeX, no per-run scripts)
 - [x] **Bilingual Output**: English + Chinese reports and PDFs via the `language` config, with CJK rendered cleanly end-to-end (body + charts)
 - [x] **Web Presentation**: Browser report viewer (`/mm:dashboard`) with Document, **Slides** (auto-split by section, keyboard navigation + nav dots), and embedded-PDF modes — all driven by the same report content
+- [x] **Codex CLI Support**: The `mm-*` skills run as native Codex skills (`.agents/skills/` symlink + per-skill `agents/openai.yaml` invocation policy + MCP dependencies), with `AGENTS.md` as the control surface and a ready-to-paste `~/.codex/config.toml` MCP config
 
 ### TODO
 
