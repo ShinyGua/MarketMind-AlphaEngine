@@ -31,7 +31,7 @@ command = ".venv/bin/python3"
 args = ["mcp/market_data_server.py"]
 env = {}
 
-[mcp_servers.workspace]
+[mcp_servers.mm-workspace]
 command = ".venv/bin/python3"
 args = ["mcp/workspace_server.py"]
 env = { WORKSPACES_DIR = "workspaces" }

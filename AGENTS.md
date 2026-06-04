@@ -72,7 +72,7 @@ date folder, and MCP servers. `.agents/skill-index.md` maps stages → skills.
 
 ## Codex MCP setup (required for full functionality)
 
-The skills call `mcp__market-data__*`, `mcp__workspace__*`, `mcp__memory__*`.
+The skills call `mcp__market-data__*`, `mcp__mm-workspace__*`, `mcp__memory__*`.
 Codex reads MCP servers from `~/.codex/config.toml` (not `.mcp.json`). Copy the
 three `[mcp_servers.*]` tables from **`.agents/references/codex-config.toml`**
 into your `~/.codex/config.toml`, then:

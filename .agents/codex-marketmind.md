@@ -28,7 +28,7 @@ inside the orchestrated pipeline (arguments, prior-stage dated artifacts, MCP).
 
 ## Codex MCP Setup
 
-The skills call `mcp__market-data__*`, `mcp__workspace__*`, `mcp__memory__*`.
+The skills call `mcp__market-data__*`, `mcp__mm-workspace__*`, `mcp__memory__*`.
 Codex reads MCP servers from `~/.codex/config.toml`. Copy the three
 `[mcp_servers.*]` tables from `.agents/references/codex-config.toml`, launch
 `codex` from the repo root (server paths are repo-relative), and export
@@ -85,7 +85,7 @@ name:
   subagent tooling if available.
 - `WebSearch` / `WebFetch` -> use Codex web browsing when current facts or
   verification are required.
-- `mcp__workspace__*`, `mcp__market-data__*`, `mcp__memory__*` -> the servers
+- `mcp__mm-workspace__*`, `mcp__market-data__*`, `mcp__memory__*` -> the servers
   registered from `.agents/references/codex-config.toml`. If not attached, use
   the local Python servers/modules (`mcp/*_server.py`) or workspace files.
 

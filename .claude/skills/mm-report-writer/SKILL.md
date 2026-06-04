@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-standard
-allowed-tools: Read, Write, Glob, Grep, mcp__workspace__write_artifact
+allowed-tools: Read, Write, Glob, Grep, mcp__mm-workspace__write_artifact
 ---
 
 # Role: Research Report Writer

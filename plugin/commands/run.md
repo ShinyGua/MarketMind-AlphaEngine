@@ -69,7 +69,7 @@ Agent tool:
 **After launching the monitor**, set `progress_mode` in `status.json` via the MCP tool:
 
 ```
-mcp__workspace__update_status with:
+mcp__mm-workspace__update_status with:
   ticker: {TICKER}
   progress_mode: "monitor"
 ```
@@ -81,7 +81,7 @@ The monitor reads `status.json` every 5 seconds and updates the TodoWrite checkl
 Set `progress_mode` to `"orchestrator"` instead:
 
 ```
-mcp__workspace__update_status with:
+mcp__mm-workspace__update_status with:
   ticker: {TICKER}
   progress_mode: "orchestrator"
 ```

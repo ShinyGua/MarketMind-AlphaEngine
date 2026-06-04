@@ -6,7 +6,7 @@
       "comment": "API keys (NEWSAPI_KEY, FRED_API_KEY) are loaded from the project .env at server startup; never commit secrets here.",
       "env": {}
     },
-    "workspace": {
+    "mm-workspace": {
       "command": ".venv/bin/python3",
       "args": ["mcp/workspace_server.py"],
       "env": {

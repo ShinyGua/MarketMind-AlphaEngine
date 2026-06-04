@@ -5,7 +5,7 @@ user-invocable: false
 disable-model-invocation: true
 context: fork
 agent: mm-light
-allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, WebFetch, mcp__workspace__write_artifact
+allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, WebFetch, mcp__mm-workspace__write_artifact
 ---
 
 # Role: Web Research Desk
