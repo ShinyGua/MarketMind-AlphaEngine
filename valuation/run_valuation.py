@@ -54,6 +54,167 @@ def _load_json(path):
         return None
 
 
+# ── company-desk → engine schema adapter ──────────────────────────────────────
+# The company desk writes raw yfinance fundamentals:
+#   {"ticker", "valuation_ratios": {camelCase}, "financials": {statement: {item: {date: val}}}}
+# The engine consumes a normalized shape: metrics{snake_case} + income_statement /
+# cash_flow as lists-of-dicts (newest first). These helpers bridge the two without
+# touching the math in dcf.py / comps.py.
+
+# yfinance camelCase ratio → engine metrics key
+_RATIO_MAP = {
+    "enterpriseToRevenue": "ev_to_revenue",
+    "enterpriseToEbitda": "ev_to_ebitda",
+    "trailingPE": "trailing_pe",
+    "forwardPE": "forward_pe",
+    "priceToBook": "price_to_book",
+    "revenueGrowth": "revenue_growth",
+    "profitMargins": "profit_margins",
+    "operatingMargins": "operating_margins",
+    "marketCap": "market_cap",
+    "enterpriseValue": "enterprise_value",
+    "beta": "beta",
+    "sharesOutstanding": "shares_outstanding",
+    "currentPrice": "current_price",
+    "totalRevenue": "total_revenue",
+    "ebitda": "ebitda",
+    "totalCash": "total_cash",
+    "totalDebt": "total_debt",
+    "quoteType": "quote_type",
+}
+
+
+def _looks_like_date(s) -> bool:
+    """True for 'YYYY-MM-DD'-style keys used as statement period columns."""
+    return isinstance(s, str) and len(s) >= 7 and s[:4].isdigit() and s[4] == "-"
+
+
+def _latest_period(statement: dict):
+    """Return the newest period's line items as {line_item: value}, or None.
+
+    Handles both yfinance statement layouts the company desk may emit:
+      • date-keyed:  {date_str: {line_item: value}}   (current desk schema)
+      • item-keyed:  {line_item: {date_str: value}}   (transposed layout)
+    """
+    if not isinstance(statement, dict) or not statement:
+        return None
+
+    # date-keyed layout: top-level keys are date strings, values are item dicts.
+    date_keys = [k for k, v in statement.items()
+                 if _looks_like_date(k) and isinstance(v, dict)]
+    if date_keys:
+        period = statement[sorted(date_keys)[-1]]
+        return period if isinstance(period, dict) else None
+
+    # item-keyed layout: each value is a {date_str: value} series.
+    dates = set()
+    for series in statement.values():
+        if isinstance(series, dict):
+            dates.update(series.keys())
+    if not dates:
+        return None
+    newest = sorted(dates)[-1]  # ISO-ish date strings sort chronologically
+    return {item: series.get(newest)
+            for item, series in statement.items()
+            if isinstance(series, dict)}
+
+
+def _norm_metrics(raw: dict) -> dict:
+    # Support two schemas:
+    #   schema A (company-desk v1): raw["valuation_ratios"] = {camelCase: value}
+    #   schema B (direct yfinance): raw["info"] = {camelCase: value}
+    ratios = raw.get("valuation_ratios") or raw.get("info") or {}
+    metrics = {}
+    for src, dst in _RATIO_MAP.items():
+        v = ratios.get(src)
+        if v is not None and not (isinstance(v, float) and v != v):  # skip NaN
+            metrics[dst] = v
+    # quote_type: prefer metadata, then info/valuation_ratios field
+    qt = (raw.get("metadata") or {}).get("quote_type") or ratios.get("quoteType")
+    if qt:
+        metrics["quote_type"] = qt
+    return metrics
+
+
+def _nonan(v):
+    """Return None for NaN floats; pass other values through."""
+    if isinstance(v, float) and v != v:
+        return None
+    return v
+
+
+def _norm_statements(raw: dict):
+    """Return (income_statement, cash_flow) as single-row lists (latest period).
+
+    Prefers annual statements; falls back to quarterly when annual are empty
+    (e.g. WOLF post-Chapter 11 reporting gap).
+
+    Supports three layouts:
+      • schema A: raw["financials"]["income_statement"] + raw["cashflow"]
+      • schema B: raw["income_statement"] + raw["cash_flow"]  (direct yfinance)
+      • schema C: raw["financials"] is a flat date-keyed dict (older layout)
+    """
+    fin = raw.get("financials") or {}
+    inc_period = (_latest_period(fin.get("income_statement"))
+                  or _latest_period(fin.get("income_statement_q"))
+                  or _latest_period(raw.get("income_statement"))
+                  or _latest_period(fin))
+    cf_period = (_latest_period(raw.get("cashflow"))
+                 or _latest_period(raw.get("cashflow_q"))
+                 or _latest_period(raw.get("cash_flow"))
+                 or _latest_period(fin.get("cashflow"))
+                 or _latest_period(fin.get("cashflow_q")))
+
+    income = []
+    if inc_period:
+        ebit = _nonan(inc_period.get("EBIT")) or _nonan(inc_period.get("Operating Income"))
+        income = [{
+            "ebit": ebit,
+            "pretax_income": _nonan(inc_period.get("Pretax Income")),
+            "tax_provision": _nonan(inc_period.get("Tax Provision")),
+        }]
+    cash_flow = []
+    if cf_period:
+        dep = (_nonan(cf_period.get("Depreciation And Amortization"))
+               or _nonan(cf_period.get("Depreciation Amortization Depletion"))
+               or _nonan(cf_period.get("Depreciation")))
+        cash_flow = [{
+            "dep_amort": dep,
+            "capex": _nonan(cf_period.get("Capital Expenditure")),
+            "operating_cash_flow": _nonan(cf_period.get("Operating Cash Flow")),
+        }]
+    return income, cash_flow
+
+
+def _adapt_fundamentals(raw: dict) -> dict:
+    """Normalize a company-desk fundamentals dict into the engine schema.
+
+    Idempotent: a dict that already has `metrics` is returned unchanged.
+
+    Handles three input schemas:
+      • already-normalized: has `metrics` key → pass through
+      • company-desk v1: has `valuation_ratios` + `financials` keys
+      • direct yfinance: has `info` + `income_statement` + `cash_flow` keys
+    """
+    if not isinstance(raw, dict):
+        return raw
+    if raw.get("metrics"):
+        return raw
+    # Accept either schema; fall through if neither recognized key set is present.
+    has_ratios_schema = "valuation_ratios" in raw or "financials" in raw
+    has_info_schema = "info" in raw or "income_statement" in raw or "cash_flow" in raw
+    if not has_ratios_schema and not has_info_schema:
+        return raw
+    income, cash_flow = _norm_statements(raw)
+    return {
+        "ticker": raw.get("ticker"),
+        "metrics": _norm_metrics(raw),
+        "income_statement": income,
+        "cash_flow": cash_flow,
+        "metadata": raw.get("metadata"),
+    }
+
+
 def _cfg(workspace):
     rc = _load_json(os.path.join(workspace, "resolved_config.json")) or {}
     block = {**_DEFAULTS, **(rc.get("valuation") or {})}
@@ -97,7 +258,15 @@ def main():
         print("valuation: disabled in config")
         return
 
-    fund = _load_json(os.path.join(workspace, "raw", date, "fundamentals", f"{ticker}.json"))
+    # Try several possible filenames: {ticker}.json, then any *.json in the dir
+    # (company desk may append exchange suffix, e.g. 0941.HK.json)
+    fund_dir = os.path.join(workspace, "raw", date, "fundamentals")
+    fund_path = os.path.join(fund_dir, f"{ticker}.json")
+    if not os.path.exists(fund_path):
+        candidates = [f for f in sorted(glob.glob(os.path.join(fund_dir, "*.json")))
+                      if os.path.basename(f).startswith(ticker)]
+        fund_path = candidates[0] if candidates else fund_path
+    fund = _adapt_fundamentals(_load_json(fund_path))
     if not fund or not fund.get("metrics"):
         _not_applicable(out_dir, ticker, "fundamentals unavailable", lang)
         return
@@ -117,7 +286,8 @@ def main():
     # peers
     peer_files = sorted(glob.glob(
         os.path.join(workspace, "raw", date, "fundamentals", "peers", "*.json")))
-    peers = [p for p in (_load_json(f) for f in peer_files) if p and p.get("metrics")]
+    peers = [p for p in (_adapt_fundamentals(_load_json(f)) for f in peer_files)
+             if p and p.get("metrics")]
 
     inputs_missing = []
 

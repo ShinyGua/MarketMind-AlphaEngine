@@ -19,6 +19,8 @@ Write reasons, risks, and narrative text in the language from `resolved_config.j
 
 This is a SEPARATE stage from report writing. The report is the research product; the decision is the investment action layer.
 
+The BUY/HOLD/SELL output is a **research view for human review, not investment advice and not an executed action**. It is drafted for a person to evaluate and sign off on before any external use; it does not account for an individual's suitability, position sizing, risk tolerance, or mandate. State conclusions plainly, but never imply the call is a guaranteed outcome or a recommendation to transact.
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
@@ -77,6 +79,8 @@ Start from the moderator's `net_directional_lean` in `thesis_map.json`: `bullish
 **HOLD** only when the two sides are genuinely balanced after weighing by evidence quality — catalysts offsetting, technicals neutral, risk/reward roughly symmetric. Before settling on HOLD, run the **invert-the-signs test**: if every directional sign in front of you were flipped, would you confidently call BUY? If yes, then the honest call here is SELL — do not retreat to HOLD to avoid a directional view.
 
 ### 3. Calibrate Confidence
+
+`confidence` measures **evidence quality and directional conviction** — how clean and well-supported the directional case is. It is **not** a probability that the call will be correct, and it is not a price-move forecast. Calibrate it to the strength and agreement of the evidence, not to optimism.
 
 Score confidence from 0.0 to 1.0:
 - 0.8+: Strong conviction, multiple confirming signals

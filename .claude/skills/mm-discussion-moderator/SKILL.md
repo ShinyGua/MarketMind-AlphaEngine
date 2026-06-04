@@ -100,8 +100,8 @@ Read critique files AND the memo summaries saved during scan. Do NOT re-read ful
 ### 1. Read All Discussion Materials
 
 Read every file in:
-- `{workspace}/discussion/analyst_memos/` (3 memos)
-- `{workspace}/discussion/debate/` (all round subdirectories, all critique files)
+- `{workspace}/discussion/{date}/analyst_memos/` (3 memos)
+- `{workspace}/discussion/{date}/debate/` (all round subdirectories, all critique files)
 
 ### 2. Map the Landscape
 
@@ -141,7 +141,7 @@ After mapping consensus and disagreements, state a single **net evidence-weighte
 
 ### 6. Produce thesis_map.json
 
-Write to: `{workspace}/discussion/thesis_map.json`
+Write to: `{workspace}/discussion/{date}/thesis_map.json`
 
 ```json
 {
@@ -181,7 +181,7 @@ Write to: `{workspace}/discussion/thesis_map.json`
 
 ### 7. Produce debate_summary.md
 
-Write to: `{workspace}/discussion/debate_summary.md`
+Write to: `{workspace}/discussion/{date}/debate_summary.md`
 
 ```markdown
 # Analyst Debate Summary

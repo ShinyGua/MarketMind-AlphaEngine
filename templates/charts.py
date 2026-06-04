@@ -75,12 +75,17 @@ def L(key):
 
 def _setup_rcparams():
     """Set matplotlib defaults, including CJK fonts for Chinese."""
-    fonts = ['Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif']
+    fonts = ['Helvetica Neue', 'Helvetica', 'Arial', 'DejaVu Sans', 'sans-serif']
     if LANG == 'ch':
-        fonts = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei'] + fonts
+        # Order by likely availability across OSes; WenQuanYi/Noto are the
+        # common Linux CJK faces (WenQuanYi is what ships in this environment).
+        fonts = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei',
+                 'Noto Sans CJK SC', 'Source Han Sans SC',
+                 'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei'] + fonts
     plt.rcParams.update({
         'font.family': 'sans-serif',
         'font.sans-serif': fonts,
+        'axes.unicode_minus': False,
         'font.size': 9,
         'axes.labelcolor': COLORS['text'],
         'axes.edgecolor': COLORS['light_gray'],
@@ -271,7 +276,7 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
     ax2.set_xticklabels(tick_labels, fontsize=7)
 
     plt.tight_layout()
-    fig.savefig(output_path, format='pdf', bbox_inches='tight', dpi=150)
+    fig.savefig(output_path, bbox_inches='tight', dpi=150)  # format inferred from extension (.svg)
     plt.close(fig)
     print(f'  Generated: {output_path}')
 
@@ -342,7 +347,7 @@ def generate_relative_chart(ticker, ticker_path, spy_path, output_path, index_na
     ax.set_xticklabels(tick_labels, fontsize=7)
 
     plt.tight_layout()
-    fig.savefig(output_path, format='pdf', bbox_inches='tight', dpi=150)
+    fig.savefig(output_path, bbox_inches='tight', dpi=150)  # format inferred from extension (.svg)
     plt.close(fig)
     print(f'  Generated: {output_path}')
 
@@ -396,7 +401,7 @@ def generate_peer_chart(ticker, peer_data, output_path):
                  fontweight='bold', color=COLORS['primary'], loc='left', pad=12)
 
     plt.tight_layout()
-    fig.savefig(output_path, format='pdf', bbox_inches='tight', dpi=150)
+    fig.savefig(output_path, bbox_inches='tight', dpi=150)  # format inferred from extension (.svg)
     plt.close(fig)
     print(f'  Generated: {output_path}')
 
@@ -485,7 +490,7 @@ def main():
     if not ticker_3mo.exists():
         ticker_3mo = raw_prices / f'{ticker_clean}_medium.csv'
     if ticker_3mo.exists():
-        generate_price_chart(ticker, str(ticker_3mo), str(chart_dir / 'price_chart.pdf'),
+        generate_price_chart(ticker, str(ticker_3mo), str(chart_dir / 'price_chart.svg'),
                             catalysts=catalysts)
 
     # 2. Relative performance chart (annotated)
@@ -516,7 +521,7 @@ def main():
         if idx_name == 'SECTOR ETF':
             idx_name = 'Sector'
         generate_relative_chart(ticker, str(ticker_3mo), str(spy_path),
-                                str(chart_dir / 'relative_chart.pdf'),
+                                str(chart_dir / 'relative_chart.svg'),
                                 index_name=idx_name)
 
     # 3. Peer chart (target highlighted)
@@ -546,7 +551,7 @@ def main():
                     tret = (tdf['Close'].iloc[-1] / tdf['Close'].iloc[-5] - 1) * 100
                     peer_data.insert(0, {'name': ticker, 'return_5d': float(tret)})
             if peer_data:
-                generate_peer_chart(ticker, peer_data, str(chart_dir / 'peer_chart.pdf'))
+                generate_peer_chart(ticker, peer_data, str(chart_dir / 'peer_chart.svg'))
         except Exception as e:
             print(f'  Warning: peer chart failed: {e}')
 

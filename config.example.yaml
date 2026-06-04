@@ -40,7 +40,7 @@ data_sources:
   news:
     provider: newsapi           # newsapi free tier; falls back to web_search if no API key
     fallback: web_search        # use WebSearch tool when API key is unavailable
-    api_key_env: NEWSAPI_API_KEY
+    api_key_env: NEWSAPI_KEY
     max_market_news: 10
     max_sector_news: 12
     max_company_news: 15
@@ -60,6 +60,17 @@ data_sources:
       - DGS10                   # US 10Y yield
       - DTWEXBGS                # Trade-weighted USD
       - VIXCLS                  # VIX
+
+  nasdaq:                       # public nasdaq.com data (US names only)
+    enabled: true
+    api_base: https://api.nasdaq.com   # unofficial JSON API, no key; falls back to WebSearch/WebFetch
+    news_limit: 10
+
+  web_research:                 # mm-web-research subagent (Claude WebSearch/WebFetch)
+    enabled: true
+    max_results: 12
+    # source hierarchy: institutional/MCP > NewsAPI > NASDAQ (US) > general web search
+    source_hierarchy: [mcp, newsapi, nasdaq, websearch]
 
 # --- Shared Market Context ---
 shared_market_context:

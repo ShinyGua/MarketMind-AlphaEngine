@@ -1,6 +1,6 @@
 ---
 name: mm-pdf-exporter
-description: Generates JPM-style PDF report — creates annotated charts, writes LaTeX, compiles with xelatex
+description: Generates the JPM-style PDF — renders annotated SVG charts, then markdown→HTML/CSS→PDF via WeasyPrint
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -12,7 +12,7 @@ allowed-tools: Read, Write, Bash, Glob, Grep
 
 ## Mission
 
-Convert the pipeline outputs into a professional JPM-style PDF equity research report. Generate annotated charts from price data, write a LaTeX document using the `equity_research.cls` template, and compile with xelatex.
+Produce the final branded PDF equity research report. This stage is **deterministic and code-driven**: you run two committed scripts and verify the output. You do **NOT** hand-author LaTeX, HTML, or per-run Python — the layout lives in `templates/render_pdf.py`, `templates/report.html.j2`, and `templates/report.css`.
 
 **PYTHON**: Always use `.venv/bin/python3` for all Python commands.
 
@@ -21,232 +21,58 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 ## Language
 
-Read `resolved_config.json` → `language` field. If `ch`, the report body and all narrative sections should already be in Chinese (written by the report writer). Additionally:
-- Pass `--lang ch` to `charts.py` so chart labels are in Chinese
-- Add `\setlanguagech` before `\begin{document}` in the `.tex` file to activate Chinese strings in the LaTeX template
-- If language is `en` (default), no extra flags needed
+Read `resolved_config.json` → `language`. If `ch`, pass `--lang ch` to `charts.py` so chart labels are Chinese. The renderer reads the language itself from config and selects Chinese UI strings + CJK font automatically — no other flags needed.
 
-## Inputs
+## Pipeline
 
-- `{workspace}/resolved_config.json` — merged config (contains language field)
-- `{workspace}/final/{date}/{daily_report|weekly_report}.md` — the final markdown report (filename depends on `run_mode` in resolved_config: `daily_report.md` for daily, `weekly_report.md` for weekly)
-- `{workspace}/quant/{date}/quant_summary.json` — technical indicators
-- `{workspace}/decision/{date}/final_decision.json` — BUY/HOLD/SELL decision
-- `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis
-- `{workspace}/profile/company_profile.json` — company metadata (undated)
-- `{workspace}/raw/{date}/calendar/catalysts.json` — catalyst events (for chart annotations)
-- `templates/equity_research.cls` — LaTeX document class (project root)
-- `templates/charts.py` — chart generation script (project root)
+```
+final/{date}/{daily|weekly}_report.md  ──┐
+quant / decision / valuation / profile  ─┼─► render_pdf.py ─► report.pdf
+exports/{date}/pdf/charts/*.svg  ◄─ charts.py
+```
 
-## Process
-
-### Step 1: Generate Annotated Charts
-
-Run the chart generation script:
+### Step 1 — Generate annotated charts (SVG)
 
 ```bash
-# If language is ch, add --lang ch
+# add --lang ch when resolved_config.language == "ch"
 .venv/bin/python3 templates/charts.py {workspace} {date} {TICKER} [--lang ch]
 ```
 
-This reads price CSVs and catalysts, and outputs to `{workspace}/exports/{date}/pdf/charts/`:
-- `price_chart.pdf` — annotated price chart with SMA, crossovers, latest price, catalyst events
-- `relative_chart.pdf` — TICKER vs SPY with spread labels and alpha badge
-- `peer_chart.pdf` — peer bar chart with target ticker highlighted and rank badge
+Writes vector SVG charts to `{workspace}/exports/{date}/pdf/charts/`:
+`price_chart.svg`, `relative_chart.svg`, `peer_chart.svg`. Charts are best-effort — a missing peer/index file just skips that chart; continue regardless.
 
-Verify at least `price_chart.pdf` was created.
-
-### Step 2: Read Pipeline Outputs
-
-Read these files and extract key data:
-- From `company_profile.json`: name, ticker, exchange, sector
-- From `final_decision.json`: decision, confidence, horizon, decision_summary, top_reasons, key_risks, disconfirming_signals
-- From `quant_summary.json`: returns (1d/5d/1m/3m), technical indicators (RSI, MACD, ATR), relative_strength, flags
-- From `thesis_map.json`: consensus, strongest_bull_case, strongest_bear_case, writer_guidance
-- From the final report markdown (`daily_report.md` or `weekly_report.md`): section content (Executive Summary, Market Context, Company Events, etc.)
-
-### Step 3: Write report.tex
-
-Write `{workspace}/exports/{date}/pdf/report.tex` following this **7-page structure**:
-
-**Page 1: Cover + Thesis**
-```latex
-\documentclass{equity_research}
-\company{...}\ticker{...}\exchange{...}\sector{...}
-\reportdate{...}\decision{...}\confidence{...}\horizon{...}\reportmode{Daily}
-% If language is ch, add: \setlanguagech
-\begin{document}
-\maketitlepage
-\subsection{Investment Thesis}
-\begin{thesisbox}
-[2-3 sentence thesis from decision_summary — narrative, not bullets]
-\end{thesisbox}
-\vspace{3em}
-\metricbox{1D Return}{+X.X\%} \metricsep \metricbox{RSI (14)}{XX} \metricsep ...
-\sourceattr{...}
-```
-
-**Page 2: The Big Picture**
-```latex
-\bigpicturepage{[regime insight from thesis_map consensus/bull case]}{[why it matters]}
-\insertchart{charts/relative_chart.pdf}
-```
-
-**Page 3: Market Context**
-```latex
-\section{Market Context}
-\bigidea{[one-sentence market summary]}
-[1-2 narrative paragraphs — NOT bullets]
-```
-
-**Page 4: Price Action**
-```latex
-\section{Price Action}
-\bigidea{[one-sentence technical summary]}
-\insertchart{charts/price_chart.pdf}
-\metricbox{1D}{...} \metricsep \metricbox{5D}{...} ...
-[1 short paragraph about volume/momentum]
-```
-
-After the paragraph, add a **Technical Snapshot table** (from `quant_summary.json`). Use `\resizebox` to fit 11 columns. Include: Close, 1D%, 5D%, 1M%, 3M%, RSI(14), MACD, MACD Signal, MACD Hist, SMA20, SMA50. **Do NOT include** EMA12, EMA26, or ATR. Color returns and MACD values (positive=`\textcolor{buygreen}{}`, negative=`\textcolor{sellred}{}`).
-
-```latex
-\vspace{0.8em}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}rrrrrrrrrrr@{}}
-\rowcolor{jpmnavy}
-\textcolor{white}{\textbf{Close}} &
-\textcolor{white}{\textbf{1D\%}} &
-\textcolor{white}{\textbf{5D\%}} &
-\textcolor{white}{\textbf{1M\%}} &
-\textcolor{white}{\textbf{3M\%}} &
-\textcolor{white}{\textbf{RSI(14)}} &
-\textcolor{white}{\textbf{MACD}} &
-\textcolor{white}{\textbf{Signal}} &
-\textcolor{white}{\textbf{Hist}} &
-\textcolor{white}{\textbf{SMA20}} &
-\textcolor{white}{\textbf{SMA50}} \\
-\rowcolor{jpmlight}
-\$[close] &
-[+/-][1d]\% &
-[+/-][5d]\% &
-[+/-][1m]\% &
-[+/-][3m]\% &
-[rsi] &
-[macd] &
-[macd\_signal] &
-[+/-][macd\_hist] &
-\$[sma20] &
-\$[sma50] \\
-\end{tabular}}
-\sourceattr{Yahoo Finance via yfinance}
-```
-
-**Page 5: What Changed (Company Events)**
-```latex
-\section{What Changed}
-\bigidea{[one-sentence event summary]}
-[2-3 narrative paragraphs about key events — each event as a paragraph with bold title]
-```
-
-**Page 6: Sector & Peers**
-
-Build two LaTeX tables from `quant_summary.json`. **Do NOT use `\insertchart{charts/peer_chart.pdf}`** on this page.
-
-```latex
-\section{Sector \& Peers}
-\bigidea{[one-sentence peer positioning]}
-[1 short narrative paragraph]
-\vspace{1em}
-```
-
-**Table 1 — Peer 5D Returns** (from `relative_strength.peer_5d_returns`). Sort descending by return. Bold the target ticker row. Color returns green/red. Use `\rowcolor{jpmlight}` on the target row.
-
-```latex
-\begin{center}
-{\footnotesize
-\begin{tabular}{@{}lrr@{}}
-\rowcolor{jpmnavy}
-\textcolor{white}{\textbf{Ticker}} &
-\textcolor{white}{\textbf{5D Return}} &
-\textcolor{white}{\textbf{Peer Rank}} \\
-\rowcolor{jpmlight}
-\textbf{[TICKER]} & \textcolor{buygreen/sellred}{\textbf{[+/-][X.XX]\%}} & \textbf{\#[rank] of [N]} \\
-[peer1] & \textcolor{buygreen/sellred}{[+/-][X.XX]\%} & \\
-[peer2] & \textcolor{buygreen/sellred}{[+/-][X.XX]\%} & \\
-... \\
-\end{tabular}}
-\end{center}
-```
-
-**Table 2 — Relative Strength vs Benchmarks** (from `relative_strength.vs_SPY_5d`, `vs_SPY_1m`, `vs_SOXX_5d`, `vs_SOXX_1m`). Place below table 1 with `\vspace{1em}`.
-
-```latex
-\vspace{1em}
-\begin{center}
-{\footnotesize
-\begin{tabular}{@{}lrr@{}}
-\rowcolor{jpmnavy}
-\textcolor{white}{\textbf{Benchmark}} &
-\textcolor{white}{\textbf{5D Alpha}} &
-\textcolor{white}{\textbf{1M Alpha}} \\
-\rowcolor{jpmlight}
-vs SPY & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} \\
-vs SOXX (Sector) & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} & \textcolor{buygreen/sellred}{[+/-][X.XX]pp} \\
-\end{tabular}}
-\end{center}
-\sourceattr{Yahoo Finance via yfinance}
-```
-
-**Page 7: Decision & Risk**
-```latex
-\section{Decision \& Risk}
-\decisionpage{[summary paragraph]}{
-\item [reason 1]
-\item [reason 2]
-\item [reason 3]
-}{
-\item [risk 1]
-\item [risk 2]
-\item [risk 3]
-}
-\subsection{What Would Change Our View}
-[1 paragraph from disconfirming_signals]
-\disclaimer
-\end{document}
-```
-
-### Step 4: Copy Template
+### Step 2 — Render the PDF
 
 ```bash
-cp templates/equity_research.cls {workspace}/exports/{date}/pdf/
+.venv/bin/python3 templates/render_pdf.py {workspace} {date}
 ```
 
-### Step 5: Compile with xelatex
+This converts the final markdown report → HTML (with the branded `report.css` and `report.html.j2`) → PDF via **WeasyPrint**, embedding the SVG charts. It builds the Page-1 cover + rating box from the JSON artifacts (decision, quant, valuation, profile), styles all markdown tables, adds running headers/footers, and renders Chinese cleanly via the system CJK font. Charts that the report references inline (`![...](charts/*.svg)`) embed in place; any charts not referenced are appended in an **Exhibits** section so they are never dropped.
 
-```bash
-cd {workspace}/exports/{date}/pdf && xelatex -interaction=nonstopmode report.tex
-```
+The renderer is self-degrading: missing artifacts render as "—" rather than failing. It also writes `report.html` alongside the PDF for debugging.
 
-Run once. Only run a second pass if the log contains "Rerun to get cross-references right" — otherwise skip (saves ~1.5 minutes).
+### Step 3 — Verify
 
-### Step 6: Verify
+Confirm `{workspace}/exports/{date}/pdf/report.pdf` exists and is non-trivial (typically 100 KB–400 KB; chart-bearing PDFs are well over the old ~14 KB text-only size). If it is missing, re-run Step 2 and report the renderer's stderr — do **not** fall back to hand-writing a PDF script.
 
-Check that `{workspace}/exports/{date}/pdf/report.pdf` exists and is non-empty (should be 50-100KB).
+## Inputs
 
-## LaTeX Writing Rules
-
-1. **Escape special characters**: `&` → `\&`, `%` → `\%`, `$` → `\$`, `#` → `\#`, `_` → `\_`
-2. **Narrative, not bullets**: Use paragraphs for everything except the decision page's Why/Risks sections
-3. **One page per section**: The `\section{}` command automatically starts a new page
-4. **Use \bigidea{} at the top of each section**: This is the one-sentence hook that tells the reader why this page matters
-5. **Chart paths are relative**: Use `charts/price_chart.pdf` not absolute paths
-6. **Keep it sparse**: Each page should have 40-50% whitespace
-7. **Sources**: End each page with `\sourceattr{...}`
+- `{workspace}/resolved_config.json` — language + run_mode
+- `{workspace}/final/{date}/{daily_report|weekly_report}.md` — report body
+- `{workspace}/decision/{date}/final_decision.json` — rating box
+- `{workspace}/quant/{date}/quant_summary.json` — price + key metrics
+- `{workspace}/valuation/{date}/valuation_summary.json` — fair value / margin of safety
+- `{workspace}/profile/company_profile.json` — company meta + market cap
+- `{workspace}/raw/{date}/calendar/catalysts.json` — chart annotations
 
 ## Output
 
-- `{workspace}/exports/{date}/pdf/charts/*.pdf` — generated chart files
-- `{workspace}/exports/{date}/pdf/report.tex` — LaTeX source
-- `{workspace}/exports/{date}/pdf/equity_research.cls` — copied template
-- `{workspace}/exports/{date}/pdf/report.pdf` — Final JPM-style PDF report
+- `{workspace}/exports/{date}/pdf/charts/*.svg` — annotated charts
+- `{workspace}/exports/{date}/pdf/report.html` — intermediate HTML (debug)
+- `{workspace}/exports/{date}/pdf/report.pdf` — final JPM-style PDF
+
+## Rules
+
+- Do not author LaTeX, HTML, or fpdf2 scripts. The two scripts above own the output; your job is to run and verify them.
+- Do not edit `report.css` / `report.html.j2` / `render_pdf.py` per run — they are committed templates.
+- If a chart or artifact is missing, note it and continue; the export stage is non-critical and the renderer degrades gracefully.

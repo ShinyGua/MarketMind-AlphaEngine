@@ -49,3 +49,20 @@ cli_pause
 
 # Ignore specific agent spec files
 market_report_agent_codex_spec.md
+
+.mm_status.py
+theses/
+cx2cc_review.md
+
+# Mid-process / per-run artifacts (regenerated each run; not source)
+# Long-term memory stores (only memory/retrieval.py is tracked source)
+memory/episodic
+memory/procedural
+memory/semantic
+# Per-run LLM-generated stage scripts (e.g. quant_{ticker}_{date}.py).
+# The committed scripts/ are deterministic helpers; throwaways are not.
+scripts/quant_*.py
+scripts/*_build_*.py
+# Stray rendered report artifacts if produced outside workspaces/
+/report.pdf
+/report.html

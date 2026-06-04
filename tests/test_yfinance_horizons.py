@@ -12,7 +12,7 @@ HORIZONS = {
     "long":   {"period": "2y",  "interval": "1mo"},
 }
 
-def test_horizon(name, period, interval):
+def _check_horizon(name, period, interval):
     print(f"\n--- {name}: period={period}, interval={interval} ---")
     try:
         df = yf.download(TICKER, period=period, interval=interval, progress=False)
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     print(f"Testing yfinance horizons for {TICKER}")
     results = {}
     for name, params in HORIZONS.items():
-        results[name] = test_horizon(name, **params)
+        results[name] = _check_horizon(name, **params)
 
     print("\n=== SUMMARY ===")
     all_pass = True

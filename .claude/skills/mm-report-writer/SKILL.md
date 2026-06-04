@@ -61,22 +61,30 @@ Write to: `{workspace}/drafts/{date}/daily_v1.md`
 ---
 
 ## Executive Summary
-<3-5 bullet points capturing the day's key takeaways. Lead with the most material event.>
+<The Page-1 investment summary. Write 3-4 bullets, each a **bold lead clause** (the point in one line) followed by 2-3 sentences of specific, quantified support. Lead with numbers; cite evidence card IDs. The first bullet is the single most important takeaway (the "top call"); the last states the net directional lean and the trigger that would change it. Mirror this shape:
+- **Bold lead clause capturing the point.** 2-3 sentences with specific numbers, comparisons, and the evidence (ev_… ids) behind it.
+(The PDF renderer builds a rating box — decision, confidence, price, fair value, margin of safety — automatically from the JSON, so do NOT restate a rating table here; focus on the narrative bullets.)>
 
 ## Market Context
 <Macro environment, index performance, sector performance. Use relative strength data. Clearly state whether the stock's move is market-driven or company-specific.>
+
+![Relative strength](charts/relative_chart.svg)
 
 ## Company Events & News
 <Ranked by materiality. Each event: what happened, why it matters, market reaction. Reference evidence card IDs.>
 
 ## Price Action & Technical Snapshot
-<Current price, returns (1d/5d/1m/3m), key technical levels, RSI, MACD status, volume. Reference quant_summary.json directly.>
+<Current price, returns (1d/5d/1m/3m), key technical levels, RSI, MACD status, volume. Reference quant_summary.json directly. Include the technical-snapshot table and end it with a source line.>
+
+![Price action & technicals](charts/price_chart.svg)
 
 ## Valuation
 <From `shared_context.valuation` (valuation_summary.json). State the verdict (cheap/fair/expensive) and margin of safety vs the current price. Give the DCF intrinsic range (bear/base/bull) with the WACC and terminal growth used, and a short comps line (company EV/EBITDA and forward P/E vs peer median + percentile). If valuation is `applicable: false` (ETF/fund) or `confidence: "low"`, say so in one line instead of forcing a number. Do not invent figures — use only what the summary provides.>
 
 ## Sector & Peers
 <How the company performed vs sector and peers. Any notable peer developments.>
+
+![Peer 5-day returns](charts/peer_chart.svg)
 
 ## Catalysts & Risks
 <Upcoming catalysts with dates. Key risks from debate. Bull/bear summary from thesis_map.>
@@ -117,6 +125,8 @@ Write the revised draft to `{workspace}/drafts/{date}/` with an incremented vers
 6. **Uncertainty**: When confidence is limited, say so explicitly
 7. **Traceability**: Every major claim should be traceable back to evidence cards
 8. **Concise**: Daily reports should be scannable in 5 minutes
+9. **Chart anchors**: Place the three chart references exactly as markdown images at the points shown in the template — `![Relative strength](charts/relative_chart.svg)` in Market Context, `![Price action & technicals](charts/price_chart.svg)` in Price Action, `![Peer 5-day returns](charts/peer_chart.svg)` in Sector & Peers. The PDF renderer embeds them in place; keep the paths exactly (relative, `.svg`). If a chart is not generated, the renderer skips it gracefully — still include the anchor.
+10. **Table sources**: Every markdown table ends with an italic source line, e.g. `*Source: quant_summary.json (yfinance), {date}*`.
 
 ## Quality Rules
 

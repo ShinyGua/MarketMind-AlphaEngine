@@ -47,7 +47,7 @@ Read only:
 - Company profile
 - Market context data
 
-Write to: `{workspace}/discussion/analyst_memos/market_analyst.md`
+Write to: `{workspace}/discussion/{date}/analyst_memos/market_analyst.md`
 
 The memo MUST contain these sections:
 

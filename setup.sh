@@ -35,7 +35,7 @@ fi
 # Activate and install
 source .venv/bin/activate
 pip install -q --upgrade pip
-pip install -q pyyaml yfinance pandas ta fpdf2 markdown flask mcp pydantic pytest
+pip install -q pyyaml yfinance pandas ta fpdf2 markdown flask mcp pydantic pytest weasyprint jinja2 exchange_calendars requests
 
 echo ""
 echo "MarketMind environment ready."

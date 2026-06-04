@@ -47,7 +47,7 @@ params = {
     "q": "<sector> OR <industry>",
     "language": config.get("language", "en"),  # from resolved_config
     "sortBy": "relevancy",
-    "pageSize": config["news"]["max_sector_news"],
+    "pageSize": config["data_sources"]["news"]["max_sector_news"],
     "from": "<lookback_date>",
     "apiKey": os.environ["NEWSAPI_KEY"]
 }
@@ -56,7 +56,7 @@ params = {
 **Post-fetch cap enforcement**: Before saving, truncate the articles list to `max_sector_news` entries. NewsAPI may return more results than requested — always enforce the cap:
 
 ```python
-articles = articles[:config["news"]["max_sector_news"]]
+articles = articles[:config["data_sources"]["news"]["max_sector_news"]]
 ```
 
 Save to `{workspace}/raw/{date}/news/sector_news.json`.
@@ -71,7 +71,7 @@ peers = ["PEER1", "PEER2", ...]  # from peer_set.json
 data = yf.download(peers, period="6mo", interval="1d", group_by="ticker")
 ```
 
-Save each peer to `{workspace}/raw/prices/peer_{ticker}.csv`.
+Save each peer to `{workspace}/raw/{date}/prices/peer_{ticker}.csv`.
 
 ### 3. Fetch Sector ETF Data
 
@@ -82,7 +82,7 @@ sector_etf = "SOXX"  # from market_context_link.json secondary_indices
 data = yf.download(sector_etf, period="3mo", interval="1d")
 ```
 
-Save to `{workspace}/raw/prices/sector_etf.csv`.
+Save to `{workspace}/raw/{date}/prices/sector_etf.csv`.
 
 ### 4. Create Evidence Cards (Batch Mode)
 
@@ -117,14 +117,14 @@ Evidence card schema:
 
 When scoring materiality, consider relevance to the target company specifically, not just the sector in general.
 
-Save to `{workspace}/normalized/evidence_cards/sector_*.json`.
+Save to `{workspace}/normalized/{date}/evidence_cards/sector_*.json`.
 
 ## Output
 
-- `{workspace}/raw/news/sector_news.json`
-- `{workspace}/raw/prices/peer_*.csv`
-- `{workspace}/raw/prices/sector_etf.csv`
-- `{workspace}/normalized/evidence_cards/sector_*.json`
+- `{workspace}/raw/{date}/news/sector_news.json`
+- `{workspace}/raw/{date}/prices/peer_*.csv`
+- `{workspace}/raw/{date}/prices/sector_etf.csv`
+- `{workspace}/normalized/{date}/evidence_cards/sector_*.json`
 
 ## Error Handling
 

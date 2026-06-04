@@ -90,26 +90,16 @@ STAGE_LABELS = {
 
 All time-sensitive data is organized under `{date}/` subdirectories (format: YYYY-MM-DD).
 
-At pipeline start, determine the **last trading day** (not necessarily today):
+At pipeline start, determine the **last trading day** (not necessarily today). This is **market-aware**: the committed helper reads `company.market_profile` (US|HK|CN|JP|UK|EU) from the workspace config and uses that exchange's calendar (timezone + holidays):
 
 ```bash
-.venv/bin/python3 -c "
-import datetime
-from zoneinfo import ZoneInfo
-now = datetime.datetime.now(ZoneInfo('America/New_York'))
-today = now.date()
-market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-d = today if now >= market_open else today - datetime.timedelta(days=1)
-while d.weekday() >= 5:  # skip weekends
-    d -= datetime.timedelta(days=1)
-print(d.isoformat())
-"
+run_date=$(.venv/bin/python3 scripts/trading_day.py {workspace})
 ```
 
-Rules:
-- Before US market open (9:30 AM ET) → use previous trading day
-- Saturday/Sunday → use last Friday
-- After market open → use today
+Rules (applied per the company's `market_profile`, via `exchange_calendars`):
+- After the exchange's session open on a trading day → use that day
+- Before the open, on a weekend, or on an exchange holiday → use the previous session
+- The helper self-degrades to US weekend-only logic if `exchange_calendars` is unavailable, so it never blocks the pipeline
 
 Store the result via `mcp__workspace__update_status` with `run_date: "{date}"`. Use this date for ALL path references.
 
@@ -120,7 +110,7 @@ When dispatching skills, pass date as the second argument: `{workspace} {date}`
 
 ```
 1. Read {workspace}/status.json → get stages_completed list
-2. Determine today's date → store as run_date in status.json
+2. Determine the last trading session via `scripts/trading_day.py {workspace}` (market-aware; see Date Handling) → store as run_date in status.json
 3. Create date subdirectories for all stages
 4. FOR EACH stage that is NOT in stages_completed (in order):
    a. Execute the stage (see Stage Details below) — pass {workspace} and {date} to each skill
@@ -206,31 +196,23 @@ Verify `{workspace}/profile/company_profile.json` exists.
 **Then immediately proceed to stage 3.**
 
 ### 3. collect
-Dispatch 3 desk skills **in parallel** via Agent tool:
+Dispatch 4 collection skills **in parallel** via Agent tool:
 - **mm-market-desk** with args: `{workspace} {date}`
 - **mm-company-desk** with args: `{workspace} {date}`
 - **mm-sector-desk** with args: `{workspace} {date}`
+- **mm-web-research** with args: `{workspace} {date}` — owns the web-search + NASDAQ tiers of the source hierarchy (NASDAQ for US names), capturing provenance (url/excerpt/date). Complements, not replaces, the NewsAPI/MCP desks.
 
-Wait for all 3. Log successes/failures.
+Wait for all 4. Log successes/failures. Web-research is best-effort — if it fails, continue with the desk cards.
 **Then immediately proceed to stage 4.**
 
 ### 4. normalize
 Verify evidence cards exist in `{workspace}/normalized/{date}/evidence_cards/`. If empty, log warning.
 
-**Then create evidence_digest.json** — concatenate all evidence cards into one file for fast downstream reads:
+**Then create evidence_digest.json** — deduplicate cards across the desks + web-research (the 4 collectors run in parallel and can't see each other, so the same article can appear as several cards) and write the digest:
 ```bash
-.venv/bin/python3 -c "
-import json, glob, os
-ws = '{workspace}/normalized/{date}/evidence_cards'
-cards = []
-for f in sorted(glob.glob(os.path.join(ws, '*.json'))):
-    try: cards.append(json.load(open(f)))
-    except: pass
-with open('{workspace}/normalized/{date}/evidence_digest.json', 'w') as out:
-    json.dump(cards, out, indent=2)
-print(f'evidence_digest.json: {len(cards)} cards')
-"
+.venv/bin/python3 normalize/dedup_evidence.py {workspace} {date}
 ```
+This clusters by canonical URL + near-identical title, keeps the richest/highest-materiality card per cluster (recording `merged_ids`), and writes `{workspace}/normalized/{date}/evidence_digest.json`. It self-degrades to a plain concatenation if anything goes wrong, so the digest is always produced.
 
 **Then immediately proceed to stage 5.**
 
