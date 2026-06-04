@@ -10,16 +10,26 @@
 #     Launch `codex` from the repository root, or replace the relative paths
 #     with absolute ones (e.g. /abs/path/to/MarketMind-AlphaEngine/.venv/bin/python3
 #     and the matching absolute server-script paths).
-#   * Export the API keys before launching: `export NEWSAPI_KEY=... FRED_API_KEY=...`
-#     (FRED/NewsAPI are optional — the desks fall back to WebSearch when unset,
-#     but an unset NEWSAPI_KEY yields thinner evidence; set it for parity).
-#   * If a key env-var is unset, leave it as "" rather than removing the line.
+#   * API keys come from the project `.env` (gitignored): the market-data server
+#     self-loads it at startup (mcp/shared/dotenv.py). Do NOT put `${NEWSAPI_KEY}`
+#     here — Codex does not expand `${VAR}` in env tables, so the literal would
+#     poison os.environ and block the real `.env` value. Leave env empty.
+#     Canonical name is NEWSAPI_KEY (NEWSAPI_API_KEY is accepted as an alias).
+#   * NETWORK ACCESS: the `workspace-write` sandbox disables outbound network by
+#     DEFAULT. Live data (NewsAPI/yfinance/FRED/SEC) requires the
+#     [sandbox_workspace_write] block below; without it the desks fall back to
+#     WebSearch/cache with DNS failures. The headless driver also sets this per-run
+#     via `-c sandbox_workspace_write.network_access=true`.
 # ---------------------------------------------------------------------------
+
+# Allow the collection desks to reach the network under the workspace-write sandbox.
+[sandbox_workspace_write]
+network_access = true
 
 [mcp_servers.market-data]
 command = ".venv/bin/python3"
 args = ["mcp/market_data_server.py"]
-env = { NEWSAPI_KEY = "${NEWSAPI_KEY}", FRED_API_KEY = "${FRED_API_KEY}" }
+env = {}
 
 [mcp_servers.workspace]
 command = ".venv/bin/python3"

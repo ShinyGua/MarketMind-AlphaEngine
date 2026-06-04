@@ -139,6 +139,15 @@ codex
 
 确定性阶段（估值、图表/PDF、去重、评分器）作为已提交的 Python 直接运行；LLM 阶段（数据台、分析师、撰写器……）作为并行的 `codex exec` 运行；深度闸会重做任何过薄的 memo/报告。
 
+> **拉取实时数据需要放开网络出站。** Codex 的 `workspace-write` 沙箱默认禁止出站网络，
+> 因此采集台会静默回退到 WebSearch/缓存（诊断里会看到 `dns_failed`）。无头驱动会为每个
+> 阶段加上 `-c sandbox_workspace_write.network_access=true`；交互式 `codex` 则靠
+> `.agents/references/codex-config.toml` 里的 `[sandbox_workspace_write] network_access = true`
+> 实现同样效果。collect 阶段会先运行 `scripts/check_data_sources.py`，把 key 是否存在（绝不
+> 打印取值）、DNS、以及每个数据源的状态（`auth_ok` / `dns_failed` / `auth_failed` /
+> `rate_limited` / `no_key`）写入 `raw/{date}/diagnostics/data_sources.json` —— 当某次运行
+> 回退过多时可据此排查。
+
 ### 使用方法
 
 ```text

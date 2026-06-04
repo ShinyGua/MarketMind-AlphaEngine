@@ -60,6 +60,43 @@ def _err(tool: str, error: Exception) -> list[mcp.types.TextContent]:
     )]
 
 
+# DNS-failure signatures surfaced (often wrapped in a ConnectionError) when the
+# execution sandbox blocks outbound name resolution.
+_DNS_MARKERS = (
+    "name or service not known", "nodename nor servname",
+    "failed to resolve", "getaddrinfo", "temporary failure in name resolution",
+    "name resolution",
+)
+
+
+def _classify_request(exc: Exception | None = None, resp=None) -> str:
+    """Map a network exception or HTTP response to a structured failure reason so
+    desks can tell apart dns_failed / network_failed / auth_failed / rate_limited /
+    http_failed (vs the No-KEY cases handled separately)."""
+    import socket
+
+    import requests
+
+    if exc is not None:
+        if isinstance(exc, socket.gaierror):
+            return "dns_failed"
+        if isinstance(exc, requests.exceptions.Timeout):
+            return "network_failed"
+        if isinstance(exc, (requests.exceptions.ConnectionError, OSError)):
+            if any(m in str(exc).lower() for m in _DNS_MARKERS):
+                return "dns_failed"
+            return "network_failed"
+        return "network_failed"
+    if resp is not None:
+        if resp.status_code in (401, 403):
+            return "auth_failed"
+        if resp.status_code == 429:
+            return "rate_limited"
+        if resp.status_code >= 400:
+            return "http_failed"
+    return "http_failed"
+
+
 # ── tool schemas ────────────────────────────────────────────────────────
 
 TOOLS = [
@@ -312,9 +349,15 @@ async def _get_news(arguments: dict) -> list[mcp.types.TextContent]:
         if category:
             params["category"] = category
 
-    resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    body = resp.json()
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code >= 400:
+            return _ok({"fallback_needed": True, "reason": _classify_request(resp=resp),
+                        "provider": "newsapi", "status_code": resp.status_code})
+        body = resp.json()
+    except (requests.exceptions.RequestException, OSError) as exc:
+        return _ok({"fallback_needed": True, "reason": _classify_request(exc=exc),
+                    "provider": "newsapi"})
 
     articles = []
     for art in body.get("articles", [])[:max_results]:
@@ -359,9 +402,15 @@ async def _get_filings(arguments: dict) -> list[mcp.types.TextContent]:
     }
     headers = {"User-Agent": "MarketMind/1.0 (research@marketmind.dev)"}
 
-    resp = requests.get(url, params=params, headers=headers, timeout=15)
-    resp.raise_for_status()
-    body = resp.json()
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        if resp.status_code >= 400:
+            return _ok({"fallback_needed": True, "reason": _classify_request(resp=resp),
+                        "provider": "sec_edgar", "status_code": resp.status_code})
+        body = resp.json()
+    except (requests.exceptions.RequestException, OSError) as exc:
+        return _ok({"fallback_needed": True, "reason": _classify_request(exc=exc),
+                    "provider": "sec_edgar"})
 
     filings = []
     hits = body.get("hits", body.get("filings", []))
@@ -420,9 +469,15 @@ async def _get_macro_series(arguments: dict) -> list[mcp.types.TextContent]:
             "observation_start": start_date,
         }
 
-        resp = requests.get(url, params=params, timeout=15)
-        resp.raise_for_status()
-        body = resp.json()
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code >= 400:
+                return _ok({"fallback_needed": True, "reason": _classify_request(resp=resp),
+                            "provider": "fred", "status_code": resp.status_code})
+            body = resp.json()
+        except (requests.exceptions.RequestException, OSError) as exc:
+            return _ok({"fallback_needed": True, "reason": _classify_request(exc=exc),
+                        "provider": "fred"})
 
         dates = []
         values = []

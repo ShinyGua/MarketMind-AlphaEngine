@@ -81,7 +81,7 @@ resolve_config → init_workspace → collect(parallel) → normalize
 - Link shared market context
 
 ### Stage 2: Parallel Data Collection
-Run these desks in parallel:
+Under the headless Codex driver this stage first runs `scripts/check_data_sources.py`, a non-critical preflight that records key presence (never values), DNS reachability, and per-source status (`auth_ok`/`dns_failed`/`auth_failed`/`rate_limited`/`no_key`) to `raw/{date}/diagnostics/data_sources.json` — so a fallback-heavy run self-explains. (Live data requires network egress: Codex's `workspace-write` sandbox needs `[sandbox_workspace_write] network_access = true`; the driver sets it per stage.) Then run these desks in parallel:
 
 - **mm-market-desk**: Macro headlines, index data, macro asset prices (yfinance, FRED)
 - **mm-company-desk**: Company news, SEC filings, catalyst calendar (NewsAPI, EDGAR)
