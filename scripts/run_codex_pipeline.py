@@ -97,8 +97,14 @@ def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int
         f"artifacts to the dated workspace paths. When finished, print only the "
         f"artifact path(s) you wrote."
     )
+    # workspace-write disables network egress by DEFAULT; the collection desks
+    # (and any shell yfinance/requests fallback when an MCP tool isn't attached)
+    # need outbound DNS/HTTP. Grant it per-invocation so the fix doesn't depend on
+    # the user's global ~/.codex/config.toml.
     cmd = [CODEX, "exec", "-C", str(ROOT),
-           "--sandbox", "workspace-write", "--skip-git-repo-check"]
+           "--sandbox", "workspace-write",
+           "-c", "sandbox_workspace_write.network_access=true",
+           "--skip-git-repo-check"]
     if ctx.model:
         cmd += ["--model", ctx.model]
     cmd.append(prompt)
@@ -227,6 +233,9 @@ def st_init_workspace(ctx):
 
 
 def st_collect(ctx):
+    # Preflight: record which data sources are reachable + which keys are present
+    # (sanitized) so a fallback-heavy run self-explains (dns vs auth vs key).
+    det(ctx, "scripts/check_data_sources.py", ctx.ws, ctx.date, critical=False)
     desks = ["mm-market-desk", "mm-company-desk", "mm-sector-desk", "mm-web-research"]
     parallel(ctx, [lambda d=d: codex_skill(ctx, d, critical=False) for d in desks])
 
