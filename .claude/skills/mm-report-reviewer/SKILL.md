@@ -69,6 +69,7 @@ Score the report on a 1-10 scale for each dimension:
 - Is the time horizon coherent with the evidence?
 - Are both bull and bear cases presented?
 - Is confidence calibrated to the evidence strength?
+- **Symmetry check:** would the same evidence, with every directional sign inverted, have justified a *confident* BUY? If so, a HOLD here is likely a bias artifact — the draft must either justify why the downside case is genuinely different or move toward SELL. Flag unjustified HOLD-defaulting (a directional case dressed down to HOLD) as a Decision Quality deduction. SELL must not be held to a higher evidentiary bar than BUY.
 
 #### Market Context (weight: medium)
 - Is the macro/market environment properly framed?
