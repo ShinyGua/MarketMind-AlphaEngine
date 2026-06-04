@@ -42,7 +42,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 - **Decision Panel (vote → converge → exit)**: The decision is reached by a multi-round panel — each analyst role casts a ballot (BUY/HOLD/SELL + a conviction self-rating + a hedge overlay), a deterministic grader scores convergence, and the loop iterates until the panel agrees or hits a hard round cap. The chair then writes the final call, faithful to the conviction-weighted lean with dissent retained
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
-- **MCP Server Architecture**: 3 Model Context Protocol servers (market-data, workspace, memory) give agents structured tool access to data, files, and persistent memory
+- **MCP Server Architecture**: 3 Model Context Protocol servers (market-data, mm-workspace, memory) give agents structured tool access to data, files, and persistent memory
 - **Long-Term Memory**: Episodic, semantic, and procedural memory layers let the system recall past analyses, learned patterns, and refined procedures across runs
 - **Automated Evaluation Pipeline**: Code-based graders score each run along multiple dimensions, with a run log and aggregated metrics to track quality over time
 - **Free Data Sources**: Works entirely with free APIs (yfinance, NewsAPI free tier, SEC EDGAR, FRED) with WebSearch fallback when API keys are unavailable
@@ -301,7 +301,7 @@ MarketMind-AlphaEngine/
 │   ├── .claude-plugin/            # Plugin metadata
 │   └── commands/                  # User-facing commands (/mm:init, /mm:run, /mm:status)
 ├── .mcp.json                      # MCP server registration for Claude Code
-├── mcp/                           # MCP servers (market-data, workspace, memory)
+├── mcp/                           # MCP servers (market-data, mm-workspace, memory)
 │   ├── market_data_server.py      # incl. get_fundamentals (DCF/comps inputs)
 │   ├── workspace_server.py
 │   ├── memory_server.py
@@ -411,7 +411,7 @@ review:
 
 ### Done
 
-- [x] **MCP Server Architecture**: 3 MCP servers (market-data, workspace, memory) for structured agent tool access
+- [x] **MCP Server Architecture**: 3 MCP servers (market-data, mm-workspace, memory) for structured agent tool access
 - [x] **Long-Term Memory System**: Episodic, semantic, and procedural memory layers across runs
 - [x] **Automated Evaluation Pipeline**: Code-based graders, run log, and aggregated metrics for quality tracking
 - [x] **Quantitative Valuation Engine**: Formula-first scenario DCF + peer comps + margin of safety, with an internal-consistency audit grader, anchoring decisions to price-vs-value
