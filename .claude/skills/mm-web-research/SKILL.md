@@ -63,6 +63,8 @@ Run `WebSearch` for the most material, recent angles, e.g.:
 
 For the strongest 3–5 hits, use `WebFetch` to pull the article and capture a **verbatim excerpt** (1–2 sentences) plus the publication date and canonical URL. Do not fabricate dates or quotes — if a date is not on the page, set `published_at` to null.
 
+**Evidence floor:** the desks (NewsAPI/free-tier) often return little — especially when `NEWSAPI_KEY` is unset (the desks then fall back to web search). Count the material cards already collected (desk evidence cards in `{workspace}/normalized/{date}/evidence_cards/` + your web hits). If that total is below `data_sources.web_research.min_cards` (default 12), run **additional targeted query passes** until you reach the floor or exhaust good angles — e.g. recent earnings/guidance, analyst rating actions, product/delivery numbers, regulatory/legal, key-customer or supply-chain news, and notable peer moves. Quality over quantity: only keep items with a real source URL and materiality ≥ 0.3.
+
 Save raw results to `{workspace}/raw/{date}/news/web/websearch.json`.
 
 ### 4. Write a manifest

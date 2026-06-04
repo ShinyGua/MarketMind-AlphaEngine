@@ -45,6 +45,8 @@ Write an independent company analysis memo. Do NOT read other analyst memos.
 
 Write to: `{workspace}/discussion/{date}/analyst_memos/company_analyst.md`
 
+**Substance floor (required):** write the full memo — develop every section, and make each supporting point its own paragraph with specific numbers and an `ev_…` id where relevant. Do not compress sections into a single sentence. A complete memo is typically 25–50 lines (≥1,200 characters); a 3–4 sentence stub is incomplete and fails the depth gate (`eval/graders/depth_grader.py`), which forces a redo.
+
 The memo MUST contain:
 
 ```markdown

@@ -90,6 +90,11 @@ Score the report on a 1-10 scale for each dimension:
 - Does each table end with an italic source line?
 If any are missing, add a specific fix to the revision brief (it's a low-weight deduction, not a blocker).
 
+#### Depth & Coverage (weight: high)
+- Is every major section developed with real substance, or are any sections stubbed (a single sentence / a couple of lines)? A structurally complete but **thin** report is a Decision/Coverage failure, not a pass — accurate-but-shallow is the failure mode this dimension catches.
+- Are the key points from the analyst memos and thesis_map actually represented, not just gestured at?
+- A deterministic backstop runs alongside you: `eval/graders/depth_grader.py --report-only` flags stub sections. If it (or your read) finds thin sections, name them in the revision brief and **fail** the draft so the writer expands them.
+
 ### 3. Check for Blockers
 
 A blocker IMMEDIATELY fails the draft regardless of scores:

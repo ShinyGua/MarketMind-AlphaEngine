@@ -11,7 +11,8 @@
 #     with absolute ones (e.g. /abs/path/to/MarketMind-AlphaEngine/.venv/bin/python3
 #     and the matching absolute server-script paths).
 #   * Export the API keys before launching: `export NEWSAPI_KEY=... FRED_API_KEY=...`
-#     (FRED/NewsAPI are optional — the desks fall back to WebSearch when unset).
+#     (FRED/NewsAPI are optional — the desks fall back to WebSearch when unset,
+#     but an unset NEWSAPI_KEY yields thinner evidence; set it for parity).
 #   * If a key env-var is unset, leave it as "" rather than removing the line.
 # ---------------------------------------------------------------------------
 
