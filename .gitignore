@@ -32,6 +32,7 @@ user_token_cache.json
 *.secret
 .env
 .env.*
+!.env.example
 
 # Playwright MCP logs
 .playwright-mcp/

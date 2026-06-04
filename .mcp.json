@@ -3,10 +3,8 @@
     "market-data": {
       "command": ".venv/bin/python3",
       "args": ["mcp/market_data_server.py"],
-      "env": {
-        "NEWSAPI_KEY": "${NEWSAPI_KEY}",
-        "FRED_API_KEY": "${FRED_API_KEY}"
-      }
+      "comment": "API keys (NEWSAPI_KEY, FRED_API_KEY) are loaded from the project .env at server startup; never commit secrets here.",
+      "env": {}
     },
     "workspace": {
       "command": ".venv/bin/python3",
