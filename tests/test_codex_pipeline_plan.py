@@ -46,3 +46,8 @@ def test_dry_run_plan_covers_all_stages():
     for skill in ("mm-company-analyst", "mm-report-writer", "mm-decision-maker",
                   "mm-discussion-moderator"):
         assert skill in flat, f"missing LLM stage {skill}"
+    # decide stage runs the multi-round panel: ballots + tally + convergence grader
+    assert "mm-decision-panelist" in flat, "decide stage missing panelist ballots"
+    assert "mm-decision-maker $ARGUMENTS[2]=tally" in flat or "tally" in flat, \
+        "decide stage missing chair tally"
+    assert "panel_convergence_grader.py" in flat, "decide stage missing convergence grader"

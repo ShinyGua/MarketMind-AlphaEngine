@@ -42,6 +42,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parent
 STRINGS = {
     "en": {
         "rating": "Rating", "confidence": "Confidence", "horizon": "Horizon",
+        "overlay_vals": {"hedge": "Hedge", "trim": "Trim", "stop": "Stop"},
         "price": "Price", "fair_value": "Fair Value (DCF)",
         "margin_of_safety": "Margin of Safety", "market_cap": "Market Cap",
         "valuation": "Valuation", "mode_daily": "Daily Report",
@@ -60,6 +61,7 @@ STRINGS = {
     },
     "ch": {
         "rating": "评级", "confidence": "置信度", "horizon": "时间维度",
+        "overlay_vals": {"hedge": "对冲", "trim": "减仓", "stop": "止损"},
         "price": "现价", "fair_value": "内在价值(DCF)",
         "margin_of_safety": "安全边际", "market_cap": "市值",
         "valuation": "估值判断", "mode_daily": "每日市场跟踪",
@@ -181,6 +183,8 @@ def main():
 
     # ---- rating box values (authoritative, from JSON) ----
     dec = (decision.get("decision") or "HOLD").upper()
+    overlay_raw = str(decision.get("risk_overlay") or "none").lower()
+    overlay = S["overlay_vals"].get(overlay_raw, "")  # "" for none/unknown → not shown
     price = quant.get("latest_close")
     if not isinstance(price, (int, float)):
         price = val.get("current_price")
@@ -217,6 +221,7 @@ def main():
         "sector": profile.get("sector") or "",
         "date": date,
         "decision": dec,
+        "overlay": overlay,
         "confidence": (f"{decision.get('confidence'):.2f}"
                        if isinstance(decision.get("confidence"), (int, float)) else "—"),
         "horizon": decision.get("horizon") or "—",

@@ -39,6 +39,7 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 - **量化估值引擎**：公式驱动的 DCF（CAPM WACC、Gordon 永续价值、乐观/基准/悲观三档情景、WACC×永续增长率敏感性矩阵），加上带分位数基准的可比公司估值，产出内在价值区间和**安全边际**，使 BUY/HOLD/SELL 决策锚定在「价格 vs 价值」上，而不仅依赖动量与新闻
 - **投行风格 PDF**：通过确定性的 Markdown → HTML/CSS → PDF 流水线（WeasyPrint）生成 JPM 风格研究报告——首页评级框、内嵌标注图表、带样式表格，以及中英双语排版
 - **选择性辩论**：由主持者定向分配交叉评审对，相比所有分析师两两互评的全量 N×N 辩论，在分析师人数增加时可节省 50-90% 的 token 消耗
+- **决策评审团（投票 → 收敛 → 退出）**：最终决策由多轮评审团产生——每位分析师角色各投一票（BUY/HOLD/SELL，并附带置信度自评与对冲叠加），确定性评分器度量收敛程度，循环持续到评审团达成一致或触及硬性轮次上限。随后主席据「按置信度加权的倾向」写出最终结论，并保留少数派异议
 - **日期归档历史**：每次运行都按 `{YYYY-MM-DD}/` 目录保留结果，因此可以对同一家公司进行连续日度分析而不丢失历史研究记录
 - **智能交易日逻辑**：自动识别正确的数据截面，处理盘前、周末和节假日等情况
 - **MCP 服务器架构**：3 个 Model Context Protocol 服务器（market-data、workspace、memory）为 Agent 提供结构化的数据、文件和持久记忆工具访问
@@ -221,7 +222,7 @@ codex
 | **Debate** | 分析师独立写 memo，主持者分配交叉质询对，并组织定向辩论 | 3-6 位分析师 |
 | **Draft** | 生成带证据追踪的 JPM 风格叙事研究报告 | `mm-report-writer` |
 | **Review** | 进行多维度打分并驱动迭代修订 | `mm-report-reviewer` |
-| **Decide** | 输出带置信度、理由和风险项的 BUY/HOLD/SELL 决策 | `mm-decision-maker` |
+| **Decide** | 多轮评审团——各角色投票并自评置信度，收敛评分器把关循环，再输出最终 BUY/HOLD/SELL 决策（含对冲叠加） | `mm-decision-panelist`、`mm-decision-maker` |
 | **Export** | 生成标注 SVG 图表，并通过 Markdown→HTML/CSS→PDF（WeasyPrint）导出 JPM 风格报告 | `mm-pdf-exporter` |
 | **User Review** | 暂停收集用户反馈 — 是否认同、修正意见、个人洞察 | 用户（human-in-the-loop） |
 | **Reflect** | 通过代码评分器评估运行质量、存储用户反馈和长期记忆 | eval 流水线 + memory |
@@ -265,7 +266,8 @@ MarketMind-AlphaEngine/
 │       ├── mm-discussion-moderator/ # 分歧扫描与综合判断
 │       ├── mm-report-writer/      # 研究报告生成
 │       ├── mm-report-reviewer/    # 多维质量打分
-│       ├── mm-decision-maker/     # BUY/HOLD/SELL 决策输出
+│       ├── mm-decision-panelist/  # 单角色决策投票（投票 + 置信度 + 对冲叠加）
+│       ├── mm-decision-maker/     # 评审团主席：逐轮计票 + 最终 BUY/HOLD/SELL 决策
 │       ├── mm-pdf-exporter/       # 图表生成与 Markdown -> HTML/CSS -> PDF
 │       ├── mm-progress-monitor/   # 后台进度监控
 │       ├── mm-memory-writer/      # 运行后记忆提取与存储
@@ -394,6 +396,7 @@ review:
 - [x] **Codex CLI 支持**：`mm-*` 技能作为 Codex 原生技能运行（`.agents/skills/` 符号链接 + 每个技能的 `agents/openai.yaml` 调用策略与 MCP 依赖），以 `AGENTS.md` 作为控制入口，并提供可直接粘贴的 `~/.codex/config.toml` MCP 配置
 - [x] **Codex 对齐驱动**：`scripts/run_codex_pipeline.py` 把每个 LLM 阶段作为独立的 `codex exec` 运行（每阶段全新上下文 —— 等价于 Claude 的 `context: fork`），确定性阶段用已提交的 Python、数据台/分析师并行执行，使 Codex 产出与 Claude 一致，而不会被压缩成残缺片段
 - [x] **确定性质量底线**：深度闸（`eval/graders/depth_grader.py`）会标记过薄的分析师 memo、残缺的报告小节与过少的证据，并接入复审循环（重做）与发布闸，使「准确但过薄」的产出无法静默通过
+- [x] **决策评审团辩论循环**：决策阶段运行多轮评审团——每位分析师角色投票（BUY/HOLD/SELL）并附置信度自评与对冲叠加，确定性收敛评分器（`eval/graders/panel_convergence_grader.py`）以硬性轮次上限把关「继续 vs 退出」，主席据按置信度加权的倾向写出最终结论并保留异议
 
 ### TODO
 

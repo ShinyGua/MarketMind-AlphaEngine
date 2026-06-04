@@ -109,7 +109,16 @@ Skill files use Claude conventions; map them as follows:
 - **Arguments**: `$ARGUMENTS[0]` = workspace path (e.g. `workspaces/NVDA`),
   `$ARGUMENTS[1]` = `run_date` (`YYYY-MM-DD`). Pass these when running a stage.
 - **Arguments**: `$ARGUMENTS[2]` and beyond are stage-specific (e.g. analyst
-  mode `memo`/`debate`, writer mode `initial`/`revision`).
+  mode `memo`/`debate`, writer mode `initial`/`revision`, decision-maker mode
+  `tally <round>` vs final, panelist `{role} {round}`).
+- **`decide` is a loop, not a single call.** When `decision.panel.enabled` is
+  true, the decide stage runs a multi-round panel: each `discussion.analyst_roles`
+  role casts a ballot via `mm-decision-panelist`, `mm-decision-maker tally <round>`
+  tallies them, and `eval/graders/panel_convergence_grader.py <ws> <date> <round>`
+  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap. After the
+  loop, `mm-decision-maker` (final) writes `final_decision.json`. With the panel
+  disabled it is a single `mm-decision-maker` call (legacy). The headless driver
+  `scripts/run_codex_pipeline.py` already encodes this loop in `st_decide`.
 - **Tools**: `Read`/`Glob`/`Grep`/`Bash`/`Write`/`Edit` → Codex shell tools +
   `apply_patch`; `rg` for search. `TodoWrite` → Codex plan/status updates.
   `WebSearch`/`WebFetch` → Codex web browsing. `mcp__*__*` → the `config.toml`

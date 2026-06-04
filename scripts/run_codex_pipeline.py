@@ -311,6 +311,31 @@ def _latest_review(ctx):
 
 
 def st_decide(ctx):
+    panel = (ctx.cfg.get("decision", {}) or {}).get("panel", {}) or {}
+    if not panel.get("enabled", True):
+        codex_skill(ctx, "mm-decision-maker")   # legacy single-shot decision
+        return
+    roles = _analyst_roles(ctx)
+    max_r = int(panel.get("max_rounds", 3))
+    for r in range(1, max_r + 1):
+        # 1. each role casts a ballot (vote + conviction + overlay) — fresh context each
+        parallel(ctx, [
+            (lambda role=role: codex_skill(ctx, "mm-decision-panelist", role, str(r), critical=False))
+            for role in roles
+        ])
+        # 2. chair tallies ballots + surfaces retained dissent
+        codex_skill(ctx, "mm-decision-maker", "tally", str(r), critical=False)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        det(ctx, "eval/graders/panel_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
+        if ctx.dry:
+            print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
+            break
+        conv = _read_json(ctx.ws / "decision" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        if (conv or {}).get("exit"):
+            log(f"panel converged on round {r}: {(conv or {}).get('exit_reason')}")
+            break
+        log(f"panel round {r}: no convergence, continuing")
+    # 4. chair writes the final decision (reads panel summaries -> risk_overlay + panel block)
     codex_skill(ctx, "mm-decision-maker")
 
 

@@ -21,7 +21,7 @@
       <table>
         <tr>
           <td><span class="k">{{ S.rating }}</span>
-              <span class="v"><span class="badge {{ decision }}">{{ decision }}</span></span></td>
+              <span class="v"><span class="badge {{ decision }}">{{ decision }}</span>{% if overlay %}<span class="overlay-tag">· {{ overlay }}</span>{% endif %}</span></td>
           <td><span class="k">{{ S.confidence }}</span><span class="v">{{ confidence }}</span></td>
           <td><span class="k">{{ S.horizon }}</span><span class="v">{{ horizon }}</span></td>
           <td><span class="k">{{ S.price }}</span><span class="v">{{ price }}</span></td>
