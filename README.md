@@ -39,6 +39,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 - **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety** that anchors the BUY/HOLD/SELL decision to price-vs-value — not just momentum and news
 - **Investment-Bank-Style PDF**: Generates JPM-style research reports — Page-1 rating box, embedded annotated charts, styled tables, and bilingual (EN/中文) typography — via a deterministic Markdown → HTML/CSS → PDF pipeline (WeasyPrint)
 - **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
+- **Decision Panel (vote → converge → exit)**: The decision is reached by a multi-round panel — each analyst role casts a ballot (BUY/HOLD/SELL + a conviction self-rating + a hedge overlay), a deterministic grader scores convergence, and the loop iterates until the panel agrees or hits a hard round cap. The chair then writes the final call, faithful to the conviction-weighted lean with dissent retained
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
 - **MCP Server Architecture**: 3 Model Context Protocol servers (market-data, workspace, memory) give agents structured tool access to data, files, and persistent memory
@@ -221,7 +222,7 @@ The `/mm:init` flow:
 | **Debate** | Independent memos, moderator-assigned critique pairs, and targeted debate | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
-| **Decide** | BUY/HOLD/SELL decision with confidence, reasons, and risks | `mm-decision-maker` |
+| **Decide** | Multi-round panel — roles vote + self-rate, a convergence grader gates the loop, then the final BUY/HOLD/SELL call (+ hedge overlay) | `mm-decision-panelist`, `mm-decision-maker` |
 | **Export** | Annotated SVG charts + Markdown→HTML/CSS→PDF (WeasyPrint) into a JPM-style report | `mm-pdf-exporter` |
 | **User Review** | Pause for user feedback — agreement, corrections, personal insights | user (human-in-the-loop) |
 | **Reflect** | Evaluate run quality via code graders, store user feedback + long-term memory | eval pipeline + memory |
@@ -265,7 +266,8 @@ MarketMind-AlphaEngine/
 │       ├── mm-discussion-moderator/ # Debate scan + synthesis
 │       ├── mm-report-writer/      # Research report generation
 │       ├── mm-report-reviewer/    # Multi-dimensional quality scoring
-│       ├── mm-decision-maker/     # BUY/HOLD/SELL decision
+│       ├── mm-decision-panelist/  # Per-role decision ballot (vote + conviction + overlay)
+│       ├── mm-decision-maker/     # Panel chair: per-round tally + final BUY/HOLD/SELL decision
 │       ├── mm-pdf-exporter/       # Chart generation + Markdown -> HTML/CSS -> PDF
 │       ├── mm-progress-monitor/   # Background progress tracking
 │       ├── mm-memory-writer/      # Memory extraction from completed runs
@@ -394,6 +396,7 @@ review:
 - [x] **Codex CLI Support**: The `mm-*` skills run as native Codex skills (`.agents/skills/` symlink + per-skill `agents/openai.yaml` invocation policy + MCP dependencies), with `AGENTS.md` as the control surface and a ready-to-paste `~/.codex/config.toml` MCP config
 - [x] **Codex Parity Driver**: `scripts/run_codex_pipeline.py` runs each LLM stage as its own `codex exec` (fresh context per stage — the analog of Claude's `context: fork`) with deterministic stages in committed Python and parallel desks/analysts, so Codex output matches a Claude run instead of compressing into stubs
 - [x] **Deterministic Quality Floor**: a depth gate (`eval/graders/depth_grader.py`) flags shallow analyst memos, stub report sections, and scant evidence — wired into the review loop (redo) and the release gate — so accurate-but-thin output can't silently pass
+- [x] **Decision Panel Debate Loop**: the decide stage runs a multi-round panel — each analyst role votes (BUY/HOLD/SELL) with a conviction self-rating and a hedge overlay, a deterministic convergence grader (`eval/graders/panel_convergence_grader.py`) gates iterate-vs-exit with a hard round cap, and the chair writes a final call faithful to the conviction-weighted lean with dissent retained
 
 ### TODO
 

@@ -147,11 +147,28 @@ Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughne
 - If score < threshold → generate `revision_brief.json` → writer rewrites targeted sections
 - Max loops defined in config (default: 3)
 
-### Stage 9: Investment Decision
-- **mm-decision-maker** produces `final_decision.json`:
-  - BUY / HOLD / SELL label
-  - Confidence score
-  - Top reasons, key risks, disconfirming signals
+### Stage 9: Investment Decision (Panel Debate Loop)
+
+A multi-round **decision panel** (default; legacy single-shot when
+`decision.panel.enabled: false`). Each round:
+1. **Ballots (parallel)** — every analyst role (`discussion.analyst_roles`) casts a
+   ballot via **mm-decision-panelist**: a vote (BUY/HOLD/SELL), a **conviction
+   self-rating** (0–1), and a hedge **risk overlay** (none/hedge/trim/stop) →
+   `decision/{date}/panel/round_{N}/{role}_ballot.json`.
+2. **Chair tally** — **mm-decision-maker** (`tally` mode) tallies votes and surfaces
+   retained dissent → `panel_summary_round_{N}.json`.
+3. **Convergence (deterministic)** — `eval/graders/panel_convergence_grader.py`
+   computes a conviction-weighted convergence score and decides iterate-vs-exit;
+   it **auto-exits at `max_rounds`** (hard cap) → `convergence_round_{N}.json`.
+
+After the loop, **mm-decision-maker** (final mode) produces `final_decision.json`:
+- BUY / HOLD / SELL label + `risk_overlay` hedge stance
+- Confidence score; conviction-weighted panel lean (not head-count)
+- Top reasons, key risks, disconfirming signals, and a `panel` block (rounds,
+  final tally, convergence score, retained dissent)
+
+Config: `decision.panel` (`enabled`, `min_rounds`, `max_rounds`,
+`convergence_threshold`, `overlay_labels`).
 
 ### Stage 10: Export
 - Write final markdown report to `final/`
@@ -231,6 +248,10 @@ workspaces/
 
     decision/{YYYY-MM-DD}/       # Date-stamped decision
       final_decision.json
+      panel/                     # decision-panel debate loop
+        round_{N}/{role}_ballot.json
+        panel_summary_round_{N}.json
+        convergence_round_{N}.json
 
     final/{YYYY-MM-DD}/          # Date-stamped final output
       {daily_report|weekly_report}.md   # basename depends on run_mode
@@ -308,7 +329,8 @@ All inter-stage data exchange uses JSON files written to the workspace. Key sche
 - **Valuation Summary**: `valuation/{date}/valuation_summary.json` — DCF intrinsic range, margin of safety, verdict, comps, confidence
 - **Thesis Map**: `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases
 - **Review Output**: `reviews/{date}/final_reviews/*.json` — pass/fail, dimension scores, rewrite actions
-- **Final Decision**: `decision/{date}/final_decision.json` — BUY/HOLD/SELL with evidence
+- **Final Decision**: `decision/{date}/final_decision.json` — BUY/HOLD/SELL with evidence, `risk_overlay` hedge stance, and a `panel` block (rounds, vote tally, convergence, retained dissent)
+- **Panel Ballot**: `decision/{date}/panel/round_{N}/{role}_ballot.json` — one role's vote + conviction self-rating + hedge overlay for round N
 
 See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema definitions.
 
@@ -387,7 +409,8 @@ Automated evaluation pipeline under `eval/`:
 |--------|---------------|
 | `factuality_grader.py` | Report numbers match quant_summary.json + valuation_summary.json |
 | `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
-| `consistency_grader.py` | Decision aligns with thesis_map consensus |
+| `consistency_grader.py` | Decision aligns with thesis_map consensus (and panel vote majority when the panel ran) |
+| `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit |
 | `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety) |
 | `cost_tracker.py` | Token/cost estimation per run |
 
@@ -446,7 +469,8 @@ When memory context is loaded, it supplements (not replaces) current evidence. T
 | mm-discussion-moderator | mm-heavy | No | Synthesize analyst memos → thesis_map |
 | mm-report-writer | mm-standard | No | Generate report draft |
 | mm-report-reviewer | mm-heavy | No | Multi-dimensional scoring + revision |
-| mm-decision-maker | mm-heavy | No | Final BUY/HOLD/SELL decision |
+| mm-decision-panelist | mm-standard | No | Casts one analyst role's decision ballot (vote + conviction + hedge overlay) per panel round |
+| mm-decision-maker | mm-heavy | No | Chair: per-round tally + final BUY/HOLD/SELL decision |
 | mm-memory-writer | mm-standard | No | Extract and store memories from completed runs |
 
 ---
