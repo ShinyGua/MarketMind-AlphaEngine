@@ -62,7 +62,7 @@ The memo MUST contain:
 - WACC: X.X% · terminal growth: X.X% · initial growth: X.X% fading over N yrs  (from `dcf`)
 - Growth basis: `dcf.growth_source` (e.g. revenue_cagr_3y) · growth confidence: `dcf.growth_confidence`
 - Margin of safety vs price: Z%
-<Comment on whether DCF is the selected anchor or only a candidate. If DCF is unavailable or not selected, explain why. When `dcf.growth_confidence` is low (or the source is `default_fallback`, or `dcf.growth_reason` cites a noisy sector / divergence / weak margin), say the DCF base growth is low-confidence and lean on comps. Flag if `tv_fraction_in_band` is false (terminal value carrying too much of the EV).>
+<Keep DCF, comps, and the blended/canonical `fair_value` as **distinct signals**, and state each one's confidence/fragility before using it directionally. Comment on whether DCF is the selected anchor or only a candidate. If DCF is unavailable or not selected, explain why. When `dcf.growth_confidence` is low (or the source is `default_fallback`, or `dcf.growth_reason` cites a noisy sector / divergence / weak margin), say the DCF base growth is low-confidence and lean on comps. A downgraded DCF — or a low-confidence *blended* `fair_value` — should explicitly carry **reduced decision weight** (a caveat the decision weighs by confidence), without weakening the rigor of your valuation analysis itself. Flag if `tv_fraction_in_band` is false (terminal value carrying too much of the EV).>
 
 ## Peer Comps
 - EV/EBITDA: company X.Xx vs peer median Y.Yx (company at the Pth percentile)
@@ -96,6 +96,6 @@ Each critique must include: valuation perspective on the other analyst's thesis 
 
 - Anchor to `valuation_summary.json` — quote its fair value, valuation method, margin of safety, intrinsic range when available, and comps percentiles. Do not invent numbers or substitute WebSearch figures for the computed ones.
 - Always reference specific multiples and numbers, not vague "expensive" or "cheap".
-- The price target must have explicit reasoning tied to the DCF base case or peer-median implied value, not just a number.
+- The price target must have explicit reasoning tied to the selected `valuation_method` / `method_candidates` (the canonical `fair_value`) — not the DCF base case specifically — not just a number.
 - Honestly flag low confidence, `applicable: false`, or `tv_fraction_in_band: false` rather than overstating a thin or fragile model.
-- A negative margin of safety is a genuine sell signal — state it plainly; do not soften an expensive verdict.
+- A negative margin of safety is a genuine **bearish valuation signal** — state it plainly and do not soften an expensive verdict (you may still call a name strongly cheap or expensive). But present it as a valuation input the decision weighs by confidence, **not a standalone SELL trigger**.
