@@ -1,6 +1,6 @@
 ---
 name: mm-valuation-engine
-description: Computes scenario DCF (bull/base/bear) + peer comps and a margin of safety via Python
+description: Computes multi-anchor fair value from DCF + peer comps and a margin of safety via Python
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -12,7 +12,7 @@ allowed-tools: Read, Write, Bash, Glob, Grep
 
 ## Mission
 
-Produce a quantitative valuation snapshot — a discounted-cash-flow intrinsic-value range, peer comparable-company multiples, and a margin of safety vs the current price — that the analysts, decision maker, and report writer reference. This is the **compute** counterpart to `mm-quant-analyst`: the math lives in committed, tested Python (`valuation/`), not in this prompt.
+Produce a quantitative valuation snapshot — canonical fair value, selected valuation method, discounted-cash-flow intrinsic-value range when valid, peer comparable-company implied values, and a margin of safety vs the current price — that the analysts, decision maker, and report writer reference. This is the **compute** counterpart to `mm-quant-analyst`: the math lives in committed, tested Python (`valuation/`), not in this prompt.
 
 **PYTHON**: Always use `.venv/bin/python3` for all Bash Python commands. Never use bare `python3`.
 
@@ -38,7 +38,9 @@ Run the valuation engine via Bash — it reads the inputs above and writes all a
 
 The engine is **non-critical and self-degrading**:
 - For ETFs / mutual funds / indices it writes `applicable: false` (DCF/comps are meaningless for these) and exits cleanly.
-- With missing statements, no peers, or non-positive free cash flow it still writes a summary with `confidence: "low"` and an `inputs_missing` list rather than failing.
+- With missing statements, no peers, or non-positive free cash flow it still writes a summary with `confidence: "low"` and an `inputs_missing` list rather than failing. If DCF is unsuitable but peer revenue multiples are valid, it may select a low-confidence comps fair value instead of returning `verdict: unknown`.
+
+The DCF growth is selected **deterministically from fundamentals** (not free-form judgment): a source hierarchy of forward analyst growth → 3-year revenue CAGR → trailing revenue growth → fallback, then guardrails — a sign/zero-safe CAGR-vs-trailing **divergence** downgrade, a **weak-margin** growth haircut (high revenue growth ≠ high FCFF growth), a **financials/brokers** sector|industry caveat, and a size-tiered **maturity cap** (mega-caps can't sustain a small-cap rate). The chosen `dcf.growth_source`, `dcf.growth_confidence`, and `dcf.growth_reason` are written to the summary, and a low growth confidence lowers the DCF's weight in the blended fair value so it leans on comps.
 
 After it runs:
 1. Read `{workspace}/valuation/{date}/valuation_summary.json` and confirm it exists.
@@ -49,7 +51,7 @@ Do not hand-edit the numbers. If something looks wrong, surface it; the QC grade
 
 ## Output
 
-- `{workspace}/valuation/{date}/valuation_summary.json` — intrinsic range (bull/base/bear), margin of safety, verdict (cheap/fair/expensive), comps benchmarks, WACC + assumptions, confidence flag
+- `{workspace}/valuation/{date}/valuation_summary.json` — fair value, valuation method, method candidates, fair-value range, intrinsic range (bull/base/bear when valid), margin of safety, verdict (cheap/fair/expensive), comps benchmarks, WACC + assumptions, confidence flag
 - `{workspace}/valuation/{date}/comps.csv` — per-name peer multiples table
 - `{workspace}/valuation/{date}/dcf_sensitivity.csv` — WACC × terminal-growth grid (center cell = base-case intrinsic value)
 

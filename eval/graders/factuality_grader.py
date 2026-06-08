@@ -72,20 +72,37 @@ def extract_valuation_values(val: dict) -> list[dict]:
     return entries
 
 
-def search_price_in_report(text: str, value: float, tolerance: float = 0.5) -> float | None:
-    """Search for $XXX.XX patterns and return the closest match within tolerance."""
-    matches = re.findall(r"\$\s*([\d,]+\.?\d*)", text)
-    best = None
-    best_diff = tolerance + 1
-    for m in matches:
+_NUM_RE = re.compile(r"[+-]?\d[\d,]*\.?\d*")
+
+
+def _all_numbers(text: str) -> list[float]:
+    """Yield every numeric token with thousands-commas stripped (currency-agnostic).
+
+    Recognizes comma-grouped values like ``2,298,000`` and ``743,819.31`` regardless
+    of any leading currency symbol/code, so non-USD reports (KRW, JPY, ...) parse too.
+    """
+    out = []
+    for m in _NUM_RE.findall(text):
         try:
-            num = float(m.replace(",", ""))
-            diff = abs(num - value)
-            if diff <= tolerance and diff < best_diff:
-                best = num
-                best_diff = diff
+            out.append(float(m.replace(",", "")))
         except ValueError:
             continue
+    return out
+
+
+def search_price_in_report(text: str, value: float, tolerance: float = 0.5) -> float | None:
+    """Return the closest numeric token within tolerance (currency-agnostic).
+
+    Prices are large, so closest-within-tolerance makes coincidental collisions
+    negligible; we no longer require a ``$`` prefix.
+    """
+    best = None
+    best_diff = tolerance + 1
+    for num in _all_numbers(text):
+        diff = abs(num - value)
+        if diff <= tolerance and diff < best_diff:
+            best = num
+            best_diff = diff
     return best
 
 
@@ -129,21 +146,16 @@ def search_indicator_in_report(text: str, field: str, value: float, tolerance: f
             end = min(len(text), match.end() + 80)
             snippet = text[start:end]
 
-            # Extract all numbers from the snippet
-            nums = re.findall(r"[+-]?\d+\.?\d*", snippet)
-            for n in nums:
-                try:
-                    num = float(n)
-                    if abs(num - value) <= tolerance:
-                        return num
-                except ValueError:
-                    continue
+            # Extract all numbers from the snippet (comma-grouped values included)
+            for num in _all_numbers(snippet):
+                if abs(num - value) <= tolerance:
+                    return num
 
-    # Fallback: search entire text for the exact value (rounded to 2 decimal places)
-    rounded = round(value, 2)
-    pattern = re.escape(f"{rounded}")
-    if re.search(pattern, text):
-        return rounded
+    # Fallback: search the entire text for any numeric token within tolerance
+    # (handles comma-grouped formats like "1,978,267" that the snippet pass missed).
+    for num in _all_numbers(text):
+        if abs(num - value) <= tolerance:
+            return num
 
     return None
 
@@ -194,8 +206,11 @@ def grade(workspace: str, date: str) -> dict:
         report_value = None
 
         if category == "price":
-            tol = 1.0 if field in _VAL_PRICE_FIELDS else 0.5
-            # Try dollar pattern first, then indicator search
+            base_tol = 1.0 if field in _VAL_PRICE_FIELDS else 0.5
+            # Relative floor so integer-rounded large prices (e.g. KRW 1,978,267 vs
+            # 1,978,266.54) still match; USD-scale values stay governed by base_tol.
+            tol = max(base_tol, abs(source_value) * 1e-4)
+            # Currency-agnostic numeric match, then indicator-name search as fallback
             report_value = search_price_in_report(report_text, source_value, tolerance=tol)
             if report_value is None:
                 report_value = search_indicator_in_report(report_text, field, source_value, tolerance=tol)

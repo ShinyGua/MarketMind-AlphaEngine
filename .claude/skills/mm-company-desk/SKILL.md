@@ -105,16 +105,18 @@ Save to `{workspace}/raw/{date}/calendar/catalysts.json`.
 
 ### 4. Fetch Stock Price Data
 
-**Indicator warm-up**: Always fetch **6 months** (`period='6mo'`) of daily data, even though the config says 3mo. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up before producing valid values. The quant analyst will compute on the full 6mo data but only output the last 3 months.
+**Indicator warm-up (MANDATORY)**: Always fetch **6 months** (`period='6mo'`) of daily data, even though the config says 3mo. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up; for the chart's full SMA50 across a ~65-day display window you need at least **114 daily rows**. The quant analyst and chart renderer compute on the full 6mo data but only output/display the last 3 months. **This file is the permanent fix for indicator warm-up** — if it is short, the SMA50/MACD lines render only partially.
 
 ```python
 import yfinance as yf
 t = yf.Ticker("<ticker>")
 hist_6mo = t.history(period="6mo", interval="1d")  # 6mo for indicator warm-up
+# Sanity check: must hold enough rows for SMA50 warm-up across the display window.
+assert len(hist_6mo) >= 114, f"{len(hist_6mo)} rows < 114; refetch period='6mo' (or '1y')"
 hist_5d = t.history(period="5d", interval="1h")
 ```
 
-Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`.
+Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`. **Verify the row count of `{TICKER}_3mo.csv` is ≥ 114** before finishing; if a name has limited history (recent IPO), keep whatever 6mo returns and note it.
 
 ### 4b. Fetch Fundamentals (company + peers)
 

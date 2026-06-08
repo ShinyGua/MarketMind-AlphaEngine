@@ -9,7 +9,7 @@ Usage:
     .venv/bin/python3 valuation/run_valuation.py <workspace> <date>
 
 Outputs (under {workspace}/valuation/{date}/):
-    valuation_summary.json   — intrinsic range, margin of safety, comps, flags
+    valuation_summary.json   — fair value, method, margin of safety, comps, flags
     comps.csv                — per-name multiples table
     dcf_sensitivity.csv      — WACC × terminal-growth grid (per-share value)
 
@@ -42,7 +42,21 @@ _DEFAULTS = {
     "base_growth_fallback": 0.05,
     "scenario_growth_delta": 0.03,   # bull = base + delta, bear = base - delta
     "sensitivity_dims": 5,
-    "max_base_growth": 0.20,
+    "max_base_growth": 0.20,         # legacy constant-growth cap (kept for compat)
+    "dcf_min_wacc_spread": 0.015,
+    "fade_years": 10,                # two-stage high-growth phase; fades to terminal
+    "max_initial_growth": 0.35,      # default-tier cap on year-1 high-growth rate
+    "fragile_tv_fraction": 0.80,     # downgrade DCF when terminal value exceeds this share
+    # deterministic, fundamentals-driven growth selection (select_growth)
+    "cagr_years": 3,                 # revenue-CAGR window
+    "growth_divergence_ratio": 2.0,  # CAGR vs trailing ratio (both positive) → downgrade
+    "growth_divergence_abs": 0.25,   # |CAGR − trailing| when signs differ / ≤0 → downgrade
+    "weak_margin_threshold": 0.05,   # operating margin below → growth haircut + downgrade
+    "weak_margin_growth_haircut": 0.75,
+    "mega_cap_threshold": 200_000_000_000,  # ≥ $200B → mega-cap maturity cap
+    "mega_cap_max_growth": 0.25,
+    "small_cap_threshold": 2_000_000_000,   # ≤ $2B → small-cap tier
+    "small_cap_max_growth": 0.35,    # default: no small-cap inflation unless raised
 }
 
 
@@ -120,17 +134,22 @@ def _latest_period(statement: dict):
 
 
 def _norm_metrics(raw: dict) -> dict:
-    # Support two schemas:
+    # Support three schemas:
     #   schema A (company-desk v1): raw["valuation_ratios"] = {camelCase: value}
     #   schema B (direct yfinance): raw["info"] = {camelCase: value}
-    ratios = raw.get("valuation_ratios") or raw.get("info") or {}
+    #   schema D (flat fund/info): camelCase ratio keys live at the top level
+    #       (the company desk emits this for ETFs/funds, e.g. {"quoteType": "ETF",
+    #        "trailingPE": ..., "_is_fund": true})
+    ratios = (raw.get("valuation_ratios") or raw.get("info")
+              or raw.get("ratios") or raw)
     metrics = {}
     for src, dst in _RATIO_MAP.items():
         v = ratios.get(src)
         if v is not None and not (isinstance(v, float) and v != v):  # skip NaN
             metrics[dst] = v
     # quote_type: prefer metadata, then info/valuation_ratios field
-    qt = (raw.get("metadata") or {}).get("quote_type") or ratios.get("quoteType")
+    qt = ((raw.get("metadata") or {}).get("quote_type")
+          or ratios.get("quoteType") or ratios.get("quote_type"))
     if qt:
         metrics["quote_type"] = qt
     return metrics
@@ -191,23 +210,29 @@ def _adapt_fundamentals(raw: dict) -> dict:
 
     Idempotent: a dict that already has `metrics` is returned unchanged.
 
-    Handles three input schemas:
+    Handles four input schemas:
       • already-normalized: has `metrics` key → pass through
       • company-desk v1: has `valuation_ratios` + `financials` keys
       • direct yfinance: has `info` + `income_statement` + `cash_flow` keys
+      • flat fund/info: camelCase ratio keys at the top level (e.g. ETF dumps
+        with `quoteType`/`_is_fund`); has no statements but carries `quoteType`
+        so the instrument-type guard can flag it not-applicable downstream.
     """
     if not isinstance(raw, dict):
         return raw
     if raw.get("metrics"):
         return raw
-    # Accept either schema; fall through if neither recognized key set is present.
-    has_ratios_schema = "valuation_ratios" in raw or "financials" in raw
-    has_info_schema = "info" in raw or "income_statement" in raw or "cash_flow" in raw
-    if not has_ratios_schema and not has_info_schema:
+    # Accept any recognized schema; fall through if none is present.
+    has_ratios_schema = ("valuation_ratios" in raw or "financials" in raw
+                         or "ratios" in raw)
+    has_info_schema = ("info" in raw or "income_statement" in raw
+                       or "cash_flow" in raw or "cashflow" in raw)
+    has_flat_schema = "quoteType" in raw or "currentPrice" in raw
+    if not (has_ratios_schema or has_info_schema or has_flat_schema):
         return raw
     income, cash_flow = _norm_statements(raw)
     return {
-        "ticker": raw.get("ticker"),
+        "ticker": raw.get("ticker") or raw.get("symbol"),
         "metrics": _norm_metrics(raw),
         "income_statement": income,
         "cash_flow": cash_flow,
@@ -223,6 +248,91 @@ def _cfg(workspace):
 
 def _round(v, n=2):
     return round(v, n) if isinstance(v, (int, float)) else v
+
+
+def _positive(v) -> bool:
+    return isinstance(v, (int, float)) and v > 0
+
+
+def _candidate(method, value, weight, confidence, included=True, reason=None):
+    has_value = _positive(value)
+    return {
+        "method": method,
+        "value": _round(value) if has_value else None,
+        "weight": weight if included and has_value else 0.0,
+        "confidence": confidence,
+        "included": bool(included and has_value),
+        "reason": reason,
+    }
+
+
+def _weighted_value(candidates):
+    active = [c for c in candidates if c.get("included") and _positive(c.get("value"))]
+    total_w = sum(c.get("weight") or 0.0 for c in active)
+    if not active or total_w <= 0:
+        return None
+    return sum(c["value"] * c["weight"] for c in active) / total_w
+
+
+def _select_fair_value(dcf_block, implied, price, cfg):
+    """Choose the canonical fair-value anchor from DCF and comps candidates."""
+    candidates = []
+
+    intrinsic_base = (dcf_block or {}).get("scenarios", {}).get("base", {}).get("value_per_share")
+    dcf_ok = _positive(intrinsic_base)
+    dcf_reason = None
+    dcf_conf = "high"
+    dcf_weight = 0.65
+    if dcf_ok and dcf_block:
+        spread = (dcf_block.get("wacc") or 0.0) - (dcf_block.get("terminal_growth") or 0.0)
+        # Fragile only when terminal value *dominates* (terminal-dependent). A low
+        # TV fraction — common for the two-stage fade where the explicit phase
+        # carries most of the value — is robust, not fragile, so it is NOT downgraded.
+        base_tvf = (dcf_block.get("scenarios", {}).get("base", {}) or {}).get("tv_fraction")
+        fragile_tvf = cfg.get("fragile_tv_fraction", dcf_mod.TV_FRACTION_MAX)
+        if spread < cfg["dcf_min_wacc_spread"]:
+            dcf_conf, dcf_weight = "low", 0.0
+            dcf_reason = "excluded: WACC too close to terminal growth"
+        elif base_tvf is not None and base_tvf > fragile_tvf:
+            dcf_conf, dcf_weight = "medium", 0.35
+            dcf_reason = "downgraded: terminal value dominates enterprise value"
+        # Low-confidence growth selection lowers the DCF's blend weight so the
+        # fair value leans on comps. Only ever lowers (never raises) the weight.
+        gconf = dcf_block.get("growth_confidence")
+        weight_cap = {"high": 0.65, "medium": 0.5, "low": 0.35}.get(gconf)
+        if weight_cap is not None and dcf_weight > weight_cap:
+            dcf_weight = weight_cap
+            if gconf == "low":
+                dcf_conf = "low"
+            elif gconf == "medium" and dcf_conf == "high":
+                dcf_conf = "medium"
+            note = f"growth confidence {gconf}"
+            dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
+    else:
+        dcf_reason = "not available"
+    candidates.append(_candidate("dcf", intrinsic_base, dcf_weight, dcf_conf,
+                                 included=dcf_ok and dcf_weight > 0, reason=dcf_reason))
+
+    earnings_value = (implied or {}).get("blended")
+    candidates.append(_candidate("comps_earnings", earnings_value, 0.35, "medium",
+                                 included=_positive(earnings_value),
+                                 reason=None if _positive(earnings_value) else "not available"))
+
+    revenue_value = ((implied or {}).get("by_ev_revenue_growth_adjusted")
+                     or (implied or {}).get("by_ev_revenue"))
+    rev_weight = 0.0 if any(c.get("included") for c in candidates) else 1.0
+    candidates.append(_candidate("comps_revenue", revenue_value, rev_weight, "low",
+                                 included=_positive(revenue_value) and rev_weight > 0,
+                                 reason=None if _positive(revenue_value) else "not available"))
+
+    fair_value = _weighted_value(candidates)
+    method = "none"
+    if fair_value is not None:
+        active = [c["method"] for c in candidates if c.get("included")]
+        method = active[0] if len(active) == 1 else "blended"
+
+    mos = round((fair_value - price) / price, 4) if fair_value is not None and price else None
+    return _round(fair_value), mos, method, candidates
 
 
 def _write_summary(out_dir, summary):
@@ -283,6 +393,11 @@ def main():
         q = _load_json(os.path.join(workspace, "quant", date, "quant_summary.json")) or {}
         price = q.get("latest_close")
 
+    # sector/industry (for the financials/brokers DCF-growth caveat); graceful if absent
+    profile = _load_json(os.path.join(workspace, "profile", "company_profile.json")) or {}
+    sector = profile.get("sector") or profile.get("sector_profile")
+    industry = profile.get("industry")
+
     # peers
     peer_files = sorted(glob.glob(
         os.path.join(workspace, "raw", date, "fundamentals", "peers", "*.json")))
@@ -331,51 +446,77 @@ def main():
         if wacc_rate <= g_term:
             wacc_rate = g_term + 0.03
 
-        rev_growth = metrics.get("revenue_growth")
-        base_growth = cfg["base_growth_fallback"]
-        if isinstance(rev_growth, (int, float)) and rev_growth > 0:
-            base_growth = min(rev_growth, cfg["max_base_growth"])
+        # Two-stage fade DCF: the high-growth phase (capped at max_initial_growth,
+        # well above the legacy 0.20 constant-growth cap) fades linearly to terminal
+        # growth over fade_years, so fast growers are not understated by a single
+        # constant rate. Scenarios move the *initial* growth lever; bear is floored
+        # at terminal so the fade stays monotone and bear <= base <= bull holds.
+        # Deterministic, fundamentals-driven growth selection (3yr revenue CAGR
+        # preferred, with divergence / profitability / sector / maturity guards).
+        gsel = dcf_mod.select_growth(income, metrics, cfg, sector=sector, industry=industry)
+        initial_growth = gsel["initial_growth"]
         delta = cfg["scenario_growth_delta"]
-        years = cfg["projection_years"]
+        fade_years = cfg["fade_years"]
 
         scenarios = {}
-        for name, g in (("bear", max(base_growth - delta, 0.0)),
-                        ("base", base_growth),
-                        ("bull", base_growth + delta)):
-            res = dcf_mod.intrinsic_value_per_share(
-                base, g, years, wacc_rate, g_term, net_debt, shares)
+        for name, ig in (("bear", max(initial_growth - delta, g_term)),
+                         ("base", initial_growth),
+                         ("bull", initial_growth + delta)):
+            res = dcf_mod.intrinsic_value_two_stage(
+                base, ig, fade_years, wacc_rate, g_term, net_debt, shares)
             scenarios[name] = {
-                "growth": _round(g, 4),
+                "growth": _round(ig, 4),
                 "value_per_share": _round(res["value_per_share"]),
                 "tv_fraction": _round(res["tv_fraction"], 3),
             }
 
         base_vps = scenarios["base"]["value_per_share"]
         tv_frac = scenarios["base"]["tv_fraction"]
+        base_schedule = dcf_mod.growth_schedule(initial_growth, g_term, fade_years)
         dcf_block = {
+            "model": "fcff_two_stage",
             "wacc": _round(wacc_rate, 4),
             "terminal_growth": _round(g_term, 4),
             "tax_rate": _round(tax_rate, 4),
             "beta": _round(beta, 3),
             "base_fcff": _round(base),
             "net_debt": _round(net_debt),
-            "projection_years": years,
+            "initial_growth": _round(initial_growth, 4),
+            "growth_source": gsel["source"],
+            "growth_confidence": gsel["confidence"],
+            "growth_reason": gsel["reason"],
+            "growth_components": {k: _round(v, 4) for k, v in gsel["components"].items()},
+            "fade_years": fade_years,
+            "projection_years": fade_years,
+            "growth_schedule": [_round(g, 4) for g in base_schedule],
             "scenarios": scenarios,
             "tv_fraction_in_band": (tv_frac is not None
                                     and dcf_mod.TV_FRACTION_MIN <= tv_frac <= dcf_mod.TV_FRACTION_MAX),
         }
 
         grid = dcf_mod.sensitivity_grid(
-            base, base_growth, years, net_debt, shares,
-            wacc_center=wacc_rate, g_center=g_term, n=cfg["sensitivity_dims"])
+            base, initial_growth, fade_years, net_debt, shares,
+            wacc_center=wacc_rate, g_center=g_term, n=cfg["sensitivity_dims"],
+            model="fcff_two_stage", initial_growth=initial_growth, fade_years=fade_years)
         grid["center_value"] = base_vps  # equals scenarios.base — QC asserts this
         sensitivity = grid
 
-    # ── margin of safety (base intrinsic vs price) ───────────────────────────
-    margin_of_safety = None
     intrinsic_base = (dcf_block or {}).get("scenarios", {}).get("base", {}).get("value_per_share")
-    if intrinsic_base and price:
-        margin_of_safety = round((intrinsic_base - price) / price, 4)
+    fair_value, margin_of_safety, valuation_method, method_candidates = _select_fair_value(
+        dcf_block, implied, price, cfg)
+    fair_value_range = None
+    if dcf_block and valuation_method in {"dcf", "blended"}:
+        fair_value_range = {
+            "low": (dcf_block or {}).get("scenarios", {}).get("bear", {}).get("value_per_share"),
+            "base": fair_value,
+            "high": (dcf_block or {}).get("scenarios", {}).get("bull", {}).get("value_per_share"),
+        }
+    elif implied:
+        vals = [implied.get(k) for k in (
+            "by_pe", "by_ev_ebitda", "by_ev_revenue", "by_ev_revenue_growth_adjusted")]
+        vals = [v for v in vals if _positive(v)]
+        if vals and fair_value:
+            fair_value_range = {"low": _round(min(vals)), "base": fair_value, "high": _round(max(vals))}
 
     # ── verdict + confidence ─────────────────────────────────────────────────
     if margin_of_safety is None:
@@ -388,7 +529,13 @@ def main():
         verdict = "fair"
 
     critical_missing = {"financial_statements", "positive_free_cash_flow", "shares_outstanding"}
-    if not (inputs_missing) and len(peers) >= 3:
+    if valuation_method == "none":
+        confidence = "low"
+    elif valuation_method == "comps_revenue":
+        confidence = "low"
+    elif valuation_method == "blended":
+        confidence = "medium" if inputs_missing or len(peers) < 3 else "high"
+    elif not (inputs_missing) and len(peers) >= 3:
         confidence = "high"
     elif critical_missing & set(inputs_missing) or len(peers) < 2:
         confidence = "low"
@@ -398,20 +545,26 @@ def main():
     # ── summary text ─────────────────────────────────────────────────────────
     if lang == "ch":
         mos_txt = (f"{margin_of_safety*100:.0f}%" if margin_of_safety is not None else "不可计算")
-        summary_text = (f"{ticker} 现价 {price}，基准内在价值 "
-                        f"{intrinsic_base if intrinsic_base else '不可计算'}，"
+        fv_txt = fair_value if fair_value else "不可计算"
+        summary_text = (f"{ticker} 现价 {price}，公允价值 {fv_txt}"
+                        f"（方法：{valuation_method}），"
                         f"安全边际 {mos_txt}，估值判断：{verdict}（置信度 {confidence}）。")
     else:
         mos_txt = (f"{margin_of_safety*100:.0f}%" if margin_of_safety is not None else "n/a")
-        summary_text = (f"{ticker} at {price}: base-case intrinsic value "
-                        f"{intrinsic_base if intrinsic_base else 'n/a'}, margin of safety "
-                        f"{mos_txt}, verdict {verdict} (confidence {confidence}).")
+        fv_txt = fair_value if fair_value else "n/a"
+        summary_text = (f"{ticker} at {price}: fair value {fv_txt} "
+                        f"({valuation_method}), margin of safety {mos_txt}, "
+                        f"verdict {verdict} (confidence {confidence}).")
 
     summary = {
         "ticker": ticker,
         "applicable": True,
         "confidence": confidence,
         "current_price": _round(price) if price else None,
+        "fair_value": fair_value,
+        "fair_value_range": fair_value_range,
+        "valuation_method": valuation_method,
+        "method_candidates": method_candidates,
         "intrinsic_value_base": intrinsic_base,
         "intrinsic_range": {
             "bear": (dcf_block or {}).get("scenarios", {}).get("bear", {}).get("value_per_share"),

@@ -125,6 +125,12 @@ def evaluate(workspace: Path, date: str) -> dict:
         flag_out = regression_flag_path(workspace, date)
         flag_out.parent.mkdir(parents=True, exist_ok=True)
         flag_out.write_text(json.dumps(flag, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    else:
+        # A previously failed gate may be repaired and re-run. Keep the
+        # regression flag aligned with the current gate state.
+        flag_out = regression_flag_path(workspace, date)
+        if flag_out.exists():
+            flag_out.unlink()
 
     return gate
 

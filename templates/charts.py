@@ -46,6 +46,8 @@ LABELS = {
         'relative_perf': 'Relative Performance',
         'peer_perf': '5-Day Performance',
         'vol': 'Vol',
+        'macd': 'MACD',
+        'upcoming': 'Upcoming',
         'return_pct': 'Return (%)',
         '5d_return': '5-Day Return (%)',
         'golden_cross': 'Golden Cross',
@@ -57,6 +59,8 @@ LABELS = {
         'relative_perf': '相对表现',
         'peer_perf': '5日表现',
         'vol': '成交量',
+        'macd': 'MACD',
+        'upcoming': '即将',
         'return_pct': '收益率 (%)',
         '5d_return': '5日收益率 (%)',
         'golden_cross': '金叉',
@@ -176,36 +180,92 @@ def _make_tick_labels(dates, n_ticks=8):
     return positions, labels
 
 
-def generate_price_chart(ticker, price_path, output_path, catalysts=None):
-    """Annotated price chart with SMA, crossovers, events, and latest price.
+# Display window (≈3 months of trading days) and the minimum raw rows needed for
+# a full SMA50 at the first visible bar (65 display + 49 prior bars = 114).
+DISPLAY_WINDOW = 65
+WARMUP_MIN_ROWS = 114
+
+
+def _prepare_chart_df(df, window=DISPLAY_WINDOW):
+    """Compute SMA20/SMA50 and MACD(12,26,9) on the FULL dataframe, then slice to
+    the last `window` rows. Computing before trimming is what makes the overlays
+    valid across the entire visible window (warm-up preserved). Pure: no I/O."""
+    df = df.copy()
+    close = df['Close']
+    df['SMA20'] = close.rolling(20).mean()
+    df['SMA50'] = close.rolling(50).mean()
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_hist'] = df['MACD'] - df['MACD_signal']
+    if window and len(df) > window:
+        df = df.iloc[-window:]
+    return df
+
+
+def _fetch_warmup_history(ticker, run_date=None):
+    """Best-effort in-memory 6mo daily OHLCV for indicator warm-up.
+
+    Rendering stays read-only and never network-dependent: this returns a
+    DataFrame shaped like load_price_csv (date-bounded to run_date so the latest
+    bar/price matches the rest of the report), or None on ANY failure. It never
+    raises and never writes to disk."""
+    try:
+        import yfinance as yf
+        raw = yf.Ticker(ticker).history(period='6mo', interval='1d')
+        if raw is None or raw.empty:
+            return None
+        cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in raw.columns]
+        df = raw[cols].copy()
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        df.index = pd.to_datetime(df.index).normalize()
+        if run_date:
+            df = df[df.index <= pd.Timestamp(run_date).normalize()]
+        df = df.dropna(subset=['Close'])
+        return df if not df.empty else None
+    except Exception as e:  # network unavailable / fetch error → caller degrades
+        print(f'  [warn] warm-up fetch failed for {ticker}: {e}')
+        return None
+
+
+def generate_price_chart(ticker, price_path, output_path, catalysts=None, run_date=None):
+    """Annotated price chart with SMA, MACD, crossovers, events, latest price.
     Uses integer x-axis to eliminate weekend/holiday gaps."""
     df = load_price_csv(price_path)
     if df.empty:
         return
 
-    # Trim to last 3 months for display
-    if len(df) > 65:
-        df = df.iloc[-65:]
+    # Warm-up: if the raw file is too short for a full SMA50 across the visible
+    # window, try an in-memory 6mo fetch (read-only — never overwrites the raw CSV;
+    # degrades to partial overlays if no network).
+    if len(df) < WARMUP_MIN_ROWS:
+        warm = _fetch_warmup_history(ticker, run_date)
+        if warm is not None and len(warm) > len(df):
+            df = warm
+
+    # Compute indicators on the full df, THEN trim to the display window.
+    df = _prepare_chart_df(df, window=DISPLAY_WINDOW)
 
     dates = df.index
     x = np.arange(len(df))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5),
-                                     gridspec_kw={'height_ratios': [3.5, 1]},
-                                     sharex=True)
-    fig.subplots_adjust(hspace=0.05)
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6.5),
+                                        gridspec_kw={'height_ratios': [3.2, 1, 1.1]},
+                                        sharex=True)
+    fig.subplots_adjust(hspace=0.08)
 
     # Price line (thicker)
     ax1.plot(x, df['Close'].values, color=COLORS['primary'], linewidth=2, label=ticker)
 
-    # SMA overlays
-    sma20, sma50 = None, None
-    if len(df) >= 20:
-        sma20 = df['Close'].rolling(20).mean()
+    # SMA overlays (precomputed on the full df → valid across the whole window)
+    sma20 = df['SMA20'] if df['SMA20'].notna().any() else None
+    sma50 = df['SMA50'] if df['SMA50'].notna().any() else None
+    if sma20 is not None:
         ax1.plot(x, sma20.values, color=COLORS['accent'], linewidth=1,
                  linestyle='--', alpha=0.6, label='SMA 20')
-    if len(df) >= 50:
-        sma50 = df['Close'].rolling(50).mean()
+    if sma50 is not None:
         ax1.plot(x, sma50.values, color=COLORS['gray'], linewidth=1,
                  linestyle='--', alpha=0.6, label='SMA 50')
 
@@ -221,12 +281,17 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
                      fontsize=7, fontweight='bold', color=color,
                      arrowprops=dict(arrowstyle='->', color=color, lw=0.8))
 
-    # === ANNOTATION: Latest price dot + label ===
+    # Headroom at the top so the latest-price label and upcoming block don't
+    # collide with the price line or title.
+    ymin, ymax = ax1.get_ylim()
+    ax1.set_ylim(ymin, ymax + (ymax - ymin) * 0.12)
+
+    # === ANNOTATION: Latest price dot + label (anchored inward at the right edge) ===
     latest_price = df['Close'].iloc[-1]
     ax1.scatter([x[-1]], [latest_price], color=COLORS['primary'], s=60, zorder=5,
                 edgecolors='white', linewidth=1.5)
     ax1.annotate(f'${latest_price:.2f}', (x[-1], latest_price),
-                 textcoords="offset points", xytext=(10, -5),
+                 textcoords="offset points", xytext=(-10, 8), ha='right',
                  fontsize=9, fontweight='bold', color=COLORS['primary'],
                  bbox=dict(boxstyle='round,pad=0.3', facecolor=COLORS['very_light'],
                           edgecolor=COLORS['light_gray'], alpha=0.9))
@@ -235,30 +300,40 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
     if len(df) >= 5:
         ax1.axvspan(x[-5], x[-1], alpha=0.06, color=COLORS['accent'])
 
-    # === ANNOTATION: Catalyst event lines ===
+    # === ANNOTATION: Catalyst events ===
+    # In-window catalysts get a real vline at their true position; future ones are
+    # collected into a single bounded, staggered "Upcoming" block (no longer pinned
+    # to the same right-edge spot, which caused the overlap).
     if catalysts:
+        upcoming = []
         for cat in catalysts:
             try:
                 cat_date = pd.Timestamp(cat['date'])
-                if dates[0] <= cat_date <= dates[-1] + timedelta(days=30):
-                    xi = _date_to_idx(dates, cat_date)
-                    # Future catalysts: place at right edge
-                    if cat_date > dates[-1]:
-                        xi = len(x) - 1
-                    ax1.axvline(x=xi, color=COLORS['secondary'], linestyle=':',
-                               alpha=0.5, linewidth=0.8)
-                    ymax = ax1.get_ylim()[1]
-                    ax1.annotate(cat.get('event', '')[:25], (xi, ymax),
-                                textcoords="offset points", xytext=(3, -8),
-                                fontsize=6, color=COLORS['secondary'], rotation=0,
-                                va='top', ha='left')
-            except (ValueError, KeyError):
-                pass
+            except (ValueError, KeyError, TypeError):
+                continue
+            event = (cat.get('event') or '')[:18]
+            if dates[0] <= cat_date <= dates[-1]:
+                xi = _date_to_idx(dates, cat_date)
+                ax1.axvline(x=xi, color=COLORS['secondary'], linestyle=':',
+                            alpha=0.45, linewidth=0.8)
+                ax1.annotate(event, (xi, df['Close'].iloc[xi]),
+                             textcoords="offset points", xytext=(3, 10),
+                             fontsize=6, color=COLORS['secondary'], va='bottom', ha='left')
+            elif cat_date > dates[-1]:
+                upcoming.append((cat_date, event))
+        upcoming = sorted(upcoming)[:3]
+        if upcoming:
+            block = [f"{L('upcoming')}:"] + [f"▸ {d.strftime('%b %d')}  {ev}" for d, ev in upcoming]
+            ax1.text(0.99, 0.92, '\n'.join(block), transform=ax1.transAxes,
+                     ha='right', va='top', fontsize=6, color=COLORS['secondary'],
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor=COLORS['very_light'],
+                               edgecolor=COLORS['light_gray'], alpha=0.85))
 
     ax1.set_ylabel('', fontsize=8)
     ax1.legend(loc='upper left', fontsize=7, frameon=False)
     ax1.set_title(f'{ticker} — {L("price_action")}', fontsize=12, fontweight='bold',
                   color=COLORS['primary'], loc='left', pad=12)
+    ax1.tick_params(labelbottom=False)
 
     # Volume bars
     if 'Volume' in df.columns:
@@ -269,11 +344,25 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None):
         ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, p: f'{v/1e6:.0f}M'))
         vol_avg = df['Volume'].rolling(20).mean()
         ax2.plot(x, vol_avg.values, color=COLORS['muted'], linewidth=0.7, alpha=0.5)
+    ax2.tick_params(labelbottom=False)
 
-    # X-axis: trading day labels only (no gaps)
+    # MACD panel (below volume): histogram + MACD line + signal line
+    macd, signal, hist = df['MACD'], df['MACD_signal'], df['MACD_hist']
+    if macd.notna().any():
+        hist_colors = [COLORS['positive'] if (h >= 0) else COLORS['negative']
+                       for h in np.nan_to_num(hist.values)]
+        ax3.bar(x, hist.values, color=hist_colors, alpha=0.35, width=0.8)
+        ax3.plot(x, macd.values, color=COLORS['secondary'], linewidth=1, label=L('macd'))
+        ax3.plot(x, signal.values, color=COLORS['accent'], linewidth=1,
+                 linestyle='--', label='Signal')
+        ax3.axhline(0, color=COLORS['light_gray'], linewidth=0.6)
+        ax3.set_ylabel(L('macd'), fontsize=7, color=COLORS['muted'])
+        ax3.legend(loc='upper left', fontsize=6, frameon=False, ncol=2)
+
+    # X-axis: trading day labels only (no gaps), on the bottom MACD panel
     tick_pos, tick_labels = _make_tick_labels(dates)
-    ax2.set_xticks(tick_pos)
-    ax2.set_xticklabels(tick_labels, fontsize=7)
+    ax3.set_xticks(tick_pos)
+    ax3.set_xticklabels(tick_labels, fontsize=7)
 
     plt.tight_layout()
     fig.savefig(output_path, bbox_inches='tight', dpi=150)  # format inferred from extension (.svg)
@@ -491,7 +580,7 @@ def main():
         ticker_3mo = raw_prices / f'{ticker_clean}_medium.csv'
     if ticker_3mo.exists():
         generate_price_chart(ticker, str(ticker_3mo), str(chart_dir / 'price_chart.svg'),
-                            catalysts=catalysts)
+                            catalysts=catalysts, run_date=date)
 
     # 2. Relative performance chart (annotated)
     # Try multiple index names: SPY, HSI, ^HSI, sector_etf, etc.

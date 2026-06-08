@@ -7,7 +7,7 @@ the numbers the engine wrote are mutually consistent and obey the guardrails:
   HARD FAIL (math is wrong):
     - terminal growth >= WACC (Gordon model invalid)
     - sensitivity-grid center cell != base-case intrinsic value
-    - margin_of_safety != (intrinsic_base - price) / price
+    - margin_of_safety != (fair_value - price) / price
     - intrinsic range not ordered bear <= base <= bull
     - comps blended implied value != mean of its components
   WARN (model fragile, not a failure):
@@ -26,6 +26,7 @@ from pathlib import Path
 _ABS_TOL = 0.05      # per-share value comparisons
 _MOS_TOL = 0.01      # margin-of-safety (1 percentage point)
 _BLEND_TOL = 0.02
+_REL_TOL = 1e-4      # 0.01% — large-value sensitivity-grid center vs base (non-USD safe)
 
 
 def load_json(path: Path):
@@ -116,19 +117,21 @@ def grade(workspace: str, date: str) -> dict:
         center = _center_cell(sens_path)
         if center is not None:
             hard_ok &= check("sensitivity_center_eq_base",
-                             abs(center - base_iv) <= _ABS_TOL,
+                             abs(center - base_iv) <= max(_ABS_TOL, abs(base_iv) * _REL_TOL),
                              f"center={center}, base={base_iv}")
 
-    # 4. margin of safety == (intrinsic_base - price) / price
+    # 4. margin of safety == (fair_value - price) / price
     mos = summary.get("margin_of_safety")
     price = summary.get("current_price")
-    if mos is not None and base_iv is not None and price:
-        recomputed = (base_iv - price) / price
+    fair_value = summary.get("fair_value")
+    mos_anchor = fair_value if fair_value is not None else base_iv
+    if mos is not None and mos_anchor is not None and price:
+        recomputed = (mos_anchor - price) / price
         hard_ok &= check("margin_of_safety_recompute",
                          abs(recomputed - mos) <= _MOS_TOL,
                          f"stored={mos}, recomputed={recomputed:.4f}")
 
-    # 5. comps blended implied value == mean of its components
+    # 5. comps blended implied value == mean of earnings/cash-flow components
     imp = summary.get("comps_implied_value") or {}
     comps = [imp.get("by_pe"), imp.get("by_ev_ebitda")]
     present = [v for v in comps if isinstance(v, (int, float)) and v > 0]
@@ -138,11 +141,33 @@ def grade(workspace: str, date: str) -> dict:
                          abs(mean - imp["blended"]) <= max(_BLEND_TOL, 0.005 * mean),
                          f"blended={imp['blended']}, mean={mean:.4f}")
 
+    # 6. selected fair value matches included candidate or weighted blend
+    candidates = summary.get("method_candidates") or []
+    active = [c for c in candidates
+              if c.get("included") and isinstance(c.get("value"), (int, float))
+              and c.get("value") > 0]
+    if fair_value is not None and active:
+        total_w = sum(c.get("weight") or 0.0 for c in active)
+        if summary.get("valuation_method") == "blended" and total_w > 0:
+            recomputed = sum(c["value"] * c["weight"] for c in active) / total_w
+            hard_ok &= check("fair_value_blend_recompute",
+                             abs(recomputed - fair_value) <= max(_ABS_TOL, 0.005 * recomputed),
+                             f"stored={fair_value}, recomputed={recomputed:.4f}")
+        else:
+            vals = [c["value"] for c in active]
+            hard_ok &= check("fair_value_matches_candidate",
+                             any(abs(v - fair_value) <= _ABS_TOL for v in vals),
+                             f"fair_value={fair_value}, candidates={vals}")
+
     # ── warnings (do not fail) ────────────────────────────────────────────────
     if dcf and dcf.get("tv_fraction_in_band") is False:
         base_tv = (dcf.get("scenarios", {}).get("base", {}) or {}).get("tv_fraction")
+        if base_tv is not None and base_tv > 0.70:
+            note = "above 70% — model leans on terminal value"
+        else:
+            note = "below 50% — explicit phase carries the value (terminal-light)"
         result["warnings"].append(
-            f"terminal value fraction {base_tv} outside 50–70% band (model leans on terminal value)")
+            f"terminal value fraction {base_tv} outside 50–70% band ({note})")
     if summary.get("confidence") == "low":
         result["warnings"].append(
             f"low confidence; inputs_missing={summary.get('inputs_missing')}")

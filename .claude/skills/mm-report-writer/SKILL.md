@@ -79,7 +79,7 @@ Write to: `{workspace}/drafts/{date}/daily_v1.md`
 ![Price action & technicals](charts/price_chart.svg)
 
 ## Valuation
-<From `shared_context.valuation` (valuation_summary.json). State the verdict (cheap/fair/expensive) and margin of safety vs the current price. Give the DCF intrinsic range (bear/base/bull) with the WACC and terminal growth used, and a short comps line (company EV/EBITDA and forward P/E vs peer median + percentile). If valuation is `applicable: false` (ETF/fund) or `confidence: "low"`, say so in one line instead of forcing a number. Do not invent figures — use only what the summary provides.>
+<From `shared_context.valuation` (valuation_summary.json). State the verdict, canonical `fair_value`, `valuation_method`, and margin of safety vs the current price. If DCF is available, give its intrinsic range with WACC and terminal growth; if DCF is unavailable or downgraded, say why and use the selected comps/blended method instead. Include a short comps line (EV/Revenue for high-growth/loss-making names; EV/EBITDA and forward P/E when meaningful). If valuation is `applicable: false` (ETF/fund) or `confidence: "low"`, say so in one line instead of forcing precision. Do not invent figures — use only what the summary provides.>
 
 ## Sector & Peers
 <How the company performed vs sector and peers. Any notable peer developments.>
@@ -133,6 +133,6 @@ Write the revised draft to `{workspace}/drafts/{date}/` with an incremented vers
 - Do not fabricate data or events not present in evidence cards
 - Do not ignore writer_guidance from thesis_map.json — it contains debate-tested instructions
 - Reference specific numbers from quant_summary.json, not approximations
-- Valuation figures (intrinsic range, margin of safety, multiples) must come from valuation_summary.json — never fabricate or WebSearch them; if it is not applicable / low confidence, state that plainly
+- Valuation figures (fair value, valuation method, margin of safety, intrinsic range, multiples) must come from valuation_summary.json — never fabricate or WebSearch them; if it is not applicable / low confidence, state that plainly
 - If the debate showed a fundamental disagreement, present both sides
 - Catalyst dates must be accurate as per catalysts.json

@@ -89,6 +89,171 @@ def project_fcff(base: float, growth: float, years: int) -> list[float]:
     return flows
 
 
+def growth_schedule(initial_growth: float, terminal_growth: float,
+                    fade_years: int) -> list[float]:
+    """Linear growth fade from `initial_growth` (year 1) to `terminal_growth`.
+
+    The final year's growth equals `terminal_growth`, so the explicit phase
+    hands off smoothly to the Gordon perpetuity. Monotone whether the company
+    fades down (high grower) or up (sub-terminal grower); `initial == terminal`
+    yields a flat schedule == the constant-growth model. `fade_years <= 1`
+    collapses to a single terminal-growth period.
+    """
+    if fade_years <= 1:
+        return [terminal_growth]
+    return [initial_growth + (terminal_growth - initial_growth) * (t / (fade_years - 1))
+            for t in range(fade_years)]
+
+
+def project_fcff_schedule(base: float, schedule: list[float]) -> list[float]:
+    """Project FCFF by compounding `base` through a per-year growth schedule."""
+    flows = []
+    val = base
+    for g in schedule:
+        val = val * (1 + g)
+        flows.append(val)
+    return flows
+
+
+# ── growth selection (deterministic, fundamentals-driven) ──────────────────────
+_CONFIDENCE_ORDER = ["low", "medium", "high"]
+
+# sectors/industries where an FCFF DCF is structurally noisy (banks/brokers/etc.).
+# Matched (lowercased) against BOTH the company's sector and its industry so a
+# broad sector label ("Financial Services") plus a precise industry ("Capital
+# Markets") both trigger the caveat.
+DCF_NOISY_SECTORS = {
+    "financial services", "financials", "banks", "bank", "insurance",
+    "capital markets", "brokers", "broker", "asset management",
+}
+
+
+def _downgrade(confidence: str) -> str:
+    """Lower a confidence label one notch (high→medium→low), floored at low."""
+    try:
+        i = _CONFIDENCE_ORDER.index(confidence)
+    except ValueError:
+        return "low"
+    return _CONFIDENCE_ORDER[max(0, i - 1)]
+
+
+def revenue_cagr(income_statement: list[dict], years: int = 3) -> float | None:
+    """Annualized revenue CAGR from a newest-first income-statement list.
+
+    Uses entries carrying a positive `revenue`; spans up to `years` intervals
+    (fewer when history is short). Returns None with < 2 usable periods.
+    """
+    revs = [r.get("revenue") for r in (income_statement or [])
+            if isinstance(r.get("revenue"), (int, float)) and r.get("revenue") > 0]
+    if len(revs) < 2:
+        return None
+    span = min(years, len(revs) - 1)
+    newest, oldest = revs[0], revs[span]
+    if oldest <= 0:
+        return None
+    return (newest / oldest) ** (1 / span) - 1
+
+
+def _maturity_cap(market_cap, cfg: dict) -> float:
+    """Size-tiered growth ceiling: mega-caps can't sustain a small-cap rate."""
+    default = cfg.get("max_initial_growth", 0.35)
+    if not isinstance(market_cap, (int, float)) or market_cap <= 0:
+        return default
+    if market_cap >= cfg.get("mega_cap_threshold", 200e9):
+        return cfg.get("mega_cap_max_growth", 0.25)
+    if market_cap <= cfg.get("small_cap_threshold", 2e9):
+        return cfg.get("small_cap_max_growth", default)
+    return default
+
+
+def _is_noisy_dcf_sector(sector, industry) -> bool:
+    for label in (sector, industry):
+        if isinstance(label, str) and label.strip().lower() in DCF_NOISY_SECTORS:
+            return True
+    return False
+
+
+def select_growth(income_statement: list[dict], metrics: dict, cfg: dict,
+                  sector: str | None = None, industry: str | None = None) -> dict:
+    """Deterministic, fundamentals-driven initial-growth selection for the DCF.
+
+    Hierarchy: forward analyst revenue growth (if ever collected) → 3yr revenue
+    CAGR → trailing revenue growth → fallback. Confidence is then downgraded by a
+    sign/zero-safe CAGR-vs-trailing divergence guard, a profitability penalty, and
+    a financials/brokers sector|industry caveat; growth is finally clamped by a
+    size-tiered maturity cap. Pure — returns initial_growth + source + confidence
+    + an audit `reason` trail + the raw components.
+    """
+    metrics = metrics or {}
+
+    def _pos(v):
+        return v if isinstance(v, (int, float)) and v > 0 else None
+
+    cagr = revenue_cagr(income_statement, cfg.get("cagr_years", 3))
+    # trailing_raw keeps the actual figure (may be ≤0, used by the divergence guard);
+    # trailing is the positive-only value eligible to be the growth *source*.
+    trailing_raw = metrics.get("revenue_growth")
+    trailing_raw = trailing_raw if isinstance(trailing_raw, (int, float)) else None
+    trailing = _pos(trailing_raw)
+    forward = _pos(metrics.get("forward_revenue_growth"))  # inactive slot today
+    fallback = cfg.get("base_growth_fallback", 0.05)
+
+    if forward is not None:
+        growth, source, confidence = forward, "forward_revenue_growth", "high"
+    elif cagr is not None and cagr > 0:
+        growth, source, confidence = cagr, "revenue_cagr_3y", "high"
+    elif trailing is not None:
+        growth, source, confidence = trailing, "revenue_growth_ttm", "medium"
+    else:
+        growth, source, confidence = fallback, "default_fallback", "low"
+
+    reasons = [f"source={source}"]
+
+    # divergence guard (sign/zero-safe): only when both CAGR and a trailing figure
+    # exist. Ratio rule needs both strictly positive; otherwise an absolute-diff
+    # rule — never divide by a non-positive trailing.
+    if cagr is not None and trailing_raw is not None:
+        if cagr > 0 and trailing_raw > 0:
+            ratio = cagr / trailing_raw
+            hi = cfg.get("growth_divergence_ratio", 2.0)
+            if ratio > hi or ratio < 1.0 / hi:
+                confidence = _downgrade(confidence)
+                reasons.append(f"cagr/trailing divergence ratio {ratio:.2f}")
+        elif abs(cagr - trailing_raw) > cfg.get("growth_divergence_abs", 0.25):
+            confidence = _downgrade(confidence)
+            reasons.append(f"cagr/trailing abs divergence {abs(cagr - trailing_raw):.2f}")
+
+    # profitability penalty: weak/negative margins → revenue growth ≠ FCFF growth.
+    opm = metrics.get("operating_margins")
+    if isinstance(opm, (int, float)) and opm < cfg.get("weak_margin_threshold", 0.05):
+        growth *= cfg.get("weak_margin_growth_haircut", 0.75)
+        confidence = _downgrade(confidence)
+        reasons.append(f"weak operating margin {opm:.3f} → growth haircut")
+
+    # financials/brokers caveat: FCFF DCF is structurally noisy.
+    if _is_noisy_dcf_sector(sector, industry):
+        confidence = _downgrade(confidence)
+        reasons.append(f"noisy-DCF sector/industry ({sector or industry})")
+
+    # maturity (size) cap.
+    cap = _maturity_cap(metrics.get("market_cap"), cfg)
+    if growth > cap:
+        reasons.append(f"capped at {cap} (size tier)")
+        growth = cap
+
+    return {
+        "initial_growth": growth,
+        "source": source,
+        "confidence": confidence,
+        "reason": "; ".join(reasons),
+        "components": {
+            "cagr_3y": cagr,
+            "revenue_growth_ttm": trailing_raw,
+            "forward": forward,
+        },
+    }
+
+
 def terminal_value(last_fcff: float, wacc_rate: float, terminal_growth: float) -> float:
     """Gordon-growth terminal value. Raises if WACC <= terminal growth."""
     if wacc_rate <= terminal_growth:
@@ -102,16 +267,16 @@ def present_value(flows: list[float], wacc_rate: float) -> list[float]:
     return [cf / (1 + wacc_rate) ** (i + 1) for i, cf in enumerate(flows)]
 
 
-def enterprise_value(base: float, growth: float, years: int,
-                     wacc_rate: float, terminal_growth: float) -> dict:
-    """Full DCF → enterprise value plus the terminal-value fraction (guardrail).
+def enterprise_value_from_flows(flows: list[float], wacc_rate: float,
+                                terminal_growth: float) -> dict:
+    """Enterprise value from precomputed FCFF flows + Gordon terminal value.
 
-    Returns {ev, pv_explicit, pv_terminal, tv_fraction, flows}.
+    Returns {ev, pv_explicit, pv_terminal, tv_fraction, flows}. Shared core for
+    both the constant-growth and the two-stage fade DCF so they stay identical.
     """
-    flows = project_fcff(base, growth, years)
     pv_flows = present_value(flows, wacc_rate)
     tv = terminal_value(flows[-1], wacc_rate, terminal_growth)
-    pv_tv = tv / (1 + wacc_rate) ** years
+    pv_tv = tv / (1 + wacc_rate) ** len(flows)
     pv_explicit = sum(pv_flows)
     ev = pv_explicit + pv_tv
     return {
@@ -121,6 +286,16 @@ def enterprise_value(base: float, growth: float, years: int,
         "tv_fraction": (pv_tv / ev) if ev else None,
         "flows": flows,
     }
+
+
+def enterprise_value(base: float, growth: float, years: int,
+                     wacc_rate: float, terminal_growth: float) -> dict:
+    """Constant-growth DCF → enterprise value plus the terminal-value fraction.
+
+    Returns {ev, pv_explicit, pv_terminal, tv_fraction, flows}.
+    """
+    flows = project_fcff(base, growth, years)
+    return enterprise_value_from_flows(flows, wacc_rate, terminal_growth)
 
 
 def intrinsic_value_per_share(base: float, growth: float, years: int,
@@ -141,6 +316,30 @@ def intrinsic_value_per_share(base: float, growth: float, years: int,
     }
 
 
+def intrinsic_value_two_stage(base: float, initial_growth: float, fade_years: int,
+                              wacc_rate: float, terminal_growth: float,
+                              net_debt: float, shares: float) -> dict:
+    """Two-stage DCF: a high-growth phase fading to terminal, then Gordon TV.
+
+    Growth fades linearly from `initial_growth` to `terminal_growth` over
+    `fade_years`; the fade endpoint equals the Gordon `terminal_growth`, so the
+    explicit exit and the perpetuity tie together. Returns the same shape as
+    intrinsic_value_per_share plus the realized `growth_schedule`.
+    """
+    sched = growth_schedule(initial_growth, terminal_growth, fade_years)
+    flows = project_fcff_schedule(base, sched)
+    dcf = enterprise_value_from_flows(flows, wacc_rate, terminal_growth)
+    equity = dcf["ev"] - (net_debt or 0.0)
+    vps = (equity / shares) if shares else None
+    return {
+        "value_per_share": vps,
+        "ev": dcf["ev"],
+        "equity_value": equity,
+        "tv_fraction": dcf["tv_fraction"],
+        "growth_schedule": sched,
+    }
+
+
 def _centered_axis(center: float, step: float, n: int) -> list[float]:
     """Symmetric odd-length axis centered on `center` (guarantees center cell)."""
     if n % 2 == 0:
@@ -153,12 +352,21 @@ def sensitivity_grid(base: float, growth: float, years: int,
                      net_debt: float, shares: float,
                      wacc_center: float, g_center: float,
                      n: int = 5, wacc_step: float = 0.01,
-                     g_step: float = 0.0025) -> dict:
+                     g_step: float = 0.0025, *,
+                     model: str = "fcff_constant",
+                     initial_growth: float | None = None,
+                     fade_years: int | None = None) -> dict:
     """Per-share value over a WACC × terminal-growth grid.
 
     The center cell equals the base-case intrinsic value (a built-in sanity
     check the QC grader asserts). Cells where WACC <= g are returned as None.
+
+    `model="fcff_two_stage"` runs the two-stage fade DCF per cell (requires
+    `initial_growth` and `fade_years`); the default constant-growth path is
+    unchanged. Either way only WACC and terminal growth vary across cells, so
+    the center cell ties out to the base scenario by construction.
     """
+    two_stage = model in ("fcff_two_stage", "revenue_margin")
     wacc_axis = _centered_axis(wacc_center, wacc_step, n)
     g_axis = _centered_axis(g_center, g_step, n)
     grid = []
@@ -166,7 +374,11 @@ def sensitivity_grid(base: float, growth: float, years: int,
         row = []
         for g in g_axis:
             try:
-                res = intrinsic_value_per_share(base, growth, years, w, g, net_debt, shares)
+                if two_stage:
+                    res = intrinsic_value_two_stage(
+                        base, initial_growth, fade_years, w, g, net_debt, shares)
+                else:
+                    res = intrinsic_value_per_share(base, growth, years, w, g, net_debt, shares)
                 row.append(res["value_per_share"])
             except ValueError:
                 row.append(None)

@@ -26,7 +26,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 ## Inputs
 
-- `{workspace}/valuation/{date}/valuation_summary.json` — **primary input**: computed DCF intrinsic-value range (bull/base/bear), margin of safety, verdict, peer comps benchmarks (quartiles + company percentile), WACC and assumptions, confidence flag
+- `{workspace}/valuation/{date}/valuation_summary.json` — **primary input**: canonical `fair_value`, `valuation_method`, margin of safety, verdict, method candidates, computed DCF intrinsic-value range (when available), peer comps benchmarks (quartiles + company percentile), WACC and assumptions, confidence flag
 - `{workspace}/valuation/{date}/comps.csv` — per-name peer multiples table (optional detail)
 - `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — price data, returns
@@ -35,7 +35,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 **Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, valuation, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
-**The valuation engine has already done the math.** Your job is to *interpret* `valuation_summary.json`, not recompute it. Build your thesis from its numbers (intrinsic range, margin of safety, comps percentile). WebSearch is now an **optional cross-check** only — use it to sanity-check the computed multiples or add consensus-estimate color, never as the primary source.
+**The valuation engine has already done the math.** Your job is to *interpret* `valuation_summary.json`, not recompute it. Build your thesis from its canonical `fair_value`, `valuation_method`, margin of safety, method candidates, DCF range when available, and comps percentiles. WebSearch is now an **optional cross-check** only — use it to sanity-check the computed multiples or add consensus-estimate color, never as the primary source.
 
 **If the summary is `applicable: false`** (ETF/fund) or `confidence: "low"` (sparse data), say so plainly and lean on relative/comps signals or qualitative judgment instead of overstating a thin DCF.
 
@@ -55,21 +55,22 @@ The memo MUST contain:
 # Valuation Analysis
 
 ## Core Valuation View
-<Cheap, fair, or expensive at the current price? State the engine's `verdict` and `margin_of_safety` up front, then a 1-2 paragraph thesis. e.g. "Base-case DCF intrinsic value ~$X vs price $Y → margin of safety Z% (verdict: expensive)." Note the engine `confidence`.>
+<Cheap, fair, or expensive at the current price? State the engine's `verdict`, canonical `fair_value`, `valuation_method`, and `margin_of_safety` up front, then a 1-2 paragraph thesis. e.g. "Fair value ~$X via blended/DCF/comps vs price $Y → margin of safety Z% (verdict: expensive)." Note the engine `confidence`.>
 
 ## Intrinsic Value (DCF)
 - Intrinsic range: bear $X / base $Y / bull $Z  (from `intrinsic_range`)
-- WACC: X.X% · terminal growth: X.X% · base FCFF growth: X.X%  (from `dcf`)
+- WACC: X.X% · terminal growth: X.X% · initial growth: X.X% fading over N yrs  (from `dcf`)
+- Growth basis: `dcf.growth_source` (e.g. revenue_cagr_3y) · growth confidence: `dcf.growth_confidence`
 - Margin of safety vs price: Z%
-<Comment on whether the base case looks conservative or aggressive; flag if `tv_fraction_in_band` is false (terminal value carrying too much of the EV).>
+<Comment on whether DCF is the selected anchor or only a candidate. If DCF is unavailable or not selected, explain why. When `dcf.growth_confidence` is low (or the source is `default_fallback`, or `dcf.growth_reason` cites a noisy sector / divergence / weak margin), say the DCF base growth is low-confidence and lean on comps. Flag if `tv_fraction_in_band` is false (terminal value carrying too much of the EV).>
 
 ## Peer Comps
 - EV/EBITDA: company X.Xx vs peer median Y.Yx (company at the Pth percentile)
 - Forward P/E: company X.Xx vs peer median Y.Yx
-<From `comps` benchmarks. Is the premium/discount to peers justified by growth/margins? Reference `comps_implied_value` if present.>
+<From `comps` benchmarks. Is the premium/discount to peers justified by growth/margins? Reference `comps_implied_value`, including EV/Revenue for high-growth/loss-making companies, if present.>
 
 ## Price Target Logic
-<Anchor to the DCF base case and/or the peer-median implied value. State the number and which method drives it.>
+<Anchor to `fair_value` and `valuation_method`. State which method candidates were included or excluded, and why the selected method drives the target.>
 
 ## Valuation Risk
 <What scenario flips the verdict? Use the bear-case intrinsic value and the sensitivity to WACC / terminal growth. At what multiple or growth does it become a clear sell (or clear buy)?>
@@ -93,7 +94,7 @@ Each critique must include: valuation perspective on the other analyst's thesis 
 
 ## Quality Rules
 
-- Anchor to `valuation_summary.json` — quote its intrinsic range, margin of safety, and comps percentiles. Do not invent numbers or substitute WebSearch figures for the computed ones.
+- Anchor to `valuation_summary.json` — quote its fair value, valuation method, margin of safety, intrinsic range when available, and comps percentiles. Do not invent numbers or substitute WebSearch figures for the computed ones.
 - Always reference specific multiples and numbers, not vague "expensive" or "cheap".
 - The price target must have explicit reasoning tied to the DCF base case or peer-median implied value, not just a number.
 - Honestly flag low confidence, `applicable: false`, or `tv_fraction_in_band: false` rather than overstating a thin or fragile model.
