@@ -33,7 +33,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 - `{workspace}/profile/company_profile.json` — market cap, sector (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, valuation, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+**Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, valuation, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
 **The valuation engine has already done the math.** Your job is to *interpret* `valuation_summary.json`, not recompute it. Build your thesis from its canonical `fair_value`, `valuation_method`, margin of safety, method candidates, DCF range when available, and comps percentiles. WebSearch is now an **optional cross-check** only — use it to sanity-check the computed multiples or add consensus-estimate color, never as the primary source.
 

@@ -261,6 +261,11 @@ workspaces/
     exports/{YYYY-MM-DD}/        # Date-stamped exports
       pdf/
       web/
+
+    shared_context/             # Per-run shared bundle, one file per date
+      {YYYY-MM-DD}.json         #   quant + valuation + profile + peers + catalysts
+    memory/                     # Per-run retrieved memory context, one file per date+role
+      {YYYY-MM-DD}_{role}.json  #   role ∈ analyst | writer | reviewer
 ```
 
 ---

@@ -348,7 +348,9 @@ workspaces/NVDA/
 ├── reviews/{YYYY-MM-DD}/          # 质量评分与修订要求
 ├── decision/{YYYY-MM-DD}/         # BUY/HOLD/SELL 决策结果
 ├── final/{YYYY-MM-DD}/            # 最终报告（Markdown + JSON）
-└── exports/{YYYY-MM-DD}/pdf/      # JPM 风格 PDF 报告与图表
+├── exports/{YYYY-MM-DD}/pdf/      # JPM 风格 PDF 报告与图表
+├── shared_context/{YYYY-MM-DD}.json   # 单次运行的共享上下文包（quant+估值+资料+同业+催化剂）
+└── memory/{YYYY-MM-DD}_{role}.json    # 单次运行检索到的记忆上下文（analyst/writer/reviewer）
 ```
 
 ---

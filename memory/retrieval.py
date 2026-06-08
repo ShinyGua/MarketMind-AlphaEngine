@@ -19,6 +19,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Single source of truth for artifact paths (see mcp/shared/contracts.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "mcp" / "shared"))
+from contracts import memory_context_path  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -284,8 +288,9 @@ def main() -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Write per-role output file to workspace (avoids cross-role overwrite)
-    output_path = workspace / f"{run_date}_memory_context_{query_type}.json"
+    # Write per-role output file to workspace/memory/ (avoids cross-role overwrite)
+    output_path = memory_context_path(workspace, run_date, query_type)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=2, ensure_ascii=False)
 

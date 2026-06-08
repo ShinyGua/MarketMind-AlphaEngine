@@ -41,7 +41,7 @@ Also read `{workspace}/resolved_config.json` for review thresholds.
 **IMPORTANT:** The review_packet bundles everything. Do NOT read individual evidence card files, quant_summary, company_profile, catalysts, or debate_summary separately — they are already in the packet. This reduces reads from ~32 to ~2.
 
 **Fallback (if MCP resources unavailable):** Read individual files:
-- `{workspace}/drafts/{date}/*.md`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/{date}_shared_context.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/{date}_memory_context_reviewer.json`
+- `{workspace}/drafts/{date}/*.md`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/shared_context/{date}.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/memory/{date}_reviewer.json`
 
 ## Process
 

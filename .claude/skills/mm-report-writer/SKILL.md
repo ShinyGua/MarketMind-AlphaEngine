@@ -42,7 +42,7 @@ For revision mode, read `workspace://{TICKER}/{date}/review_packet` via MCP reso
 - `{workspace}/reviews/{date}/revision_briefs/revision_brief.json` — what to fix
 
 **Fallback (if MCP resources unavailable):** Read individual files directly:
-- `{workspace}/{date}_shared_context.json`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/{date}_memory_context_writer.json`
+- `{workspace}/shared_context/{date}.json`, `{workspace}/normalized/{date}/evidence_digest.json`, `{workspace}/discussion/{date}/thesis_map.json`, `{workspace}/memory/{date}_writer.json`
 
 ## Behavior Modes
 

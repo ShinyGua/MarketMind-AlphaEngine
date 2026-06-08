@@ -246,9 +246,10 @@ for cp in [f'{ws}/raw/{date}/calendar/catalysts.json', f'{ws}/raw/calendar/catal
     if os.path.exists(cp):
         ctx['catalysts'] = json.load(open(cp))
         break
-with open(f'{ws}/{date}_shared_context.json', 'w') as out:
+os.makedirs(f'{ws}/shared_context', exist_ok=True)
+with open(f'{ws}/shared_context/{date}.json', 'w') as out:
     json.dump(ctx, out, indent=2)
-print(f'shared_context.json: {len(ctx)} sections')
+print(f'shared_context/{date}.json: {len(ctx)} sections')
 "
 ```
 
@@ -260,7 +261,7 @@ print(f'shared_context.json: {len(ctx)} sections')
 ```bash
 .venv/bin/python3 memory/retrieval.py {workspace} {date} analyst
 ```
-This creates `{workspace}/{date}_memory_context_analyst.json` which analysts can optionally read for historical context.
+This creates `{workspace}/memory/{date}_analyst.json` which analysts can optionally read for historical context.
 
 Read `discussion.analyst_roles` from resolved config to get the list of active analysts.
 

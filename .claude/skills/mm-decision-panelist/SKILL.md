@@ -46,7 +46,7 @@ Round: $ARGUMENTS[3] (1-based integer)
   (`net_directional_lean`, strongest bull/bear cases, key risks, disagreements).
 - `{workspace}/valuation/{date}/valuation_summary.json` — verdict (cheap/fair/
   expensive), margin of safety, confidence, applicable.
-- `{workspace}/{date}_shared_context.json` — quant, profile, peers, catalysts in
+- `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts in
   one file (read this instead of the individual files).
 - `{workspace}/normalized/{date}/evidence_digest.json` — all evidence cards in one
   file (cite `ev_…` ids).
@@ -54,7 +54,7 @@ Round: $ARGUMENTS[3] (1-based integer)
   — the chair's previous tally: the vote split, the dissenters, and `chair_notes`
   on what this round must resolve. Read it and engage with it.
 
-**Memory context (optional):** if `{workspace}/{date}_memory_context_analyst.json`
+**Memory context (optional):** if `{workspace}/memory/{date}_analyst.json`
 exists, use it for historical context, but do not let it override current evidence.
 
 ## Process

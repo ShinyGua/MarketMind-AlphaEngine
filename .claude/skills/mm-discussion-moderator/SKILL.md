@@ -91,9 +91,9 @@ Read critique files AND the memo summaries saved during scan. Do NOT re-read ful
 
 - `{workspace}/discussion/{date}/debate_assignments.json` — contains memo_summaries from scan phase
 - `{workspace}/discussion/{date}/debate/round_*/*.md` — cross-critique files from debate
-- `{workspace}/{date}_shared_context.json` — quant, profile, peers, catalysts (one file)
+- `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
 
-**Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/{date}_shared_context.json` instead of individual evidence card, quant, profile, and catalyst files.
+**Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/shared_context/{date}.json` instead of individual evidence card, quant, profile, and catalyst files.
 
 ## Process
 
