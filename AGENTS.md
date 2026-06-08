@@ -127,6 +127,20 @@ Skill files use Claude conventions; map them as follows:
   loop, `mm-decision-maker` (final) writes `final_decision.json`. With the panel
   disabled it is a single `mm-decision-maker` call (legacy). The headless driver
   `scripts/run_codex_pipeline.py` already encodes this loop in `st_decide`.
+- **The decision is risk-gated after the fact.** In the reflect stage,
+  `eval/graders/decision_risk_grader.py` computes a deterministic confidence
+  *ceiling* from reproducible signals (weak panel convergence, retained dissent,
+  low-confidence valuation cited as a reason, thin evidence) and flags when the
+  chair's stated `confidence` exceeds it. It is **advisory and non-mutating** —
+  it never rewrites `final_decision.json`; an over-ceiling result makes the
+  release gate a *warning*, never *failed*. Both drivers run it (`st_reflect` /
+  the orchestrator reflect stage).
+- **Valuation confidence is derived, not asserted.** `valuation/run_valuation.py`
+  sets the summary `confidence` for `dcf`/`comps_earnings`/`blended` from the
+  included method candidates (`_component_confidence`): a low-confidence DCF — or
+  any low-confidence component carrying material weight — caps the blend, so a
+  fragile DCF can't make the fair value read "high". `valuation_grader.py` warns
+  if the stated confidence ever exceeds what the components support.
 - **Tools**: `Read`/`Glob`/`Grep`/`Bash`/`Write`/`Edit` → Codex shell tools +
   `apply_patch`; `rg` for search. `TodoWrite` → Codex plan/status updates.
   `WebSearch`/`WebFetch` → Codex web browsing. `mcp__*__*` → the `config.toml`

@@ -274,6 +274,44 @@ def _weighted_value(candidates):
     return sum(c["value"] * c["weight"] for c in active) / total_w
 
 
+_CONF_ORD = {"low": 0, "medium": 1, "high": 2}
+_ORD_CONF = {0: "low", 1: "medium", 2: "high"}
+
+
+def _min_conf(a, b):
+    """Conservative minimum of two confidence labels."""
+    return _ORD_CONF[min(_CONF_ORD[a], _CONF_ORD[b])]
+
+
+def _component_confidence(candidates):
+    """Derive a confidence label from the included method candidates.
+
+    Weight-share-weighted average of the component confidences, rounded (half-up)
+    to the nearest label, then *dragged down* when a low-confidence component
+    carries meaningful weight — so a fair value leaning on a fragile input cannot
+    read "high". Covers single-method cases (one included candidate just returns
+    its own confidence) and blends alike. Returns None when nothing is included.
+    """
+    active = [c for c in candidates
+              if c.get("included") and (c.get("weight") or 0.0) > 0
+              and c.get("confidence") in _CONF_ORD]
+    total_w = sum(c["weight"] for c in active)
+    if not active or total_w <= 0:
+        return None
+    weighted = sum(_CONF_ORD[c["confidence"]] * c["weight"] for c in active) / total_w
+    label = _ORD_CONF[int(weighted + 0.5)]  # round half up (ordinals are non-negative)
+    # Drag guard: a low-confidence component with a meaningful weight share caps
+    # the blend — ≥0.30 share → no better than "medium"; ≥0.60 share → "low".
+    for c in active:
+        if c["confidence"] == "low":
+            share = c["weight"] / total_w
+            if share >= 0.60 and _CONF_ORD[label] > 0:
+                label = "low"
+            elif share >= 0.30 and _CONF_ORD[label] > 1:
+                label = "medium"
+    return label
+
+
 def _select_fair_value(dcf_block, implied, price, cfg):
     """Choose the canonical fair-value anchor from DCF and comps candidates."""
     candidates = []
@@ -530,17 +568,26 @@ def main():
 
     critical_missing = {"financial_statements", "positive_free_cash_flow", "shares_outstanding"}
     if valuation_method == "none":
-        confidence = "low"
+        heuristic = "low"
     elif valuation_method == "comps_revenue":
-        confidence = "low"
+        heuristic = "low"
     elif valuation_method == "blended":
-        confidence = "medium" if inputs_missing or len(peers) < 3 else "high"
+        heuristic = "medium" if inputs_missing or len(peers) < 3 else "high"
     elif not (inputs_missing) and len(peers) >= 3:
-        confidence = "high"
+        heuristic = "high"
     elif critical_missing & set(inputs_missing) or len(peers) < 2:
-        confidence = "low"
+        heuristic = "low"
     else:
-        confidence = "medium"
+        heuristic = "medium"
+
+    # For methods backed by scored candidates, never claim more confidence than
+    # the included components support — a low-confidence DCF (single-method or in
+    # a blend) cannot read "high". `none`/`comps_revenue` keep their hard floor.
+    confidence = heuristic
+    if valuation_method in ("dcf", "comps_earnings", "blended"):
+        comp_conf = _component_confidence(method_candidates)
+        if comp_conf is not None:
+            confidence = _min_conf(heuristic, comp_conf)
 
     # ── summary text ─────────────────────────────────────────────────────────
     if lang == "ch":

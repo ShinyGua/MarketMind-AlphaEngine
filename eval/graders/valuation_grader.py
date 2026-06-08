@@ -22,6 +22,11 @@ import json
 import sys
 from pathlib import Path
 
+# Reuse the engine's own confidence derivation so this check can never drift from
+# what the engine actually does (valuation/ has no heavy deps — safe to import).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "valuation"))
+from run_valuation import _component_confidence, _CONF_ORD  # noqa: E402
+
 # tolerances: engine rounds prices/values to 2 dp and ratios to 4 dp
 _ABS_TOL = 0.05      # per-share value comparisons
 _MOS_TOL = 0.01      # margin-of-safety (1 percentage point)
@@ -171,6 +176,19 @@ def grade(workspace: str, date: str) -> dict:
     if summary.get("confidence") == "low":
         result["warnings"].append(
             f"low confidence; inputs_missing={summary.get('inputs_missing')}")
+
+    # Confidence-label lock (warning only): the stated confidence must not exceed
+    # what the included candidates support. A low-confidence DCF — single-method
+    # or in a blend — cannot read "high". This is a label drift, not a math error,
+    # so it warns rather than failing the math audit.
+    method = summary.get("valuation_method")
+    stated = summary.get("confidence")
+    if method in ("dcf", "comps_earnings", "blended") and stated in _CONF_ORD:
+        ceiling = _component_confidence(candidates)
+        if ceiling is not None and _CONF_ORD[stated] > _CONF_ORD[ceiling]:
+            result["warnings"].append(
+                f"stated confidence '{stated}' exceeds component-supported '{ceiling}' "
+                f"for method '{method}'")
 
     result["pass"] = hard_ok
     if hard_ok:

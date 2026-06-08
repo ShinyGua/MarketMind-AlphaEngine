@@ -36,7 +36,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 ### What Makes It Different?
 
 - **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then a moderator identifies disagreements and assigns targeted cross-critique pairs to produce a balanced thesis through structured debate rather than a single-agent summary
-- **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety** that anchors the BUY/HOLD/SELL decision to price-vs-value — not just momentum and news
+- **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety**. The blended fair value's confidence is **derived from its DCF/comps components** (a low-confidence DCF can't make the blend read "high"), and it feeds the BUY/HOLD/SELL call as a **confidence-weighted reference** that informs — but never forces — the decision
 - **Investment-Bank-Style PDF**: Generates JPM-style research reports — Page-1 rating box, embedded annotated charts, styled tables, and bilingual (EN/中文) typography — via a deterministic Markdown → HTML/CSS → PDF pipeline (WeasyPrint)
 - **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
 - **Decision Panel (vote → converge → exit)**: The decision is reached by a multi-round panel — each analyst role casts a ballot (BUY/HOLD/SELL + a conviction self-rating + a hedge overlay), a deterministic grader scores convergence, and the loop iterates until the panel agrees or hits a hard round cap. The chair then writes the final call, faithful to the conviction-weighted lean with dissent retained
@@ -44,7 +44,7 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
 - **MCP Server Architecture**: 3 Model Context Protocol servers (market-data, mm-workspace, memory) give agents structured tool access to data, files, and persistent memory
 - **Long-Term Memory**: Episodic, semantic, and procedural memory layers let the system recall past analyses, learned patterns, and refined procedures across runs
-- **Automated Evaluation Pipeline**: Code-based graders score each run along multiple dimensions, with a run log and aggregated metrics to track quality over time
+- **Automated Evaluation Pipeline**: Code-based graders score each run along multiple dimensions — including an **advisory decision risk gate** that flags over-confidence (a non-mutating confidence ceiling from weak convergence, retained dissent, low-confidence valuation, or thin evidence) — with a run log and aggregated metrics to track quality over time
 - **Free Data Sources**: Works entirely with free APIs (yfinance, NewsAPI free tier, SEC EDGAR, FRED) with WebSearch fallback when API keys are unavailable
 
 ---
@@ -316,7 +316,7 @@ MarketMind-AlphaEngine/
 │   └── tests/                     # Unit tests (pytest)
 ├── memory/                        # Long-term memory store (episodic/semantic/procedural)
 ├── eval/                          # Evaluation pipeline (graders, run log, metrics)
-│   ├── graders/                   # Factuality, evidence, consistency, valuation, cost graders
+│   ├── graders/                   # Factuality, evidence, consistency, valuation, depth, panel-convergence, decision-risk, cost graders
 │   ├── release_gate.py            # Deterministic pass/warning/failed verdict
 │   ├── stage_timer.py             # Stage start/end timestamp recorder
 │   ├── finalize_run.py            # Assembles run log entry from all artifacts
@@ -414,7 +414,7 @@ review:
 - [x] **MCP Server Architecture**: 3 MCP servers (market-data, mm-workspace, memory) for structured agent tool access
 - [x] **Long-Term Memory System**: Episodic, semantic, and procedural memory layers across runs
 - [x] **Automated Evaluation Pipeline**: Code-based graders, run log, and aggregated metrics for quality tracking
-- [x] **Quantitative Valuation Engine**: Formula-first scenario DCF + peer comps + margin of safety, with an internal-consistency audit grader, anchoring decisions to price-vs-value
+- [x] **Quantitative Valuation Engine**: Formula-first scenario DCF + peer comps + margin of safety, with an internal-consistency audit grader and **component-derived confidence** (a low-confidence DCF can't inflate the blend), feeding decisions as a confidence-weighted reference
 - [x] **Institutional PDF Rendering**: Deterministic Markdown → HTML/CSS → PDF (WeasyPrint) — Page-1 rating box, embedded annotated SVG charts, styled tables, running headers/footers, and a self-degrading committed renderer (no LaTeX, no per-run scripts)
 - [x] **Bilingual Output**: English + Chinese reports and PDFs via the `language` config, with CJK rendered cleanly end-to-end (body + charts)
 - [x] **Web Presentation**: Browser report viewer (`/mm:dashboard`) with Document, **Slides** (auto-split by section, keyboard navigation + nav dots), and embedded-PDF modes — all driven by the same report content
@@ -422,6 +422,7 @@ review:
 - [x] **Codex Parity Driver**: `scripts/run_codex_pipeline.py` runs each LLM stage as its own `codex exec` (fresh context per stage — the analog of Claude's `context: fork`) with deterministic stages in committed Python and parallel desks/analysts, so Codex output matches a Claude run instead of compressing into stubs
 - [x] **Deterministic Quality Floor**: a depth gate (`eval/graders/depth_grader.py`) flags shallow analyst memos, stub report sections, and scant evidence — wired into the review loop (redo) and the release gate — so accurate-but-thin output can't silently pass
 - [x] **Decision Panel Debate Loop**: the decide stage runs a multi-round panel — each analyst role votes (BUY/HOLD/SELL) with a conviction self-rating and a hedge overlay, a deterministic convergence grader (`eval/graders/panel_convergence_grader.py`) gates iterate-vs-exit with a hard round cap, and the chair writes a final call faithful to the conviction-weighted lean with dissent retained
+- [x] **Decision Risk Gate**: an advisory, non-mutating confidence ceiling (`eval/graders/decision_risk_grader.py`) caps the final call's confidence on reproducible signals — weak panel convergence, retained dissent, low-confidence valuation cited as a reason, and thin evidence — surfacing over-confidence as a release-gate warning without rewriting the decision
 
 ### TODO
 
