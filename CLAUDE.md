@@ -106,6 +106,7 @@ Under the headless Codex driver this stage first runs `scripts/check_data_source
 - **mm-valuation-engine** runs the formula-first engine in `valuation/` (`dcf.py`, `comps.py`, `run_valuation.py`)
 - Inputs: yfinance fundamentals collected by the company desk (`raw/{date}/fundamentals/`), via the `get_fundamentals` MCP tool
 - Computes a bull/base/bear **DCF** (CAPM WACC, Gordon terminal value, odd-dimension WACC×terminal-growth sensitivity grid whose center cell equals the base case), peer **comps** with quartile benchmarking, and a **margin of safety** vs the current price → verdict cheap/fair/expensive
+- The summary `confidence` is **derived from the included method candidates** (`_component_confidence`), not a peer-count heuristic alone: a low-confidence DCF (or any low-confidence component carrying material weight) caps the blend, so a fragile DCF can no longer make the fair value read "high"
 - Free-tier and self-degrading: ETFs/funds → `applicable: false`; sparse data → `confidence: "low"` with an `inputs_missing` list (never aborts the pipeline)
 - Output: `valuation/{date}/valuation_summary.json`, `valuation/{date}/comps.csv`, `valuation/{date}/dcf_sensitivity.csv`
 - Consumed downstream by mm-valuation-analyst, mm-decision-maker (margin of safety → conviction), and mm-report-writer (Valuation section)
@@ -411,7 +412,8 @@ Automated evaluation pipeline under `eval/`:
 | `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
 | `consistency_grader.py` | Decision aligns with thesis_map consensus (and panel vote majority when the panel ran) |
 | `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit |
-| `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety) |
+| `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety); also warns if the stated `confidence` exceeds what the included method candidates support |
+| `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence); non-mutating, warning-only |
 | `cost_tracker.py` | Token/cost estimation per run |
 
 ### Run Log
