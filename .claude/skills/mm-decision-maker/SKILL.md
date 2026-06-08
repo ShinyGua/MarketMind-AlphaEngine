@@ -91,7 +91,7 @@ Rules for `tally` mode:
   convergence verdict per round (`convergence_score`, `exit_reason`); read the
   last round's file for the `panel` block fields (panel mode only)
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+**Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
 ## Process
 

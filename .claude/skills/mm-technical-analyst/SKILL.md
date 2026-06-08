@@ -32,7 +32,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 - `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` — price data
 - `{workspace}/profile/company_profile.json` — company context (undated)
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
+**Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
 ## Behavior Modes
 

@@ -25,7 +25,7 @@ Read these files from the workspace:
 - `{workspace}/discussion/{date}/thesis_map.json` — consensus, disagreements, key themes
 - `{workspace}/profile/company_profile.json` — ticker, sector
 
-**Performance optimization:** Read `{workspace}/{date}_shared_context.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately.
+**Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately.
 
 **User review (optional):** If `{workspace}/reviews/{date}/user_review.json` exists and `reviewed: true`, the user provided feedback on the report. This MUST be stored as memory.
 
