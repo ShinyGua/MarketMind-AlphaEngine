@@ -72,6 +72,27 @@ def extract_valuation_values(val: dict) -> list[dict]:
     return entries
 
 
+# Typographic minus variants that LLM writers emit for negative numbers. We map
+# ONLY true minus-sign code points to ASCII "-" so the number regexes below match
+# "−6.63%" (U+2212) the same as "-6.63%". En/em dashes (U+2013/2014) are LEFT ALONE
+# on purpose — they appear in ranges like "$52–62" where an ASCII "-" would make the
+# parser read a spurious "-62".
+_MINUS_VARIANTS = {
+    "−": "-",  # MINUS SIGN
+    "‐": "-",  # HYPHEN
+    "‑": "-",  # NON-BREAKING HYPHEN
+    "－": "-",  # FULLWIDTH HYPHEN-MINUS
+    "﹣": "-",  # SMALL HYPHEN-MINUS
+}
+
+
+def _normalize_minus(text: str) -> str:
+    """Map typographic minus-sign variants to ASCII '-' for robust number parsing."""
+    for src, dst in _MINUS_VARIANTS.items():
+        text = text.replace(src, dst)
+    return text
+
+
 _NUM_RE = re.compile(r"[+-]?\d[\d,]*\.?\d*")
 
 
@@ -180,7 +201,7 @@ def grade(workspace: str, date: str) -> dict:
         result["errors"].append(f"Report not found under: {ws / 'final' / date}")
     else:
         try:
-            report_text = report_path.read_text(encoding="utf-8")
+            report_text = _normalize_minus(report_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             result["errors"].append(f"Report not found: {report_path}")
 
