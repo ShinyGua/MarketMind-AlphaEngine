@@ -354,7 +354,9 @@ workspaces/NVDA/
 ├── reviews/{YYYY-MM-DD}/          # Quality scores + revision briefs
 ├── decision/{YYYY-MM-DD}/         # BUY/HOLD/SELL decision
 ├── final/{YYYY-MM-DD}/            # Final report (Markdown + JSON)
-└── exports/{YYYY-MM-DD}/pdf/      # JPM-style PDF report + charts
+├── exports/{YYYY-MM-DD}/pdf/      # JPM-style PDF report + charts
+├── shared_context/{YYYY-MM-DD}.json   # Per-run shared bundle (quant+valuation+profile+peers+catalysts)
+└── memory/{YYYY-MM-DD}_{role}.json    # Per-run retrieved memory context (analyst/writer/reviewer)
 ```
 
 ---
