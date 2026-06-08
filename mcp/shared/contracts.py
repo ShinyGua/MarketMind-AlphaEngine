@@ -91,12 +91,48 @@ def regression_flag_path(ws: Path, date: str) -> Path:
     return ws / "eval" / date / "regression_flag.json"
 
 
+# Run-context files live in per-workspace subfolders (memory/, shared_context/).
+# The plain helpers below are the canonical *write* paths. Readers should use the
+# *_read_path resolvers, which prefer the new layout but fall back to the legacy
+# root-level files so un-migrated workspaces still load.
+
 def memory_context_path(ws: Path, date: str, role: str) -> Path:
+    return ws / "memory" / f"{date}_{role}.json"
+
+
+def legacy_memory_context_path(ws: Path, date: str, role: str) -> Path:
     return ws / f"{date}_memory_context_{role}.json"
 
 
 def shared_context_path(ws: Path, date: str) -> Path:
+    return ws / "shared_context" / f"{date}.json"
+
+
+def legacy_shared_context_path(ws: Path, date: str) -> Path:
     return ws / f"{date}_shared_context.json"
+
+
+def _prefer_existing(primary: Path, fallback: Path) -> Path:
+    """Return primary if it exists, else fallback if it exists, else primary."""
+    if primary.exists():
+        return primary
+    if fallback.exists():
+        return fallback
+    return primary
+
+
+def memory_context_read_path(ws: Path, date: str, role: str) -> Path:
+    return _prefer_existing(
+        memory_context_path(ws, date, role),
+        legacy_memory_context_path(ws, date, role),
+    )
+
+
+def shared_context_read_path(ws: Path, date: str) -> Path:
+    return _prefer_existing(
+        shared_context_path(ws, date),
+        legacy_shared_context_path(ws, date),
+    )
 
 
 def evidence_digest_path(ws: Path, date: str) -> Path:

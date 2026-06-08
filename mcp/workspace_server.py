@@ -13,9 +13,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.contracts import (  # noqa: E402
     STAGES,
-    evidence_digest_path, shared_context_path, quant_summary_path,
+    evidence_digest_path, shared_context_read_path, quant_summary_path,
     valuation_summary_path,
-    thesis_map_path, decision_path, memory_context_path, detect_final_report,
+    thesis_map_path, decision_path, memory_context_read_path, detect_final_report,
 )
 
 import mcp.types
@@ -68,12 +68,19 @@ def _dates_for_ticker(ticker: str) -> list[str]:
         d = base / sub
         if d.is_dir():
             dates.update(c.name for c in d.iterdir() if c.is_dir() and DATE_RE.match(c.name))
-    # {date}_shared_context.json files at ticker root
-    for child in base.iterdir():
-        if child.is_file() and child.name.endswith("_shared_context.json"):
-            dp = child.name.replace("_shared_context.json", "")
-            if DATE_RE.match(dp):
-                dates.add(dp)
+    # New layout: shared_context/{date}.json
+    sc_dir = base / "shared_context"
+    if sc_dir.is_dir():
+        for child in sc_dir.iterdir():
+            if child.is_file() and child.suffix == ".json" and DATE_RE.match(child.stem):
+                dates.add(child.stem)
+    # Legacy layout: {date}_shared_context.json files at ticker root
+    if base.is_dir():
+        for child in base.iterdir():
+            if child.is_file() and child.name.endswith("_shared_context.json"):
+                dp = child.name.replace("_shared_context.json", "")
+                if DATE_RE.match(dp):
+                    dates.add(dp)
     return sorted(dates)
 
 def _read_file_text(path: Path) -> str | None:
@@ -107,7 +114,7 @@ def _find_latest_draft(ws: Path, date: str) -> tuple[str | None, str | None]:
 
 # Resource URI -> disk path mapping for date-stamped artifacts
 _DATE_ARTIFACT_MAP = {
-    "shared_context.json":  lambda t, d: shared_context_path(WORKSPACES_DIR / t, d),
+    "shared_context.json":  lambda t, d: shared_context_read_path(WORKSPACES_DIR / t, d),
     "evidence_digest.json": lambda t, d: evidence_digest_path(WORKSPACES_DIR / t, d),
     "quant_summary.json":   lambda t, d: quant_summary_path(WORKSPACES_DIR / t, d),
     "valuation_summary.json": lambda t, d: valuation_summary_path(WORKSPACES_DIR / t, d),
@@ -260,6 +267,7 @@ def _tool_create_date_dirs(args: dict) -> dict:
         f"drafts/{date}", f"reviews/{date}/final_reviews",
         f"reviews/{date}/revision_briefs", f"decision/{date}", f"final/{date}",
         f"exports/{date}/pdf/charts", f"exports/{date}/web", f"eval/{date}",
+        "memory", "shared_context",
     ]
     for d in dirs:
         (workspace / d).mkdir(parents=True, exist_ok=True)
@@ -309,7 +317,7 @@ async def list_resources() -> list[mcp.types.Resource]:
             # Per-role memory context
             ws = WORKSPACES_DIR / ticker
             for role in ("analyst", "writer", "reviewer"):
-                mc = memory_context_path(ws, date, role)
+                mc = memory_context_read_path(ws, date, role)
                 if mc.is_file():
                     resources.append(mcp.types.Resource(
                         uri=f"workspace://{ticker}/{date}/memory_context/{role}",
@@ -347,10 +355,10 @@ def _read_resource_impl(uri: str) -> str:
         if artifact == "draft_packet":
             packet = {
                 "evidence_digest": _read_file_json(evidence_digest_path(ws, date_str)),
-                "shared_context": _read_file_json(shared_context_path(ws, date_str)),
+                "shared_context": _read_file_json(shared_context_read_path(ws, date_str)),
                 "thesis_map": _read_file_json(thesis_map_path(ws, date_str)),
                 "debate_summary": _read_file_text(ws / "discussion" / date_str / "debate_summary.md"),
-                "memory_context": _read_file_json(memory_context_path(ws, date_str, "writer")),
+                "memory_context": _read_file_json(memory_context_read_path(ws, date_str, "writer")),
             }
             return json.dumps(packet, indent=2, ensure_ascii=False)
 
@@ -361,16 +369,16 @@ def _read_resource_impl(uri: str) -> str:
                 "latest_draft": draft_text,
                 "draft_version": draft_version,
                 "evidence_digest": _read_file_json(evidence_digest_path(ws, date_str)),
-                "shared_context": _read_file_json(shared_context_path(ws, date_str)),
+                "shared_context": _read_file_json(shared_context_read_path(ws, date_str)),
                 "thesis_map": _read_file_json(thesis_map_path(ws, date_str)),
-                "memory_context": _read_file_json(memory_context_path(ws, date_str, "reviewer")),
+                "memory_context": _read_file_json(memory_context_read_path(ws, date_str, "reviewer")),
             }
             return json.dumps(packet, indent=2, ensure_ascii=False)
 
         # Per-role memory context
         if artifact.startswith("memory_context/"):
             role = artifact.split("/", 1)[1]
-            mc = memory_context_path(ws, date_str, role)
+            mc = memory_context_read_path(ws, date_str, role)
             if mc.is_file():
                 return mc.read_text(encoding="utf-8")
             return json.dumps(None)
