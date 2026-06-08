@@ -118,9 +118,23 @@ valuation:
   default_terminal_growth: 0.025  # Gordon-growth terminal rate (must be < WACC)
   projection_years: 5             # explicit FCFF projection horizon
   base_growth_fallback: 0.05      # used when revenue growth is missing/non-positive
-  max_base_growth: 0.20           # cap on base-case FCFF growth
+  max_base_growth: 0.20           # legacy constant-growth cap (kept for compat)
   scenario_growth_delta: 0.03     # bull = base + delta, bear = base - delta
   sensitivity_dims: 5             # odd N for the WACC × terminal-growth grid
+  dcf_min_wacc_spread: 0.015      # exclude DCF if WACC is too close to terminal growth
+  fade_years: 10                  # two-stage DCF high-growth phase; growth fades to terminal
+  max_initial_growth: 0.35        # default-tier cap on year-1 high-growth rate
+  fragile_tv_fraction: 0.80       # downgrade DCF when terminal value exceeds this share of EV
+  # --- deterministic, fundamentals-driven growth selection (select_growth) ---
+  cagr_years: 3                   # revenue-CAGR window for growth selection
+  growth_divergence_ratio: 2.0    # CAGR vs trailing ratio (both positive) → confidence downgrade
+  growth_divergence_abs: 0.25     # |CAGR − trailing| when signs differ / ≤0 → downgrade
+  weak_margin_threshold: 0.05     # operating margin below → growth haircut + confidence downgrade
+  weak_margin_growth_haircut: 0.75  # growth multiplier when margins are weak
+  mega_cap_threshold: 200000000000  # ≥ $200B → mega-cap maturity growth cap
+  mega_cap_max_growth: 0.25       # growth ceiling for mega-caps
+  small_cap_threshold: 2000000000   # ≤ $2B → small-cap tier
+  small_cap_max_growth: 0.35      # default: no small-cap inflation unless raised
 
 # --- Discussion (Multi-Agent Debate) ---
 # Phase 1: Independent memos (all analysts run in parallel)
