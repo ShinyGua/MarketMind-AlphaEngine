@@ -227,6 +227,48 @@ def test_low_growth_confidence_reduces_dcf_weight():
     assert method == "blended"
 
 
+# ── component-derived confidence (engine de-weighting, not just prose) ───────
+
+def _cand(method, weight, confidence):
+    return {"method": method, "value": 75.0, "weight": weight,
+            "confidence": confidence, "included": True}
+
+
+def test_component_confidence_blended_low_dragged_to_medium():
+    # low DCF + medium comps at equal weight → dragged to medium, NOT high
+    cands = [_cand("dcf", 0.35, "low"), _cand("comps_earnings", 0.35, "medium")]
+    assert runner_mod._component_confidence(cands) == "medium"
+
+
+def test_component_confidence_single_method_low_dcf_stays_low():
+    # the single-method bug: a lone low-confidence DCF must never read "high"
+    assert runner_mod._component_confidence([_cand("dcf", 0.35, "low")]) == "low"
+
+
+def test_component_confidence_high_dcf_dominates_blend():
+    cands = [_cand("dcf", 0.65, "high"), _cand("comps_earnings", 0.35, "medium")]
+    assert runner_mod._component_confidence(cands) == "high"
+
+
+def test_component_confidence_low_majority_drags_to_low():
+    # low component carrying >=0.60 share caps the blend at low
+    cands = [_cand("dcf", 0.65, "low"), _cand("comps_earnings", 0.35, "high")]
+    assert runner_mod._component_confidence(cands) == "low"
+
+
+def test_component_confidence_empty_and_excluded_is_none():
+    assert runner_mod._component_confidence([]) is None
+    excluded = [{"method": "dcf", "value": 75.0, "weight": 0.0,
+                 "confidence": "low", "included": False}]
+    assert runner_mod._component_confidence(excluded) is None
+
+
+def test_min_conf_is_conservative():
+    assert runner_mod._min_conf("high", "medium") == "medium"
+    assert runner_mod._min_conf("medium", "low") == "low"
+    assert runner_mod._min_conf("high", "high") == "high"
+
+
 # ── comps ──────────────────────────────────────────────────────────────────
 
 def test_quartiles_ignores_none_and_nonpositive():
