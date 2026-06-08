@@ -43,7 +43,7 @@ STRINGS = {
     "en": {
         "rating": "Rating", "confidence": "Confidence", "horizon": "Horizon",
         "overlay_vals": {"hedge": "Hedge", "trim": "Trim", "stop": "Stop"},
-        "price": "Price", "fair_value": "Fair Value (DCF)",
+        "price": "Price", "fair_value": "Fair Value",
         "margin_of_safety": "Margin of Safety", "market_cap": "Market Cap",
         "valuation": "Valuation", "mode_daily": "Daily Report",
         "mode_weekly": "Weekly Report", "exhibits": "Exhibits",
@@ -62,7 +62,7 @@ STRINGS = {
     "ch": {
         "rating": "评级", "confidence": "置信度", "horizon": "时间维度",
         "overlay_vals": {"hedge": "对冲", "trim": "减仓", "stop": "止损"},
-        "price": "现价", "fair_value": "内在价值(DCF)",
+        "price": "现价", "fair_value": "公允价值",
         "margin_of_safety": "安全边际", "market_cap": "市值",
         "valuation": "估值判断", "mode_daily": "每日市场跟踪",
         "mode_weekly": "每周市场跟踪", "exhibits": "图表附录",
@@ -190,11 +190,19 @@ def main():
         price = val.get("current_price")
 
     mos = val.get("margin_of_safety")
-    rng = (val.get("intrinsic_range") or {}) if val.get("applicable") else {}
-    if rng.get("base") is not None:
-        fair_value = fmt_price(rng.get("base"))
-        if rng.get("bear") is not None and rng.get("bull") is not None:
-            fair_value += f" ({fmt_price(rng['bear'])[1:]}–{fmt_price(rng['bull'])[1:]})"
+    rng = (val.get("fair_value_range") or val.get("intrinsic_range") or {}) if val.get("applicable") else {}
+    fv = val.get("fair_value")
+    if fv is None:
+        fv = rng.get("base")
+    if fv is not None:
+        fair_value = fmt_price(fv)
+        low = rng.get("low", rng.get("bear"))
+        high = rng.get("high", rng.get("bull"))
+        if low is not None and high is not None:
+            fair_value += f" ({fmt_price(low)[1:]}–{fmt_price(high)[1:]})"
+        method = val.get("valuation_method")
+        if method and method != "none":
+            fair_value += f" · {method}"
     else:
         fair_value = "—"
 

@@ -77,7 +77,7 @@ Rules for `tally` mode:
 
 - `{workspace}/drafts/{date}/*.md` — latest draft
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
-- `{workspace}/valuation/{date}/valuation_summary.json` — intrinsic-value range, margin of safety, verdict, comps (price-vs-value anchor)
+- `{workspace}/valuation/{date}/valuation_summary.json` — fair value, valuation method, margin of safety, verdict, DCF range, comps (price-vs-value anchor)
 - `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis
 - `{workspace}/discussion/{date}/debate_summary.md` — debate details
 - `{workspace}/reviews/{date}/final_reviews/` — latest review scores
@@ -102,7 +102,7 @@ Read all inputs. Build a mental model of:
 - What is the consensus view from the analyst debate?
 - Where do analysts disagree?
 - What does the quant data say?
-- What does valuation say? Read `valuation_summary.json`: the `verdict` (cheap/fair/expensive), `margin_of_safety`, and intrinsic range. Note its `confidence` and whether it is `applicable` — a low-confidence or not-applicable valuation should be weighted lightly, not ignored or over-trusted.
+- What does valuation say? Read `valuation_summary.json`: the `verdict` (cheap/fair/expensive), canonical `fair_value`, `valuation_method`, `margin_of_safety`, and intrinsic range when available. Note its `confidence` and whether it is `applicable` — a low-confidence or not-applicable valuation should be weighted lightly, not ignored or over-trusted.
 - What catalysts are upcoming?
 - What risks were identified and not rebutted?
 - Did the report pass review? What were the weaknesses?
@@ -216,7 +216,7 @@ did not converge. **Omit the `panel` block entirely when the panel is disabled**
 4. **Time-Consistent**: The horizon must match the evidence. Don't issue a 3-month call (BUY or SELL) based on a single news event
 5. **Honest Uncertainty**: If the evidence is genuinely balanced after weighing by quality, HOLD is the right call — but apply the invert-the-signs test first. HOLD must not be chosen to avoid committing to a justified SELL (or BUY) when one side is better-evidenced
 6. **Symmetric Burden**: A SELL requires no more evidence than a BUY would in the mirror-image situation. Do not hold directional shorts to a higher bar than directional longs. If you would call BUY on a given strength of bullish evidence, call SELL on the same strength of bearish evidence
-7. **Valuation-Anchored**: Treat the margin of safety as a directional input, symmetrically. A large positive margin of safety (cheap vs intrinsic value) supports BUY and lifts confidence; a large negative margin of safety (expensive) supports SELL and lifts confidence — a "good company" trading well above intrinsic value can still be a SELL/HOLD. When valuation conflicts with momentum/news, say so explicitly and explain which you weight more and why. Discount this anchor when valuation `confidence` is low or `applicable` is false
+7. **Valuation-Anchored**: Treat the margin of safety as a directional input, symmetrically. A large positive margin of safety (cheap vs canonical fair value) supports BUY and lifts confidence; a large negative margin of safety (expensive) supports SELL and lifts confidence — a "good company" trading well above fair value can still be a SELL/HOLD. When valuation conflicts with momentum/news, say so explicitly and explain which you weight more and why. Discount this anchor when valuation `confidence` is low, `valuation_method` is a low-confidence revenue-comps fallback, or `applicable` is false
 8. **No Fabrication**: Only reference evidence cards, quant data, valuation figures, and analyst arguments that actually exist in the workspace
 9. **Panel-Faithful** (when the panel ran): the final label must reflect the panel's **conviction-weighted** lean, not a raw head-count, and not a split-the-difference HOLD. A retained dissenter with the strongest evidence can outweigh a low-conviction majority. Never silently drop a dissent — carry it into `key_risks`/`disconfirming_signals`. A `max_rounds` exit (unconverged) should temper confidence and be named in `debate_alignment`
 
