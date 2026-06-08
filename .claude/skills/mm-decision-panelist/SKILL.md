@@ -61,12 +61,16 @@ exists, use it for historical context, but do not let it override current eviden
 
 1. **Adopt your role's lens.** A `risk_analyst` weighs the bear case and failure
    conditions; a `company_analyst` weighs fundamentals and catalysts; a
-   `valuation_analyst` anchors on margin of safety; etc. Your memo already states
-   this position — start there.
+   `valuation_analyst` weighs the valuation reference (DCF + comps + blended fair
+   value), leading with its confidence; etc. Your memo already states this
+   position — start there.
 2. **Form a vote from the evidence**, weighing your lens against the thesis map's
-   `net_directional_lean` and the valuation anchor. BUY and SELL are mirror images
-   — held to the same bar. HOLD is earned only when the two sides are genuinely
-   balanced from your lens, not a default for "uncertain."
+   `net_directional_lean` and the valuation reference. Valuation is a reference,
+   not an anchor: **if you are not the `valuation_analyst`, do not override your
+   own role lens just because DCF/fair value reads cheap or expensive** — vote
+   from your lens and treat valuation as corroboration. BUY and SELL are mirror
+   images — held to the same bar. HOLD is earned only when the two sides are
+   genuinely balanced from your lens, not a default for "uncertain."
 3. **Self-rate conviction (0.0–1.0)** — how clean and well-supported *your*
    directional case is, NOT a probability of being correct and NOT a price
    forecast. Calibrate to evidence quality and agreement:
@@ -105,6 +109,10 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
 
 - Vote from your assigned role's lens — do not average into a committee-neutral
   HOLD. A risk analyst is allowed (often expected) to dissent from the majority.
+- A **low-confidence DCF (or low-confidence blended fair value) cannot be the sole
+  reason** for a BUY or SELL vote — pair it with role-lens evidence
+  (fundamentals, catalysts, risk, technicals, news); on its own it is a caveat,
+  not a vote driver.
 - `vote` must be exactly `BUY`, `HOLD`, or `SELL`. `risk_overlay` must be one of
   `none`, `hedge`, `trim`, `stop`. `conviction` is a float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.
