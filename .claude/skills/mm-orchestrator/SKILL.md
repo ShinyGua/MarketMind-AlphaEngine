@@ -464,6 +464,7 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/consistency_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/valuation_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/depth_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/decision_risk_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
 ```
