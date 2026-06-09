@@ -124,17 +124,26 @@ All 3 analysts run in parallel. Each reads evidence cards, quant summary, and co
 
 Each memo must contain: core thesis, 3–5 supporting points, biggest uncertainty, time horizon judgment.
 
-**Phase 2 — Moderator Quick Scan (selective mode)**
-The moderator reads all memos and identifies the top disagreements. Assigns targeted critique pairs — only analysts who meaningfully disagree debate each other. Writes `debate_assignments.json`.
+**Phase 2 — Discussion Panel Loop**
+A multi-round panel, modeled on the decision panel (Stage 9). Each round:
+1. **Views (parallel)** — every active analyst role files a ballot-style structured
+   view via **mm-discussion-panelist**: a directional **stance** (bullish/neutral/
+   bearish), a **conviction** self-rating (0–1), core claims, and explicit
+   challenges to the other roles → `discussion/{date}/panel/round_{N}/{role}_view.json`.
+2. **Chair tally** — **mm-discussion-moderator** (`tally` mode) tallies stances with a
+   conviction-weighted lean and surfaces retained dissent →
+   `panel_summary_round_{N}.json`.
+3. **Convergence (deterministic)** — `eval/graders/discussion_convergence_grader.py`
+   computes a conviction-weighted convergence score and decides iterate-vs-exit; it
+   **auto-exits at `max_rounds`** (hard cap) → `convergence_round_{N}.json`.
 
-**Phase 3 — Selective Cross-Critique**
-Only assigned pairs write critiques (2-3 pairs instead of full N×N). Each critic writes one targeted critique of their assigned opponent. This saves 50-90% of tokens as analyst count scales.
-
-Config: `debate_mode: selective` (default) or `full` (N×N cross, for thoroughness)
+Config: `discussion.panel` (`enabled`, `min_rounds`, `max_rounds`,
+`convergence_threshold`). `enabled: false` → memos feed synthesis directly.
 
 **Phase 3 — Synthesis**
 
-- **mm-discussion-moderator** reads all memos + all critique files
+- **mm-discussion-moderator** (`synthesis` mode) reads the full memos + all panel
+  views + per-round tallies + the convergence verdict
 - Produces:
   - `discussion/{date}/thesis_map.json` — consensus, disagreements, bull/bear cases, key risks, unsupported claims, writer guidance
   - `discussion/{date}/debate_summary.md` — human-readable summary of where analysts agreed and disagreed, and why
@@ -416,6 +425,7 @@ Automated evaluation pipeline under `eval/`:
 | `factuality_grader.py` | Report numbers match quant_summary.json + valuation_summary.json |
 | `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
 | `consistency_grader.py` | Decision aligns with thesis_map consensus (and panel vote majority when the panel ran) |
+| `discussion_convergence_grader.py` | Discussion-panel views converged (conviction-weighted stance agreement); drives the discuss-stage loop exit |
 | `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit |
 | `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety); also warns if the stated `confidence` exceeds what the included method candidates support |
 | `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence); non-mutating, warning-only |
@@ -446,10 +456,10 @@ raw doc → evidence card → evidence_digest → thesis_map → decision capsul
 Each layer is ~5-10x smaller. Downstream agents read the most compressed form sufficient for their task.
 
 ### Existing Patterns
-- **Selective debate**: Moderator assigns 2-3 critique pairs instead of N×N
+- **Structured panel views**: each round, analysts file compact `*_view.json` (stance + conviction + challenges), not full N×N prose critiques
 - **Evidence digest**: All cards consolidated into one file
 - **Shared context**: quant + profile + peers + catalysts bundled in one file
-- **Memo summaries**: Stored in debate_assignments.json, reused in synthesis
+- **Round summaries**: chair tally per round (`panel_summary_round_{N}.json`) carries the converged lean into synthesis
 - **Targeted revision**: revision_brief specifies sections to rewrite, not full report
 
 ### Memory-Aware Context Budget
@@ -473,7 +483,8 @@ When memory context is loaded, it supplements (not replaces) current evidence. T
 | mm-market-analyst | mm-standard | No | Market environment analysis memo |
 | mm-company-analyst | mm-standard | No | Company fundamentals analysis memo |
 | mm-risk-analyst | mm-standard | No | Risk identification memo |
-| mm-discussion-moderator | mm-heavy | No | Synthesize analyst memos → thesis_map |
+| mm-discussion-panelist | mm-standard | No | Files one analyst role's structured view (stance + conviction + challenges) per discussion-panel round |
+| mm-discussion-moderator | mm-heavy | No | Chair: per-round discussion-panel tally + synthesis of memos + panel views → thesis_map |
 | mm-report-writer | mm-standard | No | Generate report draft |
 | mm-report-reviewer | mm-heavy | No | Multi-dimensional scoring + revision |
 | mm-decision-panelist | mm-standard | No | Casts one analyst role's decision ballot (vote + conviction + hedge overlay) per panel round |

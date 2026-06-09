@@ -35,10 +35,10 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 
 ### What Makes It Different?
 
-- **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then a moderator identifies disagreements and assigns targeted cross-critique pairs to produce a balanced thesis through structured debate rather than a single-agent summary
+- **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then debate it across a multi-round panel — each round every analyst files a directional stance with a conviction self-rating, a moderator tallies the round, and the loop iterates until views converge — producing a balanced thesis rather than a single-agent summary
 - **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety**. The blended fair value's confidence is **derived from its DCF/comps components** (a low-confidence DCF can't make the blend read "high"), and it feeds the BUY/HOLD/SELL call as a **confidence-weighted reference** that informs — but never forces — the decision
 - **Investment-Bank-Style PDF**: Generates JPM-style research reports — Page-1 rating box, embedded annotated charts, styled tables, and bilingual (EN/中文) typography — via a deterministic Markdown → HTML/CSS → PDF pipeline (WeasyPrint)
-- **Selective Debate**: Moderator-directed cross-critique saves 50-90% of tokens compared with full N×N debate as analyst count scales
+- **Discussion Panel (stance → converge → exit)**: The thesis is forged by a multi-round panel — each round every analyst role files a structured view (stance bullish/neutral/bearish + a conviction self-rating + challenges to the other roles), a deterministic grader (`eval/graders/discussion_convergence_grader.py`) scores convergence, and the loop iterates until views agree or hit a hard round cap. Compact `*_view.json` ballots replace full N×N prose critiques, keeping token cost flat as analyst count scales
 - **Decision Panel (vote → converge → exit)**: The decision is reached by a multi-round panel — each analyst role casts a ballot (BUY/HOLD/SELL + a conviction self-rating + a hedge overlay), a deterministic grader scores convergence, and the loop iterates until the panel agrees or hits a hard round cap. The chair then writes the final call, faithful to the conviction-weighted lean with dissent retained
 - **Date-Stamped History**: Every run preserves outputs under `{YYYY-MM-DD}/` folders so the same company can be analyzed daily without losing prior research
 - **Smart Trading Day Logic**: Automatically determines the correct data cutoff, including pre-market sessions, weekends, and holidays
@@ -207,8 +207,7 @@ The `/mm:init` flow:
 |       v                                                              |
 |  Discussion loop                                                     |
 |       |-- Independent analyst memos (parallel)                       |
-|       |-- Moderator selects critique pairs                           |
-|       |-- Selective debate                                           |
+|       |-- Panel rounds: analyst views -> chair tally -> converge     |
 |       |-- Thesis synthesis                                           |
 |       |                                                              |
 |       v                                                              |
@@ -244,7 +243,7 @@ The `/mm:init` flow:
 | **Collect** | Macro, company, and sector data from yfinance, NewsAPI, and EDGAR, plus web/NASDAQ news with source provenance | 4 collectors in parallel |
 | **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python | `mm-quant-analyst` |
 | **Valuation** | Scenario DCF + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
-| **Debate** | Independent memos, moderator-assigned critique pairs, and targeted debate | 3-6 analysts |
+| **Debate** | Independent memos, then a multi-round panel of analyst views → chair tally → convergence | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
 | **Decide** | Multi-round panel — roles vote + self-rate, a convergence grader gates the loop, then the final BUY/HOLD/SELL call (+ hedge overlay) | `mm-decision-panelist`, `mm-decision-maker` |
@@ -288,7 +287,8 @@ MarketMind-AlphaEngine/
 │       ├── mm-valuation-analyst/  # Valuation framework + price target
 │       ├── mm-technical-analyst/  # Chart interpretation + signals
 │       ├── mm-catalyst-analyst/   # Event timing + catalyst calendar
-│       ├── mm-discussion-moderator/ # Debate scan + synthesis
+│       ├── mm-discussion-panelist/ # Per-role panel view (stance + conviction + challenges)
+│       ├── mm-discussion-moderator/ # Panel chair: per-round tally + synthesis
 │       ├── mm-report-writer/      # Research report generation
 │       ├── mm-report-reviewer/    # Multi-dimensional quality scoring
 │       ├── mm-decision-panelist/  # Per-role decision ballot (vote + conviction + overlay)
@@ -377,12 +377,16 @@ data_sources:
     provider: newsapi        # falls back to web_search if no API key
     fallback: web_search
 discussion:
-  debate_mode: selective     # selective (moderator picks pairs) | full (N×N)
   analyst_roles:
     - company_analyst
     - risk_analyst
     - market_analyst
     # - valuation_analyst    # uncomment to enable
+  panel:                     # multi-round discussion panel (stance -> converge -> exit)
+    enabled: true            # false -> memos feed synthesis directly
+    min_rounds: 1
+    max_rounds: 3            # hard cap
+    convergence_threshold: 0.70
 valuation:                   # scenario DCF + comps (Stage 6)
   enabled: true
   equity_risk_premium: 0.05
@@ -427,6 +431,7 @@ review:
 - [x] **Codex CLI Support**: The `mm-*` skills run as native Codex skills (`.agents/skills/` symlink + per-skill `agents/openai.yaml` invocation policy + MCP dependencies), with `AGENTS.md` as the control surface and a ready-to-paste `~/.codex/config.toml` MCP config
 - [x] **Codex Parity Driver**: `scripts/run_codex_pipeline.py` runs each LLM stage as its own `codex exec` (fresh context per stage — the analog of Claude's `context: fork`) with deterministic stages in committed Python and parallel desks/analysts, so Codex output matches a Claude run instead of compressing into stubs
 - [x] **Deterministic Quality Floor**: a depth gate (`eval/graders/depth_grader.py`) flags shallow analyst memos, stub report sections, and scant evidence — wired into the review loop (redo) and the release gate — so accurate-but-thin output can't silently pass
+- [x] **Discussion Panel Debate Loop**: the discuss stage runs a multi-round panel — each analyst role files a structured view (stance bullish/neutral/bearish + a conviction self-rating + challenges to the other roles), a deterministic convergence grader (`eval/graders/discussion_convergence_grader.py`) gates iterate-vs-exit with a hard round cap, and the chair synthesizes the converged thesis with dissent retained
 - [x] **Decision Panel Debate Loop**: the decide stage runs a multi-round panel — each analyst role votes (BUY/HOLD/SELL) with a conviction self-rating and a hedge overlay, a deterministic convergence grader (`eval/graders/panel_convergence_grader.py`) gates iterate-vs-exit with a hard round cap, and the chair writes a final call faithful to the conviction-weighted lean with dissent retained
 - [x] **Decision Risk Gate**: an advisory, non-mutating confidence ceiling (`eval/graders/decision_risk_grader.py`) caps the final call's confidence on reproducible signals — weak panel convergence, retained dissent, low-confidence valuation cited as a reason, and thin evidence — surfacing over-confidence as a release-gate warning without rewriting the decision
 

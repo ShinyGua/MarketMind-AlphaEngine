@@ -136,11 +136,14 @@ valuation:
   small_cap_threshold: 2000000000   # ≤ $2B → small-cap tier
   small_cap_max_growth: 0.35      # default: no small-cap inflation unless raised
 
-# --- Discussion (Multi-Agent Debate) ---
+# --- Discussion (Multi-Round Panel) ---
 # Phase 1: Independent memos (all analysts run in parallel)
-# Phase 2: Moderator quick scan → assigns targeted critique pairs
-# Phase 3: Selective cross-critique (only assigned pairs debate)
-# Phase 4: Moderator synthesis (thesis_map.json)
+# Phase 2: Discussion panel loop — every analyst files a structured view
+#          (stance bullish|neutral|bearish + conviction) each round; the chair
+#          tallies; a deterministic convergence grader
+#          (eval/graders/discussion_convergence_grader.py) decides iterate-vs-exit
+#          with a hard max_rounds cap. enabled:false → memos feed synthesis directly.
+# Phase 3: Moderator synthesis (thesis_map.json + debate_summary.md)
 discussion:
   enabled: true
   analyst_roles:                  # ranked by importance, uncomment to enable
@@ -150,9 +153,11 @@ discussion:
     # - valuation_analyst         # 4. P/E, DCF, price target (uncomment to enable)
     # - technical_analyst         # 5. chart patterns, momentum signals (uncomment to enable)
     # - catalyst_analyst          # 6. event timing, earnings calendar (uncomment to enable)
-  debate_mode: selective          # selective (moderator picks pairs) | full (N×N cross)
-  debate_rounds: 1                # number of cross-critique rounds (1-3)
-  max_critique_pairs: 3           # max pairs per round (for selective mode)
+  panel:
+    enabled: true
+    min_rounds: 1                 # never exit before this many rounds
+    max_rounds: 3                 # hard cap — auto-exit at the limit
+    convergence_threshold: 0.70   # conviction-weighted stance agreement needed to exit early
   require_thesis_map: true
 
 # --- Review ---

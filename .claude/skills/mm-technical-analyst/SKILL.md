@@ -1,6 +1,6 @@
 ---
 name: mm-technical-analyst
-description: Interprets chart patterns, momentum signals, and technical setup; participates in debate
+description: Interprets chart patterns, momentum signals, and technical setup for the discussion stage
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -19,10 +19,10 @@ Write your memo in the language specified by `resolved_config.json` → `languag
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
-Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique)
-Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mode)
 
 **All paths below use `{date}` = $ARGUMENTS[1].**
+
+The debate that follows this memo happens in the discussion panel loop, where you file structured views via `mm-discussion-panelist` (not in this skill).
 
 ## Inputs
 
@@ -34,9 +34,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 **Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
-## Behavior Modes
-
-### Mode A: Independent Memo (default)
+## Independent Memo
 
 Write to: `{workspace}/discussion/{date}/analyst_memos/technical_analyst.md`
 
@@ -78,13 +76,6 @@ The memo MUST contain:
 ## Time Horizon Judgment
 <Is the current setup better for day trading, swing, or position trading?>
 ```
-
-### Mode B: Cross-Critique (argument = "debate round_N")
-
-**If $ARGUMENTS[3] is provided (selective):** Only critique the specified target.
-**If $ARGUMENTS[3] is NOT provided (full):** Critique ALL others.
-
-Critique focus: validate or challenge other analysts' price/momentum claims against actual indicator data.
 
 ## Quality Rules
 
