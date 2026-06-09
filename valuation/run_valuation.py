@@ -44,6 +44,7 @@ _DEFAULTS = {
     "sensitivity_dims": 5,
     "max_base_growth": 0.20,         # legacy constant-growth cap (kept for compat)
     "dcf_min_wacc_spread": 0.015,
+    "dcf_max_growth_wacc_excess": 0.10,  # exclude DCF when initial growth exceeds WACC by more than this (non-convergent explicit phase)
     "fade_years": 10,                # two-stage high-growth phase; fades to terminal
     "max_initial_growth": 0.35,      # default-tier cap on year-1 high-growth rate
     "fragile_tv_fraction": 0.80,     # downgrade DCF when terminal value exceeds this share
@@ -328,7 +329,22 @@ def _select_fair_value(dcf_block, implied, price, cfg):
         # carries most of the value — is robust, not fragile, so it is NOT downgraded.
         base_tvf = (dcf_block.get("scenarios", {}).get("base", {}) or {}).get("tv_fraction")
         fragile_tvf = cfg.get("fragile_tv_fraction", dcf_mod.TV_FRACTION_MAX)
-        if spread < cfg["dcf_min_wacc_spread"]:
+        # Non-convergence guard: when the explicit-phase initial growth sits far
+        # above WACC, early-year cashflows compound faster than they discount, so
+        # the explicit-phase PV explodes (a post-recovery revenue CAGR against a
+        # low-beta WACC can imply an equity value many multiples of market cap).
+        # The spread guard below only compares WACC to *terminal* growth and misses
+        # this, so exclude the DCF outright. Fragile DCF must not anchor fair value.
+        init_g = dcf_block.get("initial_growth")
+        max_excess = cfg.get("dcf_max_growth_wacc_excess")
+        wacc_val = dcf_block.get("wacc") or 0.0
+        if (init_g is not None and max_excess is not None
+                and init_g - wacc_val > max_excess):
+            dcf_conf, dcf_weight = "low", 0.0
+            dcf_reason = ("excluded: initial growth %.1f%% exceeds WACC %.1f%% by "
+                          ">%.0fpp (non-convergent explicit phase)"
+                          % (init_g * 100, wacc_val * 100, max_excess * 100))
+        elif spread < cfg["dcf_min_wacc_spread"]:
             dcf_conf, dcf_weight = "low", 0.0
             dcf_reason = "excluded: WACC too close to terminal growth"
         elif base_tvf is not None and base_tvf > fragile_tvf:
