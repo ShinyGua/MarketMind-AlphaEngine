@@ -46,6 +46,12 @@ def test_dry_run_plan_covers_all_stages():
     for skill in ("mm-company-analyst", "mm-report-writer", "mm-decision-maker",
                   "mm-discussion-moderator"):
         assert skill in flat, f"missing LLM stage {skill}"
+    # discuss_debate stage runs the multi-round panel: views + tally + convergence grader
+    assert "mm-discussion-panelist" in flat, "discuss stage missing panelist views"
+    assert "discussion_convergence_grader.py" in flat, "discuss stage missing convergence grader"
+    # the old selective-debate scan/assignments are gone
+    assert "$ARGUMENTS[2]=scan" not in flat, "discuss stage still runs the legacy moderator scan"
+    assert "debate_assignments" not in flat, "discuss stage still references debate_assignments"
     # decide stage runs the multi-round panel: ballots + tally + convergence grader
     assert "mm-decision-panelist" in flat, "decide stage missing panelist ballots"
     assert "mm-decision-maker $ARGUMENTS[2]=tally" in flat or "tally" in flat, \
