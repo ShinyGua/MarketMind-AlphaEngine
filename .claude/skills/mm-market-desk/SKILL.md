@@ -40,18 +40,27 @@ This skill uses the **market-data** MCP server for all external data fetching. I
 
 **Indicator warm-up**: Fetch **6 months** (`period='6mo'`) of daily data for indices and macro assets. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up before producing valid values.
 
+Read the index set from `{workspace}/profile/market_context_link.json` — do **not**
+hardcode US tickers. Fetch `primary_index` + all `secondary_indices` (e.g. HK →
+`^HSI` + `^HSTECH`; CN → `000001.SS` + `000300.SS`; US → `SPY` + `QQQ` + sector ETF).
+
 **Via MCP (preferred):**
-Call `mcp__market-data__get_price_history` with `tickers: ["SPY", "QQQ", "SOXX"]` (from market_context_link.json), `period: "6mo"`, `interval: "1d"`.
+Call `mcp__market-data__get_price_history` with `tickers: [primary_index, *secondary_indices]` (from market_context_link.json), `period: "6mo"`, `interval: "1d"`.
 
 **Fallback (inline Python):**
 ```python
 import yfinance as yf, json
-tickers = ["SPY", "QQQ", "SOXX"]  # from market_context_link.json
+mc = json.load(open(f"{workspace}/profile/market_context_link.json"))
+tickers = [mc["primary_index"], *mc.get("secondary_indices", [])]
 data = yf.download(tickers, period="6mo", interval="1d", group_by="ticker")
 # Save each ticker's OHLCV to CSV
 ```
 
-Save to `workspaces/shared/market_context/{date}/raw/{ticker}_prices.csv`.
+Save to `workspaces/shared/market_context/{date}/raw/{symbol}_prices.csv`. Sanitize the
+filename so it matches the chart renderer's lookup: **strip a leading `^` and replace
+`.`/`-` with `_`** (e.g. `^HSI` → `HSI_prices.csv`, `000300.SS` → `000300_SS_prices.csv`,
+`BTC-USD` → `BTC_USD_prices.csv`). The renderer also accepts the dotted form, but keep
+this rule consistent so the primary index is always found.
 
 ### 2. Fetch Macro Asset Prices
 
