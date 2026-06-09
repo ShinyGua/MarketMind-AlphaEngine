@@ -35,10 +35,10 @@ MarketMind-AlphaEngine 是一个原生构建在 [Claude Code](https://code.claud
 
 ### 它和普通 Agent 项目有什么不同？
 
-- **多智能体辩论**：3-6 位分析师分别独立分析同一只股票，再由主持者识别分歧、指定交叉质询对，通过结构化辩论形成更平衡的投资观点，而不是单一 Agent 的总结
+- **多智能体辩论**：3-6 位分析师分别独立分析同一只股票，再通过多轮评审团展开辩论——每一轮每位分析师都给出带置信度自评的方向性立场，主持者汇总该轮结果，循环持续到观点收敛——从而形成更平衡的投资观点，而不是单一 Agent 的总结
 - **量化估值引擎**：公式驱动的 DCF（CAPM WACC、Gordon 永续价值、乐观/基准/悲观三档情景、WACC×永续增长率敏感性矩阵），加上带分位数基准的可比公司估值，产出内在价值区间和**安全边际**。混合公允价值的置信度**由 DCF/可比公司各分项的置信度推导**（低置信度的 DCF 无法把混合结果抬成「高」），并作为**按置信度加权的参考**输入 BUY/HOLD/SELL 决策——提供支撑、但绝不单独决定方向
 - **投行风格 PDF**：通过确定性的 Markdown → HTML/CSS → PDF 流水线（WeasyPrint）生成 JPM 风格研究报告——首页评级框、内嵌标注图表、带样式表格，以及中英双语排版
-- **选择性辩论**：由主持者定向分配交叉评审对，相比所有分析师两两互评的全量 N×N 辩论，在分析师人数增加时可节省 50-90% 的 token 消耗
+- **讨论评审团（立场 → 收敛 → 退出）**：投资观点由多轮评审团锻造——每一轮每位分析师角色各提交一份结构化视角（立场 bullish/neutral/bearish + 置信度自评 + 对其他角色的质询），确定性评分器（`eval/graders/discussion_convergence_grader.py`）度量收敛程度，循环持续到观点一致或触及硬性轮次上限。紧凑的 `*_view.json` 取代全量 N×N 长文互评，使 token 成本在分析师人数增加时保持平稳
 - **决策评审团（投票 → 收敛 → 退出）**：最终决策由多轮评审团产生——每位分析师角色各投一票（BUY/HOLD/SELL，并附带置信度自评与对冲叠加），确定性评分器度量收敛程度，循环持续到评审团达成一致或触及硬性轮次上限。随后主席据「按置信度加权的倾向」写出最终结论，并保留少数派异议
 - **日期归档历史**：每次运行都按 `{YYYY-MM-DD}/` 目录保留结果，因此可以对同一家公司进行连续日度分析而不丢失历史研究记录
 - **智能交易日逻辑**：自动识别正确的数据截面，处理盘前、周末和节假日等情况
@@ -201,8 +201,7 @@ codex
 |       v                                                              |
 |  Discussion 辩论循环                                                 |
 |       |-- 分析师独立 memo（并行）                                    |
-|       |-- 主持者选择交叉质询配对                                     |
-|       |-- 选择性辩论                                                 |
+|       |-- 评审团多轮：分析师视角 -> 主席汇总 -> 收敛                   |
 |       |-- 观点综合与 thesis map                                      |
 |       |                                                              |
 |       v                                                              |
@@ -238,7 +237,7 @@ codex
 | **Collect** | 从 yfinance、NewsAPI、EDGAR 收集宏观、公司与行业数据，并采集带来源溯源的网络/NASDAQ 新闻 | 4 个采集器并行 |
 | **Quant** | 用 Python 计算 RSI、MACD、SMA、ATR、相对强弱等指标 | `mm-quant-analyst` |
 | **Valuation** | 基于 yfinance 基本面数据计算情景 DCF + 可比公司 + 安全边际 | `mm-valuation-engine` |
-| **Debate** | 分析师独立写 memo，主持者分配交叉质询对，并组织定向辩论 | 3-6 位分析师 |
+| **Debate** | 分析师独立写 memo，随后通过多轮评审团：分析师视角 → 主席汇总 → 收敛 | 3-6 位分析师 |
 | **Draft** | 生成带证据追踪的 JPM 风格叙事研究报告 | `mm-report-writer` |
 | **Review** | 进行多维度打分并驱动迭代修订 | `mm-report-reviewer` |
 | **Decide** | 多轮评审团——各角色投票并自评置信度，收敛评分器把关循环，再输出最终 BUY/HOLD/SELL 决策（含对冲叠加） | `mm-decision-panelist`、`mm-decision-maker` |
@@ -282,7 +281,8 @@ MarketMind-AlphaEngine/
 │       ├── mm-valuation-analyst/  # 估值框架与目标价
 │       ├── mm-technical-analyst/  # 图表解读与信号分析
 │       ├── mm-catalyst-analyst/   # 催化剂与事件时间轴
-│       ├── mm-discussion-moderator/ # 分歧扫描与综合判断
+│       ├── mm-discussion-panelist/ # 各角色评审团视角（立场 + 置信度 + 质询）
+│       ├── mm-discussion-moderator/ # 评审团主席：逐轮汇总 + 综合判断
 │       ├── mm-report-writer/      # 研究报告生成
 │       ├── mm-report-reviewer/    # 多维质量打分
 │       ├── mm-decision-panelist/  # 单角色决策投票（投票 + 置信度 + 对冲叠加）
@@ -371,12 +371,16 @@ data_sources:
     provider: newsapi        # 无 API key 时回退到 web_search
     fallback: web_search
 discussion:
-  debate_mode: selective     # selective（主持者配对）| full（N×N 全量辩论）
   analyst_roles:
     - company_analyst
     - risk_analyst
     - market_analyst
     # - valuation_analyst    # 取消注释即可启用
+  panel:                     # 多轮讨论评审团（立场 -> 收敛 -> 退出）
+    enabled: true            # false -> memo 直接进入综合阶段
+    min_rounds: 1
+    max_rounds: 3            # 硬性上限
+    convergence_threshold: 0.70
 valuation:                   # 情景 DCF + 可比公司（阶段 6）
   enabled: true
   equity_risk_premium: 0.05
@@ -421,6 +425,7 @@ review:
 - [x] **Codex CLI 支持**：`mm-*` 技能作为 Codex 原生技能运行（`.agents/skills/` 符号链接 + 每个技能的 `agents/openai.yaml` 调用策略与 MCP 依赖），以 `AGENTS.md` 作为控制入口，并提供可直接粘贴的 `~/.codex/config.toml` MCP 配置
 - [x] **Codex 对齐驱动**：`scripts/run_codex_pipeline.py` 把每个 LLM 阶段作为独立的 `codex exec` 运行（每阶段全新上下文 —— 等价于 Claude 的 `context: fork`），确定性阶段用已提交的 Python、数据台/分析师并行执行，使 Codex 产出与 Claude 一致，而不会被压缩成残缺片段
 - [x] **确定性质量底线**：深度闸（`eval/graders/depth_grader.py`）会标记过薄的分析师 memo、残缺的报告小节与过少的证据，并接入复审循环（重做）与发布闸，使「准确但过薄」的产出无法静默通过
+- [x] **讨论评审团辩论循环**：讨论阶段运行多轮评审团——每位分析师角色提交结构化视角（立场 bullish/neutral/bearish + 置信度自评 + 对其他角色的质询），确定性收敛评分器（`eval/graders/discussion_convergence_grader.py`）以硬性轮次上限把关「继续 vs 退出」，主席综合出收敛后的投资观点并保留异议
 - [x] **决策评审团辩论循环**：决策阶段运行多轮评审团——每位分析师角色投票（BUY/HOLD/SELL）并附置信度自评与对冲叠加，确定性收敛评分器（`eval/graders/panel_convergence_grader.py`）以硬性轮次上限把关「继续 vs 退出」，主席据按置信度加权的倾向写出最终结论并保留异议
 - [x] **决策风险门**：一个咨询性、不修改决策的置信度上限（`eval/graders/decision_risk_grader.py`），依据可复现的信号——弱评审收敛、保留异议、被当作理由引用的低置信度估值、以及证据稀薄——给最终结论的置信度封顶，把过度自信暴露为发布闸警告，而不改写决策本身
 

@@ -26,7 +26,7 @@ as its **own `codex exec`** (one task per invocation = fresh context, the exact
 analog of Claude's fork), runs the already-deterministic stages
 (`valuation/`, `templates/`, `normalize/dedup_evidence.py`, `eval/graders/`)
 directly in Python, and fans out the independent stages (collect desks, analyst
-memos, debate critics) in parallel. The depth gate
+memos, discussion-panel views) in parallel. The depth gate
 (`eval/graders/depth_grader.py`) runs inside it as a safety net (redo thin memos,
 fail thin reports).
 
@@ -117,8 +117,18 @@ Skill files use Claude conventions; map them as follows:
 - **Arguments**: `$ARGUMENTS[0]` = workspace path (e.g. `workspaces/NVDA`),
   `$ARGUMENTS[1]` = `run_date` (`YYYY-MM-DD`). Pass these when running a stage.
 - **Arguments**: `$ARGUMENTS[2]` and beyond are stage-specific (e.g. analyst
-  mode `memo`/`debate`, writer mode `initial`/`revision`, decision-maker mode
-  `tally <round>` vs final, panelist `{role} {round}`).
+  memo skills take only `{ws} {date}`, writer mode `initial`/`revision`,
+  moderator mode `tally <round>` vs `synthesis`, discussion/decision panelist
+  `{role} {round}`).
+- **`discuss_debate` is a loop, not a single call.** When `discussion.panel.enabled`
+  is true (default), the discuss stage runs a multi-round panel: each
+  `discussion.analyst_roles` role files a structured view via
+  `mm-discussion-panelist {role} <round>`, `mm-discussion-moderator tally <round>`
+  tallies them, and `eval/graders/discussion_convergence_grader.py <ws> <date> <round>`
+  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap. After the
+  loop, `mm-discussion-moderator synthesis` writes `thesis_map.json` /
+  `debate_summary.md`. With the panel disabled the memos feed synthesis directly
+  (no cross-critique). The headless driver encodes this loop in `st_discuss_debate`.
 - **`decide` is a loop, not a single call.** When `decision.panel.enabled` is
   true, the decide stage runs a multi-round panel: each `discussion.analyst_roles`
   role casts a ballot via `mm-decision-panelist`, `mm-decision-maker tally <round>`
