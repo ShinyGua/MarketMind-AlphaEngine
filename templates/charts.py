@@ -495,6 +495,96 @@ def generate_peer_chart(ticker, peer_data, output_path):
     print(f'  Generated: {output_path}')
 
 
+# ============================================================
+# Benchmark (relative-performance index) resolution
+# ============================================================
+# Friendly display names for common indices, keyed on both caret and bare forms.
+INDEX_DISPLAY_NAMES = {
+    '^HSI': 'Hang Seng', 'HSI': 'Hang Seng',
+    '^HSTECH': 'Hang Seng TECH', 'HSTECH': 'Hang Seng TECH',
+    '000001.SS': 'SSE Composite', '000300.SS': 'CSI 300',
+    '^N225': 'Nikkei 225', 'N225': 'Nikkei 225',
+    '^GSPC': 'S&P 500', 'GSPC': 'S&P 500',
+    'SPY': 'S&P 500', 'QQQ': 'Nasdaq 100',
+}
+
+# yfinance-CSV suffixes, tried for every candidate base in every searched dir.
+_INDEX_SUFFIXES = ('_prices.csv', '_3mo.csv', '_medium.csv')
+
+
+def _index_filename_candidates(symbol):
+    """Ordered candidate filenames for an index symbol's saved CSV.
+
+    The shared market-context dir holds inconsistent shapes (dotted '000300.SS_prices.csv'
+    AND sanitized '000016_SS_prices.csv', caret-stripped 'HSI_prices.csv'), so we try
+    several base variants × all suffixes. '^HSTECH' and 'HSTECH' yield identical lists."""
+    sym = (symbol or '').strip().lstrip('^')
+    if not sym:
+        return []
+    bases = []
+    for variant in (sym,                                   # keep separators (dotted)
+                    sym.replace('.', '_').replace('-', '_').replace('=', '_'),  # sanitized
+                    sym.replace('.', '').replace('-', '').replace('=', '')):    # stripped
+        if variant and variant not in bases:
+            bases.append(variant)
+    return [f'{b}{sfx}' for b in bases for sfx in _INDEX_SUFFIXES]
+
+
+def _index_display_name(symbol):
+    """Clean label for an index symbol (friendly map, else sanitized symbol)."""
+    sym = (symbol or '').strip()
+    return INDEX_DISPLAY_NAMES.get(sym) or INDEX_DISPLAY_NAMES.get(sym.lstrip('^')) \
+        or sym.lstrip('^').upper()
+
+
+def _resolve_benchmark(workspace, date, raw_prices):
+    """Pick the relative-performance benchmark CSV + display name.
+
+    Reads profile/market_context_link.json and honors primary_index → secondary_indices,
+    searching SHARED market context FIRST so a workspace-local sector_etf.csv can never
+    pre-empt the correct primary index (the 1810 'vs SPY' failure mode). Only after every
+    resolved symbol fails does it fall back to legacy US indices, then workspace sector_etf.
+    Read-only: it only probes existing files, never fetches or writes."""
+    workspace = Path(workspace)
+    shared_mc = workspace / '..' / 'shared' / 'market_context'
+    # Search dirs in priority order: shared dated → shared undated → workspace-local.
+    search_dirs = [shared_mc / date / 'raw', shared_mc / 'raw', raw_prices]
+
+    def _find(symbols):
+        for sym in symbols:
+            for fname in _index_filename_candidates(sym):
+                for d in search_dirs:
+                    cand = d / fname
+                    if cand.exists():
+                        return str(cand), _index_display_name(sym)
+        return None
+
+    # 1. Resolved indices from the workspace's market context link.
+    link = workspace / 'profile' / 'market_context_link.json'
+    if link.exists():
+        try:
+            with open(link) as f:
+                mc = json.load(f)
+            symbols = [mc.get('primary_index')] + list(mc.get('secondary_indices') or [])
+            hit = _find([s for s in symbols if s])
+            if hit:
+                return hit
+        except Exception:
+            pass
+
+    # 2. Legacy US fallbacks (keeps existing US reports rendering when no link/file).
+    hit = _find(['SPY', 'QQQ', '^GSPC'])
+    if hit:
+        return hit
+
+    # 3. Last resort: workspace-local sector ETF proxy.
+    for fname in ('sector_etf_3mo.csv', 'sector_etf_medium.csv', 'sector_etf.csv'):
+        cand = raw_prices / fname
+        if cand.exists():
+            return str(cand), 'Sector'
+    return None
+
+
 def main():
     global LANG
 
@@ -583,33 +673,13 @@ def main():
                             catalysts=catalysts, run_date=date)
 
     # 2. Relative performance chart (annotated)
-    # Try multiple index names: SPY, HSI, ^HSI, sector_etf, etc.
-    spy_path = None
-    index_candidates = ['SPY', 'HSI', '^HSI', 'sector_etf', 'QQQ', '^GSPC']
-    search_paths = []
-    for idx_name in index_candidates:
-        search_paths.append(raw_prices / f'{idx_name}_3mo.csv')
-        search_paths.append(raw_prices / f'{idx_name}_medium.csv')
-    # Shared market context paths (various naming conventions)
-    shared_mc = Path(workspace) / '..' / 'shared' / 'market_context'
-    search_paths.extend([
-        shared_mc / date / 'raw' / 'SPY_3mo.csv',
-        shared_mc / date / 'raw' / 'SPY_prices.csv',
-        shared_mc / 'raw' / 'SPY_3mo.csv',
-        shared_mc / 'raw' / 'SPY_prices.csv',
-        shared_mc / date / 'raw' / 'QQQ_prices.csv',
-    ])
-    for candidate in search_paths:
-        if candidate.exists():
-            spy_path = candidate
-            break
-
-    if ticker_3mo.exists() and spy_path:
-        # Derive index display name from filename
-        idx_name = spy_path.stem.replace('_3mo', '').replace('_medium', '').replace('_', ' ').upper()
-        if idx_name == 'SECTOR ETF':
-            idx_name = 'Sector'
-        generate_relative_chart(ticker, str(ticker_3mo), str(spy_path),
+    # Benchmark comes from the workspace's resolved market_context_link.json
+    # (primary_index → secondary_indices), shared market context searched first so the
+    # correct index (e.g. Hang Seng for HK) wins over any workspace-local sector ETF.
+    benchmark = _resolve_benchmark(workspace, date, raw_prices)
+    if ticker_3mo.exists() and benchmark:
+        index_path, idx_name = benchmark
+        generate_relative_chart(ticker, str(ticker_3mo), index_path,
                                 str(chart_dir / 'relative_chart.svg'),
                                 index_name=idx_name)
 
