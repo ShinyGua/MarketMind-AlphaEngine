@@ -38,3 +38,18 @@ def test_panelist_output_path_matches_grader_glob():
     grader = (ROOT / "eval" / "graders" / "discussion_convergence_grader.py").read_text(encoding="utf-8")
     assert '"*_view.json"' in grader or "'*_view.json'" in grader, \
         "grader does not glob *_view.json — path contract broken"
+
+
+def test_panelist_has_internal_invocation_policy():
+    # internal stage skills must be allow_implicit_invocation: false (Codex), like
+    # every other mm-* stage skill — else Codex can auto-match it standalone.
+    policy = SKILLS / "mm-discussion-panelist" / "agents" / "openai.yaml"
+    assert policy.exists(), "mm-discussion-panelist missing agents/openai.yaml"
+    assert "allow_implicit_invocation: false" in policy.read_text(encoding="utf-8")
+
+
+def test_synthesis_documents_memo_only_fallback():
+    # when discussion.panel.enabled is false the panel/ dir is never produced;
+    # synthesis must fall back to memo-only rather than read missing artifacts.
+    text = (SKILLS / "mm-discussion-moderator" / "SKILL.md").read_text(encoding="utf-8")
+    assert "memo-only" in text, "moderator synthesis missing the panel-disabled fallback"
