@@ -28,6 +28,8 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 
 - `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and flags
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read this when assessing **multi-day** risk signals (volume divergence, support levels, ATR trend); the snapshot above only carries the latest row.
+- `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (VIX, TNX, USD, index series) when assessing macro/risk-regime trajectory.
 - `{workspace}/profile/company_profile.json` — company profile (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events

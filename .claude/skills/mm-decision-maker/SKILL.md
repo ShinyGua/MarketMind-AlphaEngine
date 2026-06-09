@@ -77,6 +77,8 @@ Rules for `tally` mode:
 
 - `{workspace}/drafts/{date}/*.md` — latest draft
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** the decision hinges on indicator trajectory (divergence, cross timing, support/resistance) the snapshot can't show.
+- `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) plus `raw/*.csv` (index + macro asset series). Read **only when** the decision hinges on macro trajectory the snapshot can't show.
 - `{workspace}/valuation/{date}/valuation_summary.json` — fair value, valuation method, margin of safety, verdict, DCF range, comps (price-vs-value reference, weighted by confidence)
 - `{workspace}/discussion/{date}/thesis_map.json` — debate synthesis
 - `{workspace}/discussion/{date}/debate_summary.md` — debate details
