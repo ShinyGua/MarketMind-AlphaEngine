@@ -163,6 +163,71 @@ def _nonan(v):
     return v
 
 
+# ── degenerate-input sanitization ─────────────────────────────────────────────
+# Some yfinance fundamentals carry frame-breaking artifacts that, left alone,
+# distort comps. The two we guard here both show up on net-cash-rich /
+# insurance-float conglomerates (e.g. Berkshire):
+#   • price_to_book reported as a near-zero stub (~0.001) — not a real 0.001x
+#     multiple; it would rank the name as the "cheapest on book" in the peer set.
+#   • a NEGATIVE enterprise_value (and the EV/Revenue, EV/EBITDA multiples derived
+#     from it) because total_cash ≫ total_debt + the EV framing. EV-based comps
+#     paths then add a huge cash pile back to equity and inflate fair value.
+# We null out these inputs on the COMPANY metrics (peers untouched) and return a
+# list of human-readable notes for `inputs_missing`. Earnings-based (P/E) and a
+# correctly-bounded P/B remain the meaningful frames for such names.
+_PB_FLOOR = 0.01          # below this a price_to_book is treated as a yfinance stub
+_NET_CASH_EV_RATIO = 0.30  # net-cash ≥ 30% of market cap ⇒ EV frame is degenerate
+
+
+def _sanitize_company_metrics(metrics: dict) -> list[str]:
+    """Mutate `metrics` in place, neutralizing degenerate comps inputs.
+
+    Returns a list of data-quality notes describing what was excluded/sanitized.
+    """
+    notes: list[str] = []
+    if not isinstance(metrics, dict):
+        return notes
+
+    # 1) Garbage price_to_book stub (≤0 or implausibly small).
+    pb = metrics.get("price_to_book")
+    if isinstance(pb, (int, float)) and pb <= _PB_FLOOR:
+        metrics["price_to_book"] = None
+        notes.append(
+            f"price_to_book ({pb:g}) excluded: degenerate yfinance stub "
+            f"(< {_PB_FLOOR}x); recompute book-value frame from equity if needed")
+
+    # 2) Net-cash-dominated / negative enterprise value ⇒ EV multiples meaningless.
+    ev = metrics.get("enterprise_value")
+    mcap = metrics.get("market_cap")
+    cash = metrics.get("total_cash")
+    debt = metrics.get("total_debt")
+    net_debt = None
+    if cash is not None or debt is not None:
+        net_debt = (debt or 0.0) - (cash or 0.0)
+    ev_negative = isinstance(ev, (int, float)) and ev <= 0
+    net_cash_heavy = (net_debt is not None and net_debt < 0
+                      and isinstance(mcap, (int, float)) and mcap > 0
+                      and (-net_debt) >= _NET_CASH_EV_RATIO * mcap)
+    if ev_negative or net_cash_heavy:
+        why = []
+        if ev_negative:
+            why.append(f"enterprise_value ({ev:,.0f}) is non-positive")
+        if net_cash_heavy:
+            why.append(f"net cash ({-net_debt:,.0f}) is "
+                       f"{(-net_debt)/mcap*100:.0f}% of market cap")
+        reason = "; ".join(why)
+        for k in ("enterprise_value", "ev_to_revenue", "ev_to_ebitda"):
+            if metrics.get(k) is not None:
+                metrics[k] = None
+        # flag so the comps engine skips EV→equity implied-value paths entirely
+        metrics["_ev_frame_degenerate"] = True
+        notes.append(
+            f"EV-based multiples (enterprise_value, ev_to_revenue, ev_to_ebitda) "
+            f"excluded: {reason}. EV frame distorted for a cash-rich/insurance-float "
+            f"holding company; earnings (P/E) and book-value anchors used instead")
+    return notes
+
+
 def _norm_statements(raw: dict):
     """Return (income_statement, cash_flow) as single-row lists (latest period).
 
@@ -368,9 +433,24 @@ def _select_fair_value(dcf_block, implied, price, cfg):
                                  included=dcf_ok and dcf_weight > 0, reason=dcf_reason))
 
     earnings_value = (implied or {}).get("blended")
-    candidates.append(_candidate("comps_earnings", earnings_value, 0.35, "medium",
+    # The blended earnings anchor averages the P/E and EV/EBITDA paths. When only
+    # ONE of those survives (e.g. EV multiples excluded as degenerate for a
+    # cash-rich conglomerate), the anchor rests on a single peer multiple and is
+    # inherently fragile — downgrade its confidence to "low" so it can't read
+    # "medium"/"high" and so the summary self-degrades rather than emitting a
+    # spuriously precise fair value.
+    earnings_paths = sum(1 for k in ("by_pe", "by_ev_ebitda")
+                         if _positive((implied or {}).get(k)))
+    earnings_conf = "medium" if earnings_paths >= 2 else "low"
+    earnings_reason = None
+    if not _positive(earnings_value):
+        earnings_reason = "not available"
+    elif earnings_paths < 2:
+        earnings_reason = ("single-multiple anchor (only one of P/E / EV-EBITDA "
+                           "available) — fragile")
+    candidates.append(_candidate("comps_earnings", earnings_value, 0.35, earnings_conf,
                                  included=_positive(earnings_value),
-                                 reason=None if _positive(earnings_value) else "not available"))
+                                 reason=earnings_reason))
 
     revenue_value = ((implied or {}).get("by_ev_revenue_growth_adjusted")
                      or (implied or {}).get("by_ev_revenue"))
@@ -459,6 +539,11 @@ def main():
              if p and p.get("metrics")]
 
     inputs_missing = []
+
+    # ── degenerate-input sanitization ─────────────────────────────────────────
+    # Neutralize frame-breaking yfinance artifacts (e.g. near-zero price_to_book
+    # stub, negative/net-cash-dominated enterprise value) before they reach comps.
+    inputs_missing.extend(_sanitize_company_metrics(metrics))
 
     # ── comps ──────────────────────────────────────────────────────────────
     comps_table, implied = None, None

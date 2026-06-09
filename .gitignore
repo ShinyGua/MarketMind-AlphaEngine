@@ -60,6 +60,7 @@ cx2cc_review.md
 memory/episodic
 memory/procedural
 memory/semantic
+memory/_backup_pre_prune_2026-06-09
 # Per-run LLM-generated stage scripts (e.g. quant_{ticker}_{date}.py).
 # The committed scripts/ are deterministic helpers; throwaways are not.
 scripts/quant_*.py

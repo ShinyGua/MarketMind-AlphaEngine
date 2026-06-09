@@ -29,6 +29,8 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 - `{workspace}/normalized/{date}/evidence_cards/company_*.json` — company evidence cards
 - `{workspace}/normalized/{date}/evidence_cards/sector_*.json` — sector evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
+- `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (index + macro asset price series) only when you need macro trajectory.
 - `{workspace}/profile/company_profile.json` — company profile (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events

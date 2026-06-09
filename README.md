@@ -323,6 +323,10 @@ MarketMind-AlphaEngine/
 │   └── metrics.py                 # Aggregate dashboard computation
 ├── logs/
 │   └── run_log.jsonl              # Append-only pipeline run history (not committed)
+├── scripts/                       # Deterministic helpers (committed; throwaway scripts/quant_*.py ignored)
+│   ├── run_codex_pipeline.py      # Codex parity driver (one codex exec per stage)
+│   ├── check_data_sources.py      # Data-source preflight diagnostics
+│   └── prune_memory_to_keeplist.py # Prune memory store to a ticker keep-list (dry-run default; --apply backs up)
 ├── templates/
 │   ├── render_pdf.py              # Markdown -> HTML/CSS -> PDF renderer (WeasyPrint)
 │   ├── report.css                 # JPM-style stylesheet (cover, tables, CJK)

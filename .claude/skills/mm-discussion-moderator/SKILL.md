@@ -92,6 +92,8 @@ Read critique files AND the memo summaries saved during scan. Do NOT re-read ful
 - `{workspace}/discussion/{date}/debate_assignments.json` — contains memo_summaries from scan phase
 - `{workspace}/discussion/{date}/debate/round_*/*.md` — cross-critique files from debate
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** validating an analyst's trajectory claim (divergence, cross timing, support/resistance) that the snapshot in `shared_context` can't confirm.
+- `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` plus `raw/*.csv` (index + macro asset series). Read **only when** validating an analyst's macro/index claim against the underlying series.
 
 **Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/shared_context/{date}.json` instead of individual evidence card, quant, profile, and catalyst files.
 

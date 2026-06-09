@@ -48,6 +48,14 @@ Round: $ARGUMENTS[3] (1-based integer)
   expensive), margin of safety, confidence, applicable.
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts in
   one file (read this instead of the individual files).
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator
+  series (RSI/MACD/SMA/EMA/ATR). Read **only when** your vote hinges on indicator
+  trajectory (divergence, cross timing, support/resistance) that the snapshot in
+  `shared_context` can't show.
+- `workspaces/shared/market_context/{date}/` — shared macro data:
+  `normalized/market_context_snapshot.json` (index levels, regime) plus
+  `raw/*.csv` (index + macro asset series). Read **only when** your vote hinges on
+  macro trajectory the snapshot can't show.
 - `{workspace}/normalized/{date}/evidence_digest.json` — all evidence cards in one
   file (cite `ev_…` ids).
 - **Round > 1 only:** `{workspace}/decision/{date}/panel/panel_summary_round_{N-1}.json`

@@ -317,6 +317,10 @@ MarketMind-AlphaEngine/
 │   └── metrics.py                 # 聚合仪表盘计算
 ├── logs/
 │   └── run_log.jsonl              # 只追加的流水线运行历史（不提交）
+├── scripts/                       # 确定性辅助脚本（已提交；临时的 scripts/quant_*.py 被忽略）
+│   ├── run_codex_pipeline.py      # Codex 对等驱动（每个阶段一次 codex exec）
+│   ├── check_data_sources.py      # 数据源预检诊断
+│   └── prune_memory_to_keeplist.py # 将记忆存储裁剪到 ticker 保留清单（默认 dry-run；--apply 先备份）
 ├── templates/
 │   ├── render_pdf.py              # Markdown -> HTML/CSS -> PDF 渲染器（WeasyPrint）
 │   ├── report.css                 # JPM 风格样式表（封面、表格、CJK）

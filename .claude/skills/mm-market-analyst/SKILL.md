@@ -28,8 +28,11 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective de
 
 - `{workspace}/normalized/{date}/evidence_cards/market_*.json` — market evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and relative strength
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
 - `{workspace}/profile/company_profile.json` — company context (undated)
-- `workspaces/shared/market_context/{date}/raw/*.csv` — index and macro asset prices
+- `workspaces/shared/market_context/{date}/normalized/market_context_snapshot.json` — shared macro snapshot (index levels, regime, notes); the cheap default read.
+- `workspaces/shared/market_context/{date}/indicators/market_indicators.csv` — computed macro indicator series.
+- `workspaces/shared/market_context/{date}/raw/*.csv` — full index and macro asset price series (SPY, QQQ, VIX, TNX, HSI, HS300, BTC, GLD, oil, USD…). Read the raw series **only when you need trajectory** the snapshot can't show.
 
 **Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
