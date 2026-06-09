@@ -28,7 +28,7 @@ explicitly (`$mm-…`) only for targeted debugging.
 | `quant` | `.claude/skills/mm-quant-analyst/SKILL.md` |
 | `valuation` | `.claude/skills/mm-valuation-engine/SKILL.md` |
 | `discuss_memos` | `.claude/skills/mm-market-analyst/SKILL.md`, `.claude/skills/mm-company-analyst/SKILL.md`, `.claude/skills/mm-risk-analyst/SKILL.md`, optional `.claude/skills/mm-valuation-analyst/SKILL.md`, `.claude/skills/mm-technical-analyst/SKILL.md`, `.claude/skills/mm-catalyst-analyst/SKILL.md` |
-| `discuss_debate` | Same analyst skills as `discuss_memos` |
+| `discuss_debate` | `.claude/skills/mm-discussion-panelist/SKILL.md` (per-round views), `.claude/skills/mm-discussion-moderator/SKILL.md` (tally) |
 | `discuss_synthesis` | `.claude/skills/mm-discussion-moderator/SKILL.md` |
 | `draft` | `.claude/skills/mm-report-writer/SKILL.md` |
 | `review` | `.claude/skills/mm-report-reviewer/SKILL.md` |
@@ -45,7 +45,8 @@ explicitly (`$mm-…`) only for targeted debugging.
 - `mm-company-resolver`: ticker, company profile, peers, market context.
 - `mm-decision-maker`: decision-panel chair — per-round tally and final BUY/HOLD/SELL decision.
 - `mm-decision-panelist`: casts one analyst role's ballot (vote + conviction + hedge overlay) per panel round.
-- `mm-discussion-moderator`: thesis map and debate summary.
+- `mm-discussion-panelist`: files one analyst role's structured view (stance + conviction + challenges) per discussion-panel round.
+- `mm-discussion-moderator`: discussion-panel chair — per-round tally and synthesis into thesis map + debate summary.
 - `mm-init`: interactive workspace initialization.
 - `mm-market-analyst`: macro and market environment memo.
 - `mm-market-desk`: macro headlines, index data, macro assets.
