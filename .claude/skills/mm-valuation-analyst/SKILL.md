@@ -1,6 +1,6 @@
 ---
 name: mm-valuation-analyst
-description: Writes valuation analysis memo — P/E, price target, cheap vs expensive; participates in debate
+description: Writes valuation analysis memo — P/E, price target, cheap vs expensive — for the discussion stage
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -19,10 +19,10 @@ Write your memo in the language specified by `resolved_config.json` → `languag
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
-Mode: $ARGUMENTS[2] (optional — "memo" for independent memo, "debate round_N" for critique)
-Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mode)
 
 **All paths below use `{date}` = $ARGUMENTS[1].**
+
+The debate that follows this memo happens in the discussion panel loop, where you file structured views via `mm-discussion-panelist` (not in this skill).
 
 ## Inputs
 
@@ -39,9 +39,7 @@ Target: $ARGUMENTS[3] (optional — specific analyst to critique in selective mo
 
 **If the summary is `applicable: false`** (ETF/fund) or `confidence: "low"` (sparse data), say so plainly and lean on relative/comps signals or qualitative judgment instead of overstating a thin DCF.
 
-## Behavior Modes
-
-### Mode A: Independent Memo (default)
+## Independent Memo
 
 Write to: `{workspace}/discussion/{date}/analyst_memos/valuation_analyst.md`
 
@@ -81,16 +79,6 @@ The memo MUST contain:
 ## Time Horizon Judgment
 <Does the valuation thesis favor short-term trading or long-term holding?>
 ```
-
-### Mode B: Cross-Critique (argument = "debate round_N")
-
-**If $ARGUMENTS[3] is provided (selective):** Only critique the specified target.
-- Read your memo + target's memo from `{workspace}/discussion/{date}/analyst_memos/`
-- Write ONE critique: `{workspace}/discussion/{date}/debate/round_{N}/valuation_analyst_on_{target}.md`
-
-**If $ARGUMENTS[3] is NOT provided (full):** Critique ALL others.
-
-Each critique must include: valuation perspective on the other analyst's thesis — is their bullish/bearish case priced in?
 
 ## Quality Rules
 
