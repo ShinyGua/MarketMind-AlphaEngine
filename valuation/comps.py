@@ -127,6 +127,12 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
         eps = price / fwd_pe
         out["by_pe"] = eps * peer_pe_median
 
+    # EV-based paths are skipped entirely when the company's EV frame is
+    # degenerate (net-cash-dominated / negative enterprise value, flagged by the
+    # sanitizer). Adding a huge cash pile back to equity would inflate fair value;
+    # earnings (P/E) stays the meaningful anchor for such names.
+    ev_degenerate = bool(company.get("_ev_frame_degenerate"))
+
     # EV/EBITDA path: median peer EV/EBITDA × company EBITDA → EV → equity → /share.
     ebitda = company.get("ebitda")
     shares = company.get("shares_outstanding")
@@ -134,7 +140,7 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
     if company.get("total_debt") is not None or company.get("total_cash") is not None:
         net_debt = (company.get("total_debt") or 0.0) - (company.get("total_cash") or 0.0)
     peer_ev_ebitda_median = (benchmarks.get("ev_to_ebitda") or {}).get("median")
-    if ebitda and shares and peer_ev_ebitda_median and net_debt is not None:
+    if not ev_degenerate and ebitda and shares and peer_ev_ebitda_median and net_debt is not None:
         implied_ev = peer_ev_ebitda_median * ebitda
         out["by_ev_ebitda"] = (implied_ev - net_debt) / shares
 
@@ -142,7 +148,7 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
     # earnings and FCFF anchors are structurally unavailable.
     revenue = company.get("total_revenue")
     peer_ev_rev_median = (benchmarks.get("ev_to_revenue") or {}).get("median")
-    if revenue and shares and peer_ev_rev_median and net_debt is not None:
+    if not ev_degenerate and revenue and shares and peer_ev_rev_median and net_debt is not None:
         implied_ev = peer_ev_rev_median * revenue
         out["by_ev_revenue"] = (implied_ev - net_debt) / shares
 
