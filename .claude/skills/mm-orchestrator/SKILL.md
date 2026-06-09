@@ -73,7 +73,7 @@ STAGE_LABELS = {
   "quant":             "Quant snapshot",
   "valuation":         "Valuation (DCF + comps)",
   "discuss_memos":     "Analyst memos (parallel)",
-  "discuss_debate":    "Cross-critique debate",
+  "discuss_debate":    "Discussion panel loop",
   "discuss_synthesis": "Discussion synthesis",
   "draft":             "Draft report",
   "review":            "Review & revision loop",
@@ -278,24 +278,32 @@ sentences is incomplete. (Under Codex, run each analyst as a dedicated
 full-`SKILL.md` pass — see `AGENTS.md` "Depth parity".)
 
 Wait for all to complete.
-**Then immediately proceed to stage 8 (cross-critique debate).**
+**Then immediately proceed to stage 8 (discussion panel loop).**
 
-### 8. discuss_debate
-Read `discussion.debate_mode` from resolved config (default: `selective`).
+### 8. discuss_debate (Discussion Panel Loop)
+A multi-round panel, mirroring the decision panel (stage 12). Read
+`discussion.panel` from resolved config (`enabled` default `true`, `min_rounds`
+default 1, `max_rounds` default 3, `convergence_threshold` default 0.70) and read
+`discussion.analyst_roles` for the active roles.
 
-**If debate_mode = "selective" (recommended):**
-1. Dispatch **mm-discussion-moderator** with args: `{workspace} {date} scan`
-   → Moderator reads all memos, identifies disagreements, writes `debate_assignments.json`
-2. Read `{workspace}/discussion/{date}/debate_assignments.json` → get assigned pairs
-3. For each assigned pair, dispatch the critic analyst with args:
-   `{workspace} {date} debate round_1 {target_analyst}`
-   (each critic only writes one critique targeting their assigned opponent)
-4. Wait for all assigned critiques to complete.
+**If `discussion.panel.enabled` is `false`:** skip this stage entirely — the memos
+feed straight into synthesis (no cross-critique). Proceed to stage 9.
 
-**If debate_mode = "full":**
-For each round N:
-  Dispatch all analysts in parallel with args: `{workspace} {date} debate round_{N}`
-  Each critiques ALL others. Wait for all.
+**Otherwise, for each round N from 1 to `max_rounds`:**
+1. Dispatch ALL active roles **in parallel** via **mm-discussion-panelist** with
+   args: `{workspace} {date} {role} {N}`. Each files a structured view
+   (`stance` bullish|neutral|bearish + `conviction` + challenges) to
+   `discussion/{date}/panel/round_{N}/{role}_view.json`. Wait for all.
+2. Dispatch **mm-discussion-moderator** with args: `{workspace} {date} tally {N}`
+   → chair tallies the views and surfaces retained dissent to
+   `discussion/{date}/panel/panel_summary_round_{N}.json`. Wait.
+3. Run the deterministic convergence grader:
+   ```bash
+   .venv/bin/python3 eval/graders/discussion_convergence_grader.py {workspace} {date} {N}
+   ```
+   Read `discussion/{date}/panel/convergence_round_{N}.json`. If its `exit` is
+   `true` (converged, hit `max_rounds`, or insufficient views), stop the loop;
+   otherwise continue to round N+1. The grader always exits at `max_rounds`.
 
 **Then immediately proceed to stage 9.**
 
@@ -312,7 +320,10 @@ stage 7). Do this **at most once**, then continue regardless. This catches a
 runtime (e.g. Codex) that stubbed the memos and forces a real redo.
 
 Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. Wait.
-The moderator already read all memos during the scan phase (stage 8) and stored summaries in `debate_assignments.json`. In synthesis mode, it should read ONLY the critique files from `discussion/{date}/debate/round_1/` plus the stored memo summaries — NOT re-read full memos.
+In synthesis mode it reads the full analyst memos plus the panel artifacts from
+stage 8 — all rounds' `discussion/{date}/panel/round_*/*_view.json`, the latest
+`panel_summary_round_*.json`, and the last `convergence_round_*.json` — and folds
+them into `thesis_map.json` / `debate_summary.md`.
 Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 **Then immediately proceed to stage 10.**
 

@@ -259,17 +259,32 @@ def st_discuss_memos(ctx):
 
 
 def st_discuss_debate(ctx):
-    codex_skill(ctx, "mm-discussion-moderator", "scan")
-    assigns = _read_json(ctx.ws / "discussion" / ctx.date / "debate_assignments.json")
-    pairs = (assigns or {}).get("assignments", []) if not ctx.dry else [
-        {"critic": "risk_analyst", "target": "company_analyst"}]  # dry-run placeholder
-    thunks = [
-        (lambda a=a: codex_skill(ctx, role_to_skill(a["critic"]),
-                                 "debate", "round_1", a["target"], critical=False))
-        for a in pairs if a.get("critic") and a.get("target")
-    ]
-    if thunks:
-        parallel(ctx, thunks)
+    # Multi-round discussion panel (mirrors the decision panel): each analyst role
+    # files a structured view (stance + conviction) per round; the chair tallies;
+    # a deterministic grader decides iterate-vs-exit with a hard max_rounds cap.
+    panel = (ctx.cfg.get("discussion", {}) or {}).get("panel", {}) or {}
+    if not panel.get("enabled", True):
+        return  # panel off → memos feed straight into synthesis (no cross-critique)
+    roles = _analyst_roles(ctx)
+    max_r = int(panel.get("max_rounds", 3))
+    for r in range(1, max_r + 1):
+        # 1. each role files a view (stance + conviction + challenges) — fresh context each
+        parallel(ctx, [
+            (lambda role=role: codex_skill(ctx, "mm-discussion-panelist", role, str(r), critical=False))
+            for role in roles
+        ])
+        # 2. chair tallies views + surfaces retained dissent
+        codex_skill(ctx, "mm-discussion-moderator", "tally", str(r), critical=False)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        det(ctx, "eval/graders/discussion_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
+        if ctx.dry:
+            print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
+            break
+        conv = _read_json(ctx.ws / "discussion" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        if (conv or {}).get("exit"):
+            log(f"discussion panel converged on round {r}: {(conv or {}).get('exit_reason')}")
+            break
+        log(f"discussion panel round {r}: no convergence, continuing")
 
 
 def st_discuss_synthesis(ctx):
