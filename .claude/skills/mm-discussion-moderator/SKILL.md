@@ -80,15 +80,16 @@ Write `{workspace}/discussion/{date}/panel/panel_summary_round_{N}.json`:
 
 ### Mode B: Synthesis (argument = "synthesis")
 
-Read the full analyst memos and all panel artifacts, then produce the thesis map
-and debate summary.
+Read the full analyst memos and — if the panel ran — its artifacts, then produce
+the thesis map and debate summary.
 
 ## Inputs (for synthesis mode)
 
-- `{workspace}/discussion/{date}/analyst_memos/*.md` — the full analyst memos (depth-gated; ≤6 files)
-- `{workspace}/discussion/{date}/panel/round_*/*_view.json` — every round's structured views (stance evolution, challenges, changed beliefs)
-- `{workspace}/discussion/{date}/panel/panel_summary_round_*.json` — the chair's per-round tallies (read the latest for the converged lean + retained dissent)
-- `{workspace}/discussion/{date}/panel/convergence_round_*.json` — the deterministic convergence verdict (read the last round's `convergence_score`, `exit_reason`)
+- `{workspace}/discussion/{date}/analyst_memos/*.md` — the full analyst memos (depth-gated; ≤6 files). **Always present; this is your required input.**
+- `{workspace}/discussion/{date}/panel/` — the discussion-panel artifacts, present **only when the panel ran** (the default). When `discussion.panel.enabled` is false this directory is **absent** — in that case synthesize from the memos alone (memo-only fallback): skip the three panel reads below, and derive consensus/disagreements/net lean directly from the memos. When the directory exists, also read:
+  - `{workspace}/discussion/{date}/panel/round_*/*_view.json` — every round's structured views (stance evolution, challenges, changed beliefs)
+  - `{workspace}/discussion/{date}/panel/panel_summary_round_*.json` — the chair's per-round tallies (read the latest for the converged lean + retained dissent)
+  - `{workspace}/discussion/{date}/panel/convergence_round_*.json` — the deterministic convergence verdict (read the last round's `convergence_score`, `exit_reason`)
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** validating an analyst's trajectory claim (divergence, cross timing, support/resistance) that the snapshot in `shared_context` can't confirm.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` plus `raw/*.csv` (index + macro asset series). Read **only when** validating an analyst's macro/index claim against the underlying series.
@@ -100,9 +101,11 @@ and debate summary.
 ### 1. Read All Discussion Materials
 
 Read every file in:
-- `{workspace}/discussion/{date}/analyst_memos/` (the full memos)
-- `{workspace}/discussion/{date}/panel/round_*/` (all rounds' `*_view.json` — stances, challenges, changed beliefs)
-- `{workspace}/discussion/{date}/panel/panel_summary_round_*.json` (per-round tallies) and the latest `convergence_round_*.json` (converged lean + exit reason)
+- `{workspace}/discussion/{date}/analyst_memos/` (the full memos — always)
+- `{workspace}/discussion/{date}/panel/round_*/` (all rounds' `*_view.json` — stances, challenges, changed beliefs) **if the `panel/` directory exists**
+- `{workspace}/discussion/{date}/panel/panel_summary_round_*.json` (per-round tallies) and the latest `convergence_round_*.json` (converged lean + exit reason) **if present**
+
+If `panel/` is absent (panel disabled), map the landscape from the memos alone — every step below still applies, just without the panel's stance evolution.
 
 ### 2. Map the Landscape
 
