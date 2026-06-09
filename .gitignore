@@ -47,6 +47,7 @@ cli_pause
 重试一次
 
 .DS_Store
+.vscode/
 
 # Ignore specific agent spec files
 market_report_agent_codex_spec.md
