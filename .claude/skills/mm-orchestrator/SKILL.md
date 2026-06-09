@@ -323,7 +323,9 @@ Dispatch **mm-discussion-moderator** with args: `{workspace} {date} synthesis`. 
 In synthesis mode it reads the full analyst memos plus the panel artifacts from
 stage 8 — all rounds' `discussion/{date}/panel/round_*/*_view.json`, the latest
 `panel_summary_round_*.json`, and the last `convergence_round_*.json` — and folds
-them into `thesis_map.json` / `debate_summary.md`.
+them into `thesis_map.json` / `debate_summary.md`. When the panel was disabled
+(stage 8 skipped, so `discussion/{date}/panel/` is absent), it falls back to
+memo-only synthesis.
 Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
 **Then immediately proceed to stage 10.**
 

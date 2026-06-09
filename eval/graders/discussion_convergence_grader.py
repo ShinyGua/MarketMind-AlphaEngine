@@ -92,6 +92,14 @@ def _norm_conviction(c) -> float:
     return min(1.0, max(0.0, c))
 
 
+def _why(view: dict) -> str:
+    """Best one-line reason for a dissent: first core claim, else changed beliefs."""
+    claims = view.get("core_claims")
+    if isinstance(claims, list) and claims:
+        return claims[0]
+    return view.get("changed_beliefs") or ""
+
+
 def grade(workspace: str, date: str, rnd: int) -> dict:
     ws = Path(workspace)
     th = _load_thresholds(ws)
@@ -156,10 +164,7 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         convergence_score = 0.6 * cwa + 0.4 * stance_stability
 
     dissenters = [
-        {"role": r, "stance": _norm_stance(v.get("stance")),
-         "why": (v.get("core_claims") or [v.get("changed_beliefs", "")])[0]
-         if isinstance(v.get("core_claims"), list) and v.get("core_claims")
-         else v.get("changed_beliefs", "")}
+        {"role": r, "stance": _norm_stance(v.get("stance")), "why": _why(v)}
         for r, v in views.items()
         if _norm_stance(v.get("stance")) != majority_stance
     ]
