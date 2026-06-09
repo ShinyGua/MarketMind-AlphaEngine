@@ -58,8 +58,8 @@ If yfinance fails, use WebSearch: search `"{TICKER} company profile sector excha
 
 Based on `market_profile`:
 - US → primary: SPY, secondary: [QQQ, sector ETF]
-- HK → primary: ^HSI, secondary: [HSTECH]
-- CN → primary: 000300.SS
+- HK → primary: ^HSI, secondary: [^HSTECH]
+- CN → primary: 000001.SS (Shanghai Composite), secondary: [000300.SS (CSI 300)]
 - JP → primary: ^N225
 
 US sector ETF mapping: semiconductors→SOXX, technology→XLK, energy→XLE, healthcare→XLV, financials→XLF, consumer→XLY, industrials→XLI.
