@@ -263,7 +263,7 @@ def _tool_create_date_dirs(args: dict) -> dict:
         f"raw/{date}/fundamentals/peers",
         f"normalized/{date}/evidence_cards", f"normalized/{date}/time_series",
         f"normalized/{date}/tables", f"quant/{date}", f"valuation/{date}",
-        f"discussion/{date}/analyst_memos", f"discussion/{date}/debate/round_1",
+        f"discussion/{date}/analyst_memos", f"discussion/{date}/panel/round_1",
         f"drafts/{date}", f"reviews/{date}/final_reviews",
         f"reviews/{date}/revision_briefs", f"decision/{date}", f"final/{date}",
         f"exports/{date}/pdf/charts", f"exports/{date}/web", f"eval/{date}",
