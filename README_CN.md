@@ -212,8 +212,8 @@ codex
 |       | 通过 ------------------------------+                         |
 |       | 不通过 -> 定向修订 -> draft        |                         |
 |       v                          （最多循环次数由 config 控制）      |
-|  投资决策                                                             |
-|       | BUY / HOLD / SELL + 置信度 + 风险项                          |
+|  投资决策（多轮评审团：投票 -> 主席汇总 -> 收敛）                    |
+|       | BUY / HOLD / SELL + 风险叠加 + 置信度 + 风险项               |
 |       v                                                              |
 |  导出 markdown + JSON + 图表 + PDF（WeasyPrint）                     |
 |       |                                                              |
@@ -266,7 +266,7 @@ codex
 MarketMind-AlphaEngine/
 ├── .claude/
 │   ├── agents/                    # 模型档位定义（heavy/standard/light）
-│   └── skills/                    # 21 个 agent skill
+│   └── skills/                    # 24 个 agent skill
 │       ├── mm-orchestrator/       # 流水线总控（铁律：不能停）
 │       ├── mm-company-resolver/   # 股票代码 -> 公司画像 + 同业
 │       ├── mm-market-desk/        # 宏观数据采集
