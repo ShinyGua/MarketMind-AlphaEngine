@@ -39,12 +39,15 @@ def evaluate(workspace: Path, date: str) -> dict:
     metric_graders = ["cost"]
 
     results = {}
+    missing = []
     for name in gate_graders + metric_graders:
         r = _read_grader(workspace, date, name)
         if r is not None:
             results[name] = r
         else:
             results[name] = {"pass": None, "error": "grader result not found"}
+            if name in gate_graders:
+                missing.append(name)
 
     # Determine pass/fail only for gate graders (cost excluded)
     summary = {}
@@ -63,16 +66,21 @@ def evaluate(workspace: Path, date: str) -> dict:
 
     critical_fail = any(summary.get(g) == "fail" for g in critical_graders)
     advisory_fail = any(summary.get(g) == "fail" for g in advisory_graders)
+    # A missing result is not a pass: an absent critical grader means the run
+    # was never actually checked, so the gate must fail rather than read "passed".
+    critical_missing = [g for g in missing if g in critical_graders]
+    advisory_missing = [g for g in missing if g in advisory_graders]
 
-    if critical_fail:
+    if critical_fail or critical_missing:
         release_status = "failed"
-    elif advisory_fail:
+    elif advisory_fail or advisory_missing:
         release_status = "warning"
     else:
         release_status = "passed"
 
     gate = {
         "release_status": release_status,
+        "missing_graders": missing,
         "grader_summary": summary,  # Only gate graders (factuality, evidence, consistency)
         "grader_details": {
             name: {
