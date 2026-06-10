@@ -115,3 +115,94 @@ def test_score_monotonic_in_agreement(tmp_path):
     s_majority = score(["BUY", "BUY", "SELL"])
     s_unanimous = score(["BUY", "BUY", "BUY"])
     assert s_split < s_majority < s_unanimous
+
+
+def _ballot_full(ws: Path, rnd: int, role: str, vote: str, conviction: float, **extra):
+    d = ws / "decision" / DATE / "panel" / f"round_{rnd}"
+    d.mkdir(parents=True, exist_ok=True)
+    payload = {"role": role, "round": rnd, "vote": vote,
+               "conviction": conviction, "risk_overlay": "none",
+               "rationale": "x", "top_risk": "y", **extra}
+    (d / f"{role}_ballot.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _prev_convergence(ws: Path, rnd: int, score: float):
+    d = ws / "decision" / DATE / "panel"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"convergence_round_{rnd}.json").write_text(
+        json.dumps({"convergence_score": score}), encoding="utf-8")
+
+
+def test_exact_tie_is_flagged_and_blocks_convergence(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.45})
+    _ballot(ws, 1, "a", "BUY", 0.8)
+    _ballot(ws, 1, "b", "BUY", 0.8)
+    _ballot(ws, 1, "c", "SELL", 0.8)
+    _ballot(ws, 1, "d", "SELL", 0.8)
+    r = grader.grade(str(ws), DATE, 1)
+    assert r["tie_between"] == ["BUY", "SELL"]
+    assert r["exit"] is False and r["exit_reason"] == "tie_unresolved"
+
+
+def test_conviction_collapse_suppresses_early_converged_exit(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    _ballot(ws, 1, "a", "BUY", 0.9)
+    _ballot(ws, 1, "b", "BUY", 0.85)
+    _ballot(ws, 1, "c", "SELL", 0.8)
+    _ballot(ws, 2, "a", "BUY", 0.35)
+    _ballot(ws, 2, "b", "BUY", 0.40)
+    _ballot(ws, 2, "c", "BUY", 0.25)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["conviction_collapse"] is True
+    assert r["conviction_retention"] < 0.75
+    assert r["exit"] is False and r["exit_reason"] == "conviction_collapse"
+
+
+def test_stalled_below_threshold_exits_with_unresolved_dissent(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    for rnd in (1, 2):
+        _ballot(ws, rnd, "a", "BUY", 0.7)
+        _ballot(ws, rnd, "b", "SELL", 0.6)
+        _ballot(ws, rnd, "c", "HOLD", 0.5)
+    _prev_convergence(ws, 1, 0.62)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["convergence_score"] < 0.70
+    assert r["exit"] is True and r["exit_reason"] == "stalled"
+    assert r["unresolved_dissent"] is True
+
+
+def test_uncited_flip_carries_half_conviction(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.99})
+    _ballot(ws, 1, "a", "BUY", 0.6)
+    _ballot(ws, 1, "b", "SELL", 0.6)
+    _ballot(ws, 1, "c", "SELL", 0.8)
+    _ballot(ws, 2, "a", "BUY", 0.6)
+    _ballot(ws, 2, "b", "SELL", 0.6)
+    _ballot(ws, 2, "c", "BUY", 0.8)  # flip with no cited cause
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["uncited_flips"] == ["c"]
+    assert r["conviction_weighted_agreement"] == round(1.0 / 1.6, 4)
+
+
+def test_cited_flip_keeps_full_conviction(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.99})
+    _ballot(ws, 1, "a", "BUY", 0.6)
+    _ballot(ws, 1, "b", "SELL", 0.6)
+    _ballot(ws, 1, "c", "SELL", 0.8)
+    _ballot(ws, 2, "a", "BUY", 0.6)
+    _ballot(ws, 2, "b", "SELL", 0.6)
+    _ballot_full(ws, 2, "c", "BUY", 0.8,
+                 changed_from_prev="SELL->BUY",
+                 responds_to_dissent="ev_2 resolved the chair's flagged dissent")
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["uncited_flips"] == []
+    assert r["conviction_weighted_agreement"] == round(1.4 / 2.0, 4)
+
+
+def test_converged_at_cap_reports_at_max_rounds_flag(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 2, "convergence_threshold": 0.70})
+    for role in ("a", "b", "c"):
+        _ballot(ws, 2, role, "HOLD", 0.9)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["exit"] is True and r["exit_reason"] == "converged"
+    assert r["at_max_rounds"] is True

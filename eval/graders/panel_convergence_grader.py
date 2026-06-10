@@ -19,9 +19,23 @@ Convergence:
                                     (null at round 1 — nothing to compare to)
     convergence_score             = 0.6*cwa + 0.4*stability   (= cwa at round 1)
 
+Anti-conformity guards (deterministic, mirrors discussion_convergence_grader):
+    - uncited flips: a role whose vote changed vs round N-1 without citing a
+      cause (changed_from_prev + dissent answer or ev_ reference) carries only
+      half its conviction in the cwa.
+    - tie: labels tied on (head-count, conviction mass) can never converge;
+      surfaced as `tie_between`.
+    - conviction collapse: total conviction dropping below
+      `conviction_collapse_ratio` of the prior round suppresses an early
+      "converged" exit.
+    - stall: score below threshold but moving less than `stall_epsilon` vs the
+      prior round exits with reason "stalled" and `unresolved_dissent: true`.
+
 Exit (deterministic):
     exit = round >= max_rounds
-           OR (round >= min_rounds AND convergence_score >= convergence_threshold)
+           OR (round >= min_rounds AND convergence_score >= convergence_threshold
+               AND no tie AND no conviction collapse)
+           OR stalled
 
 Self-degrading: fewer than 2 readable ballots → exit with reason
 "insufficient_ballots" (never stalls the pipeline). Thresholds come from
@@ -41,7 +55,11 @@ DEFAULTS = {
     "min_rounds": 1,
     "max_rounds": 3,
     "convergence_threshold": 0.70,
+    "conviction_collapse_ratio": 0.75,
+    "stall_epsilon": 0.05,
 }
+
+UNCITED_FLIP_WEIGHT = 0.5  # conviction haircut for vote flips without a cited cause
 
 VOTES = ("BUY", "HOLD", "SELL")
 
@@ -88,6 +106,31 @@ def _norm_conviction(c) -> float:
     return min(1.0, max(0.0, c))
 
 
+def _flip_cited(ballot: dict) -> bool:
+    """A vote flip counts as cited when the panelist names what changed their
+    mind: a changed_from_prev note plus either an answer to the chair's flagged
+    dissent or an explicit evidence reference in the rationale."""
+    changed = str(ballot.get("changed_from_prev") or "").strip().lower()
+    if not changed or changed == "none":
+        return False
+    responds = str(ballot.get("responds_to_dissent") or "").strip()
+    rationale = str(ballot.get("rationale") or "")
+    return bool(responds) or "ev_" in rationale
+
+
+def _prev_convergence_score(ws: Path, date: str, rnd: int):
+    """convergence_score from round N-1's grader output, or None."""
+    if rnd <= 1:
+        return None
+    try:
+        prev = json.loads(
+            panel_convergence_path(ws, date, rnd - 1).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    score = prev.get("convergence_score")
+    return score if isinstance(score, (int, float)) else None
+
+
 def grade(workspace: str, date: str, rnd: int) -> dict:
     ws = Path(workspace)
     th = _load_thresholds(ws)
@@ -111,40 +154,71 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
             "agreement_ratio": None,
             "conviction_weighted_agreement": None,
             "vote_stability": None,
+            "tie_between": None,
+            "conviction_retention": None,
+            "conviction_collapse": False,
+            "uncited_flips": [],
+            "unresolved_dissent": False,
+            "at_max_rounds": rnd >= max_rounds,
             "dissenters": [],
             "exit": True,
             "exit_reason": "insufficient_ballots",
         })
         return result
 
-    # Tally votes + conviction.
+    # Previous-round ballots: stability, flip detection, conviction retention.
+    prev = _read_ballots(ws, date, rnd - 1) if rnd > 1 else {}
+    uncited_flips = sorted(
+        r for r in ballots
+        if r in prev
+        and _norm_vote(ballots[r].get("vote")) != _norm_vote(prev[r].get("vote"))
+        and not _flip_cited(ballots[r])
+    )
+
+    # Tally votes + conviction. Uncited flips carry only half their conviction
+    # in the weighted agreement; raw totals still drive the retention check.
     tally = {v: 0 for v in VOTES}
     conv_by_vote = {v: 0.0 for v in VOTES}
     total_conv = 0.0
-    for b in ballots.values():
+    total_conv_raw = 0.0
+    for r, b in ballots.items():
         v = _norm_vote(b.get("vote"))
         c = _norm_conviction(b.get("conviction"))
+        c_eff = c * UNCITED_FLIP_WEIGHT if r in uncited_flips else c
         tally[v] += 1
-        conv_by_vote[v] += c
-        total_conv += c
+        conv_by_vote[v] += c_eff
+        total_conv += c_eff
+        total_conv_raw += c
 
     n = len(ballots)
     # Majority by head-count, tie-broken by conviction mass.
     majority_vote = max(VOTES, key=lambda v: (tally[v], conv_by_vote[v]))
+    top_key = (tally[majority_vote], conv_by_vote[majority_vote])
+    tied = [v for v in VOTES if tally[v] > 0 and (tally[v], conv_by_vote[v]) == top_key]
+    tie_between = tied if len(tied) > 1 else None
     agreement_ratio = tally[majority_vote] / n
     cwa = (conv_by_vote[majority_vote] / total_conv) if total_conv > 0 else agreement_ratio
 
+    # Conviction retention vs previous round (raw, pre-haircut): unanimous
+    # votes reached by everyone deflating their conviction are fake consensus.
+    conviction_retention = None
+    if prev:
+        prev_total = sum(_norm_conviction(b.get("conviction")) for b in prev.values())
+        if prev_total > 0:
+            conviction_retention = total_conv_raw / prev_total
+    collapse_ratio = float(th["conviction_collapse_ratio"])
+    conviction_collapse = (conviction_retention is not None
+                           and conviction_retention < collapse_ratio)
+
     # Vote stability vs previous round.
     vote_stability = None
-    if rnd > 1:
-        prev = _read_ballots(ws, date, rnd - 1)
-        shared = [r for r in ballots if r in prev]
-        if shared:
-            unchanged = sum(
-                1 for r in shared
-                if _norm_vote(ballots[r].get("vote")) == _norm_vote(prev[r].get("vote"))
-            )
-            vote_stability = unchanged / len(shared)
+    shared = [r for r in ballots if r in prev]
+    if shared:
+        unchanged = sum(
+            1 for r in shared
+            if _norm_vote(ballots[r].get("vote")) == _norm_vote(prev[r].get("vote"))
+        )
+        vote_stability = unchanged / len(shared)
 
     if vote_stability is None:
         convergence_score = cwa
@@ -157,12 +231,29 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         if _norm_vote(b.get("vote")) != majority_vote
     ]
 
-    converged = convergence_score >= threshold and rnd >= min_rounds
+    raw_converged = convergence_score >= threshold and rnd >= min_rounds
+    suppressed = None
+    if raw_converged and tie_between:
+        suppressed = "tie_unresolved"
+    elif raw_converged and conviction_collapse:
+        suppressed = "conviction_collapse"
+    converged = raw_converged and suppressed is None
     at_cap = rnd >= max_rounds
+
+    # Stalled: below threshold and barely moving vs the prior round's score.
+    prev_score = _prev_convergence_score(ws, date, rnd)
+    stalled = (not converged and rnd > min_rounds and prev_score is not None
+               and convergence_score < threshold
+               and abs(convergence_score - prev_score) < float(th["stall_epsilon"]))
+
     if converged:
         exit_, reason = True, "converged"
     elif at_cap:
         exit_, reason = True, "max_rounds"
+    elif stalled:
+        exit_, reason = True, "stalled"
+    elif suppressed:
+        exit_, reason = False, suppressed
     else:
         exit_, reason = False, "min_rounds_not_met" if rnd < min_rounds else "not_converged"
 
@@ -173,6 +264,13 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         "conviction_weighted_agreement": round(cwa, 4),
         "vote_stability": None if vote_stability is None else round(vote_stability, 4),
         "convergence_score": round(convergence_score, 4),
+        "tie_between": tie_between,
+        "conviction_retention": (None if conviction_retention is None
+                                 else round(conviction_retention, 4)),
+        "conviction_collapse": conviction_collapse,
+        "uncited_flips": uncited_flips,
+        "unresolved_dissent": stalled,
+        "at_max_rounds": at_cap,
         "dissenters": dissenters,
         "exit": exit_,
         "exit_reason": reason,
