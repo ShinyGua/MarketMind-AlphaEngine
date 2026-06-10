@@ -203,7 +203,7 @@ The `/mm:init` flow:
 |       | RSI, MACD, SMA, ATR, relative strength                       |
 |       v                                                              |
 |  Valuation (scenario DCF + comps)                                    |
-|       | intrinsic-value range, margin of safety, verdict            |
+|       | intrinsic-value range, margin of safety, verdict             |
 |       v                                                              |
 |  Discussion loop                                                     |
 |       |-- Independent analyst memos (parallel)                       |
