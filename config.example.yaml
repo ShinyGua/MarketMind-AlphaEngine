@@ -153,6 +153,9 @@ discussion:
     # - valuation_analyst         # 4. P/E, DCF, price target (uncomment to enable)
     # - technical_analyst         # 5. chart patterns, momentum signals (uncomment to enable)
     # - catalyst_analyst          # 6. event timing, earnings calendar (uncomment to enable)
+  analyst_risk_profiles:          # asymmetric loss mandate per role (risk_averse | risk_neutral)
+    risk_analyst: risk_averse     # penalizes drawdown 2x vs missed upside
+    # all unlisted roles default to risk_neutral; do not add a risk_seeking profile
   panel:
     enabled: true
     min_rounds: 1                 # never exit before this many rounds
@@ -160,6 +163,7 @@ discussion:
     convergence_threshold: 0.70   # conviction-weighted stance agreement needed to exit early
     conviction_collapse_ratio: 0.75   # round-over-round total-conviction retention floor; below it an early "converged" exit is suppressed (fake consensus)
     stall_epsilon: 0.05           # |Δ convergence_score| below this (and below threshold) = stalled → exit with unresolved_dissent
+    devils_advocate_round: true   # round-1 perfect unanimity holds the panel one round; lowest-conviction role steelmans the opposing case
   require_thesis_map: true
 
 # --- Review ---
@@ -198,6 +202,7 @@ decision:
     convergence_threshold: 0.70   # conviction-weighted agreement needed to exit early
     conviction_collapse_ratio: 0.75   # round-over-round total-conviction retention floor; below it an early "converged" exit is suppressed (fake consensus)
     stall_epsilon: 0.05           # |Δ convergence_score| below this (and below threshold) = stalled → exit with unresolved_dissent
+    devils_advocate_round: true   # round-1 perfect unanimity holds the panel one round; lowest-conviction role steelmans the opposing case
     overlay_labels: [none, hedge, trim, stop]   # hedge stance, separate from BUY/HOLD/SELL
 
 # --- Report Style ---

@@ -140,11 +140,19 @@ A multi-round panel, modeled on the decision panel (Stage 9). Each round:
    flip without a cited cause carries half conviction (`uncited_flips`); a
    round-over-round total-conviction collapse suppresses an early "converged"
    exit (`conviction_collapse`); a below-threshold score that stops moving exits
-   with `exit_reason: "stalled"` + `unresolved_dissent: true`.
+   with `exit_reason: "stalled"` + `unresolved_dissent: true`; round-1 perfect
+   unanimity is untested consensus — the grader holds the panel one round
+   (`exit_reason: "unanimity_challenge"`) and names the lowest-conviction role
+   `devils_advocate` to steelman the opposing case (keeping their honest stance).
+
+Analyst roles carry a configurable **risk mandate** (`discussion.analyst_risk_profiles`,
+`risk_averse` | `risk_neutral`, default risk_analyst → risk_averse): an asymmetric
+loss statement injected into memo + panelist skills that shapes what a role weighs,
+never how it expresses conviction.
 
 Config: `discussion.panel` (`enabled`, `min_rounds`, `max_rounds`,
-`convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`).
-`enabled: false` → memos feed synthesis directly.
+`convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`,
+`devils_advocate_round`). `enabled: false` → memos feed synthesis directly.
 
 **Phase 3 — Synthesis**
 
@@ -178,8 +186,9 @@ A multi-round **decision panel** (default; legacy single-shot when
    it **auto-exits at `max_rounds`** (hard cap) → `convergence_round_{N}.json`.
    Same anti-conformity guards as the discussion panel: ties never converge,
    uncited vote flips carry half conviction, conviction collapse suppresses an
-   early exit, and a stalled below-threshold panel exits with
-   `unresolved_dissent: true`.
+   early exit, a stalled below-threshold panel exits with
+   `unresolved_dissent: true`, and round-1 perfect unanimity triggers a
+   devil's-advocate challenge round (`unanimity_challenge`).
 
 After the loop, **mm-decision-maker** (final mode) produces `final_decision.json`:
 - BUY / HOLD / SELL label + `risk_overlay` hedge stance
@@ -189,7 +198,7 @@ After the loop, **mm-decision-maker** (final mode) produces `final_decision.json
 
 Config: `decision.panel` (`enabled`, `min_rounds`, `max_rounds`,
 `convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`,
-`overlay_labels`).
+`devils_advocate_round`, `overlay_labels`).
 
 ### Stage 10: Export
 - Write final markdown report to `final/`

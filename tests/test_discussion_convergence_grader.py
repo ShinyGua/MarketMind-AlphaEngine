@@ -36,16 +36,30 @@ def _view(ws: Path, rnd: int, role: str, stance: str, conviction: float):
     }), encoding="utf-8")
 
 
-def test_unanimous_high_conviction_exits_converged(tmp_path):
+def test_round1_unanimity_is_challenged_not_converged(tmp_path):
+    # Perfect round-1 unanimity is untested consensus: the exit is suppressed
+    # and the lowest-conviction role is named devil's advocate for round 2.
     ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    _view(ws, 1, "company_analyst", "bearish", 0.9)
+    _view(ws, 1, "risk_analyst", "bearish", 0.9)
+    _view(ws, 1, "market_analyst", "bearish", 0.7)
+    r = grader.grade(str(ws), DATE, 1)
+    assert r["majority_stance"] == "bearish"
+    assert r["convergence_score"] == 1.0
+    assert r["exit"] is False and r["exit_reason"] == "unanimity_challenge"
+    assert r["devils_advocate"] == "market_analyst"  # lowest conviction
+    assert r["dissenters"] == []
+
+
+def test_unanimous_exits_converged_when_challenge_disabled(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70,
+                        "devils_advocate_round": False})
     for role in ("company_analyst", "risk_analyst", "market_analyst"):
         _view(ws, 1, role, "bearish", 0.9)
     r = grader.grade(str(ws), DATE, 1)
-    assert r["majority_stance"] == "bearish"
     assert r["conviction_weighted_agreement"] == 1.0
-    assert r["convergence_score"] == 1.0
     assert r["exit"] is True and r["exit_reason"] == "converged"
-    assert r["dissenters"] == []
+    assert r["devils_advocate"] is None
 
 
 def test_split_low_conviction_does_not_exit_before_cap(tmp_path):
@@ -220,3 +234,25 @@ def test_converged_at_cap_reports_at_max_rounds_flag(tmp_path):
     r = grader.grade(str(ws), DATE, 2)
     assert r["exit"] is True and r["exit_reason"] == "converged"
     assert r["at_max_rounds"] is True
+
+
+def test_max_rounds_one_cap_beats_unanimity_challenge(tmp_path):
+    # No later round exists to host the devil's advocate — converge at the cap.
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 1, "convergence_threshold": 0.70})
+    for role in ("a", "b", "c"):
+        _view(ws, 1, role, "bullish", 0.9)
+    r = grader.grade(str(ws), DATE, 1)
+    assert r["exit"] is True and r["exit_reason"] == "converged"
+    assert r["devils_advocate"] is None
+    assert r["at_max_rounds"] is True
+
+
+def test_round1_majority_without_unanimity_converges_normally(tmp_path):
+    # 2-1 above threshold is a debated outcome, not untested unanimity.
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.60})
+    _view(ws, 1, "a", "bullish", 0.9)
+    _view(ws, 1, "b", "bullish", 0.9)
+    _view(ws, 1, "c", "bearish", 0.4)
+    r = grader.grade(str(ws), DATE, 1)
+    assert r["exit"] is True and r["exit_reason"] == "converged"
+    assert r["devils_advocate"] is None

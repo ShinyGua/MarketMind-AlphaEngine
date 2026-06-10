@@ -37,6 +37,20 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 **Memory context (optional):** If `{workspace}/memory/{date}_analyst.json` exists, read it for historical context — previous analyses, persistent beliefs about this company/sector, and process learnings. Use this to inform your analysis but do not let it override current evidence.
 
+## Risk Mandate
+
+Read `resolved_config.json` → `discussion.analyst_risk_profiles` → your role
+(absent → `risk_neutral`):
+
+- `risk_averse`: your mandate penalizes recommending exposure that draws down
+  twice as heavily as it rewards captured upside — weigh failure conditions,
+  downside scenarios, and capital preservation accordingly.
+- `risk_neutral`: weigh upside and downside symmetrically.
+
+The mandate shapes *what you weigh*, not *how you speak*: it must not change
+your conviction wording, inflate or deflate your conviction rating, or add
+rhetorical confidence. The conviction rubric is unchanged.
+
 ## Independent Memo
 
 Write an independent company analysis memo. Do NOT read other analyst memos.

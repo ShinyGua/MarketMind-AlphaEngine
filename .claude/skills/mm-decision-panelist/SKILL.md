@@ -61,9 +61,26 @@ Round: $ARGUMENTS[3] (1-based integer)
 - **Round > 1 only:** `{workspace}/decision/{date}/panel/panel_summary_round_{N-1}.json`
   — the chair's previous tally: the vote split, the dissenters, and `chair_notes`
   on what this round must resolve. Read it and engage with it.
+- **Round > 1 only:** `{workspace}/decision/{date}/panel/convergence_round_{N-1}.json`
+  — the deterministic grader's verdict on the previous round (loop machinery, not
+  another role's opinion). Check whether `devils_advocate` names your role.
 
 **Memory context (optional):** if `{workspace}/memory/{date}_analyst.json`
 exists, use it for historical context, but do not let it override current evidence.
+
+## Risk Mandate
+
+Read `resolved_config.json` → `discussion.analyst_risk_profiles` → your role
+(absent → `risk_neutral`):
+
+- `risk_averse`: your mandate penalizes recommending exposure that draws down
+  twice as heavily as it rewards captured upside — weigh failure conditions,
+  downside scenarios, and capital preservation accordingly.
+- `risk_neutral`: weigh upside and downside symmetrically.
+
+The mandate shapes *what you weigh*, not *how you speak*: it must not change
+your conviction wording, inflate or deflate your conviction rating, or add
+rhetorical confidence. The conviction rubric is unchanged.
 
 ## Process
 
@@ -96,8 +113,9 @@ exists, use it for historical context, but do not let it override current eviden
    `hedge` (hold the view but pair it with downside protection), `trim` (reduce
    exposure / take partial profit), or `stop` (size down hard / honor a stop). A
    BUY with `hedge` and a SELL with `none` are both valid.
-5. **Round > 1:** read `panel_summary_round_{N-1}.json` **only** — do NOT read
-   other roles' `*_ballot.json` files from prior rounds; your vote must stay
+5. **Round > 1:** read `panel_summary_round_{N-1}.json` and the deterministic
+   grader output `convergence_round_{N-1}.json` **only** — do NOT read other
+   roles' `*_ballot.json` files from prior rounds; your vote must stay
    independent of head-counts. Directly answer the dissent the chair flagged. If
    the opposing evidence is stronger than you first weighed it, change your vote
    and say so in `changed_from_prev`; if not, defend your vote with specific
@@ -105,6 +123,13 @@ exists, use it for historical context, but do not let it override current eviden
    `changed_from_prev` must be set and `responds_to_dissent` (or an ev_… id in
    `rationale`) must name what changed your mind — the convergence grader counts
    uncited flips against the panel, at half conviction weight.**
+6. **If `convergence_round_{N-1}.json` names you `devils_advocate`:** the panel
+   was unanimous without being tested. Keep your honest vote and conviction —
+   do NOT flip to manufacture dissent — but this round your `rationale` and
+   `top_risk` must steelman the **strongest evidence-backed case against the
+   consensus** (cite ev_… ids) and state explicitly what evidence would flip
+   you. If building the steelman genuinely changes your view, change it under
+   the normal cited-flip rules.
 
 ## Output
 

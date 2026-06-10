@@ -128,9 +128,15 @@ Skill files use Claude conventions; map them as follows:
   (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap and
   anti-conformity guards: exact ties never converge, uncited stance flips carry
   half conviction, a round-over-round conviction collapse
-  (`conviction_collapse_ratio`) suppresses an early "converged" exit, and a
+  (`conviction_collapse_ratio`) suppresses an early "converged" exit, a
   below-threshold score that stops moving (`stall_epsilon`) exits with
-  `exit_reason: "stalled"` + `unresolved_dissent: true`. After the
+  `exit_reason: "stalled"` + `unresolved_dissent: true`, and round-1 perfect
+  unanimity holds the panel one round (`devils_advocate_round`,
+  `exit_reason: "unanimity_challenge"`) while the lowest-conviction role
+  steelmans the opposing case. Roles carry a configurable risk mandate
+  (`discussion.analyst_risk_profiles`: risk_averse | risk_neutral) injected
+  into memo + panelist skills — it shapes what a role weighs, never how it
+  expresses conviction. After the
   loop, `mm-discussion-moderator synthesis` writes `thesis_map.json` /
   `debate_summary.md`. With the panel disabled the memos feed synthesis directly
   (no cross-critique). The headless driver encodes this loop in `st_discuss_debate`.
@@ -140,7 +146,8 @@ Skill files use Claude conventions; map them as follows:
   tallies them, and `eval/graders/panel_convergence_grader.py <ws> <date> <round>`
   (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap and the
   same anti-conformity guards as the discussion grader (ties, uncited flips,
-  conviction collapse, stalled exit). After the
+  conviction collapse, stalled exit, round-1 unanimity → devil's-advocate
+  challenge round). After the
   loop, `mm-decision-maker` (final) writes `final_decision.json`. With the panel
   disabled it is a single `mm-decision-maker` call (legacy). The headless driver
   `scripts/run_codex_pipeline.py` already encodes this loop in `st_decide`.
