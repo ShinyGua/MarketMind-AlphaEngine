@@ -30,11 +30,18 @@ Anti-conformity guards (deterministic, mirrors discussion_convergence_grader):
       "converged" exit.
     - stall: score below threshold but moving less than `stall_epsilon` vs the
       prior round exits with reason "stalled" and `unresolved_dissent: true`.
+    - unanimity challenge (devil's advocate): round-1 PERFECT unanimity is
+      consensus that was never tested. When `devils_advocate_round` is on and
+      the panel is not at the cap, the converged exit is suppressed
+      (reason "unanimity_challenge") and the lowest-conviction role is named
+      `devils_advocate` — next round they steelman the case against the
+      consensus (keeping their honest vote).
 
 Exit (deterministic):
     exit = round >= max_rounds
            OR (round >= min_rounds AND convergence_score >= convergence_threshold
-               AND no tie AND no conviction collapse)
+               AND no tie AND no conviction collapse
+               AND NOT (round-1 unanimity with devils_advocate_round on))
            OR stalled
 
 Self-degrading: fewer than 2 readable ballots → exit with reason
@@ -57,6 +64,8 @@ DEFAULTS = {
     "convergence_threshold": 0.70,
     "conviction_collapse_ratio": 0.75,
     "stall_epsilon": 0.05,
+    # bool passes _load_thresholds' (int, float) check (bool is a subclass of int)
+    "devils_advocate_round": True,
 }
 
 UNCITED_FLIP_WEIGHT = 0.5  # conviction haircut for vote flips without a cited cause
@@ -159,6 +168,7 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
             "conviction_collapse": False,
             "uncited_flips": [],
             "unresolved_dissent": False,
+            "devils_advocate": None,
             "at_max_rounds": rnd >= max_rounds,
             "dissenters": [],
             "exit": True,
@@ -231,14 +241,26 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         if _norm_vote(b.get("vote")) != majority_vote
     ]
 
+    at_cap = rnd >= max_rounds
+
+    # Round-1 perfect unanimity is consensus that was never tested: name a
+    # devil's advocate (lowest conviction — least invested, best positioned to
+    # steelman the opposing case) and hold the panel for one challenge round.
+    devils_advocate = None
+    if (rnd == 1 and not at_cap and bool(th["devils_advocate_round"])
+            and agreement_ratio == 1.0):
+        devils_advocate = min(
+            ballots, key=lambda r: (_norm_conviction(ballots[r].get("conviction")), r))
+
     raw_converged = convergence_score >= threshold and rnd >= min_rounds
     suppressed = None
     if raw_converged and tie_between:
         suppressed = "tie_unresolved"
     elif raw_converged and conviction_collapse:
         suppressed = "conviction_collapse"
+    elif raw_converged and devils_advocate is not None:
+        suppressed = "unanimity_challenge"
     converged = raw_converged and suppressed is None
-    at_cap = rnd >= max_rounds
 
     # Stalled: below threshold and barely moving vs the prior round's score.
     prev_score = _prev_convergence_score(ws, date, rnd)
@@ -270,6 +292,7 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         "conviction_collapse": conviction_collapse,
         "uncited_flips": uncited_flips,
         "unresolved_dissent": stalled,
+        "devils_advocate": devils_advocate,
         "at_max_rounds": at_cap,
         "dissenters": dissenters,
         "exit": exit_,
