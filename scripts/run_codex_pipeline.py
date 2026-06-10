@@ -419,6 +419,22 @@ STAGE_FUNCS = {
 assert list(STAGE_FUNCS.keys()) == STAGES, "stage plan must match contracts.STAGES"
 
 
+def _completed_stages(ctx: Ctx) -> set[str]:
+    """Stages already completed for THIS run_date, per status.json.
+
+    Mirrors the orchestrator skill's resume behavior: a same-date re-run skips
+    completed stages; a different run_date is a fresh run and skips nothing.
+    """
+    try:
+        st = json.loads((ctx.ws / "status.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return set()
+    if st.get("run_date") != ctx.date:
+        return set()
+    done = st.get("stages_completed")
+    return {s for s in done if s in STAGES} if isinstance(done, list) else set()
+
+
 def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
     start = STAGES.index(from_stage) if from_stage else 0
     end = STAGES.index(to_stage) + 1 if to_stage else len(STAGES)
@@ -427,9 +443,16 @@ def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
     # resolve_config stage re-merges fresh when it runs).
     load_existing_config(ctx)
     ctx.date = resolve_run_date(ctx)
+    # An explicit --from is a forced re-run from that stage; otherwise resume by
+    # skipping stages status.json already records as completed for this date.
+    # Dry runs never skip — --dry-run previews the full plan, not resume state.
+    skip = _completed_stages(ctx) if (from_stage is None and not ctx.dry) else set()
     log(f"ticker={ctx.ticker} run_date={ctx.date} lang={ctx.lang} "
         f"stages={STAGES[start]}..{STAGES[end-1]} dry_run={ctx.dry}")
     for stage in STAGES[start:end]:
+        if stage in skip:
+            log(f"skipping {stage} (already completed for {ctx.date})")
+            continue
         header = f"=== STAGE: {stage} ==="
         print(f"\n{header}")
         det(ctx, "eval/stage_timer.py", "start", ctx.ws, stage, critical=False)
