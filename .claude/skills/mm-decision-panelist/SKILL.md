@@ -81,19 +81,30 @@ exists, use it for historical context, but do not let it override current eviden
    genuinely balanced from your lens, not a default for "uncertain."
 3. **Self-rate conviction (0.0–1.0)** — how clean and well-supported *your*
    directional case is, NOT a probability of being correct and NOT a price
-   forecast. Calibrate to evidence quality and agreement:
+   forecast. **Before rating, state in one sentence the single strongest reason
+   you would be wrong** (put it in `top_risk`) — then rate against it. Calibrate
+   to evidence quality and agreement:
+   - 0.9+ you would be genuinely shocked to be wrong
    - 0.8+ strong, multiple confirming signals from your lens
    - 0.6–0.8 moderate, some uncertainty
    - 0.4–0.6 low, balanced
    - below 0.4 very low — your vote is probably HOLD
+   Do not default to the 0.6–0.75 comfort band — use the full scale; the
+   convergence grader weights your vote by this number, so a lazy 0.7 distorts
+   the panel.
 4. **Choose a risk overlay** (independent of the vote): `none` (no hedge needed),
    `hedge` (hold the view but pair it with downside protection), `trim` (reduce
    exposure / take partial profit), or `stop` (size down hard / honor a stop). A
    BUY with `hedge` and a SELL with `none` are both valid.
-5. **Round > 1:** read `panel_summary_round_{N-1}.json`. Directly answer the
-   dissent the chair flagged. If the opposing evidence is stronger than you first
-   weighed it, change your vote and say so in `changed_from_prev`; if not, defend
-   your vote with specific evidence. Do not change a vote just to converge.
+5. **Round > 1:** read `panel_summary_round_{N-1}.json` **only** — do NOT read
+   other roles' `*_ballot.json` files from prior rounds; your vote must stay
+   independent of head-counts. Directly answer the dissent the chair flagged. If
+   the opposing evidence is stronger than you first weighed it, change your vote
+   and say so in `changed_from_prev`; if not, defend your vote with specific
+   evidence. Do not change a vote just to converge. **If you flip,
+   `changed_from_prev` must be set and `responds_to_dissent` (or an ev_… id in
+   `rationale`) must name what changed your mind — the convergence grader counts
+   uncited flips against the panel, at half conviction weight.**
 
 ## Output
 
