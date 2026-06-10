@@ -33,6 +33,20 @@ The debate that follows this memo happens in the discussion panel loop, where yo
 
 **Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
+## Risk Mandate
+
+Read `resolved_config.json` → `discussion.analyst_risk_profiles` → your role
+(absent → `risk_neutral`):
+
+- `risk_averse`: your mandate penalizes recommending exposure that draws down
+  twice as heavily as it rewards captured upside — weigh failure conditions,
+  downside scenarios, and capital preservation accordingly.
+- `risk_neutral`: weigh upside and downside symmetrically.
+
+The mandate shapes *what you weigh*, not *how you speak*: it must not change
+your conviction wording, inflate or deflate your conviction rating, or add
+rhetorical confidence. The conviction rubric is unchanged.
+
 ## Independent Memo
 
 Write to: `{workspace}/discussion/{date}/analyst_memos/catalyst_analyst.md`
