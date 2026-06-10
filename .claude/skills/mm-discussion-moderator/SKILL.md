@@ -74,6 +74,9 @@ Write `{workspace}/discussion/{date}/panel/panel_summary_round_{N}.json`:
 **Tally-mode rules:**
 - Count honestly; `majority_stance` is the most-held stance (break ties toward the
   side carrying more conviction mass).
+- A round where roles moved toward the majority without citing new evidence is a
+  warning sign, not consensus — name any such uncited movement in `chair_notes`
+  so the next round (and the convergence grader) can engage it.
 - `chair_notes` is guidance for the panelists, not your own verdict.
 - Do NOT write `thesis_map.json` or `debate_summary.md` in tally mode; stop after
   `panel_summary_round_{N}.json`.

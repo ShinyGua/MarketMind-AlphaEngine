@@ -68,6 +68,9 @@ Write to: `{workspace}/decision/{date}/panel/panel_summary_round_{N}.json`
 Rules for `tally` mode:
 - Count honestly; `majority_vote` is the most-voted label (break ties toward the
   side carrying more conviction mass). Do not editorialize the vote here.
+- A round where roles moved toward the majority without citing new evidence is a
+  warning sign, not consensus — name any such uncited movement in `chair_notes`
+  so the next round (and the convergence grader) can engage it.
 - `dissenters` = every role whose vote differs from `majority_vote`. Never drop a
   dissenter — the minority view must survive into the next round.
 - `chair_notes` is guidance for the panelists, not your own verdict. Stop here;

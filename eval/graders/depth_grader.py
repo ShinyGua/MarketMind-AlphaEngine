@@ -98,7 +98,10 @@ def _check_report(ws: Path, date: str, th: dict) -> dict:
     stub = []
     exec_bullets = None
     for block in parts[1:]:
-        head = block.splitlines()[0].strip()
+        lines = block.splitlines()
+        # A bare "## " with no heading text (e.g. trailing the report) must not
+        # crash the grader — it is itself a stub section.
+        head = lines[0].strip() if lines and lines[0].strip() else "(empty)"
         body_len = len(block.strip())
         if body_len < th["min_section_chars"]:
             stub.append({"section": head, "chars": body_len, "min": th["min_section_chars"]})

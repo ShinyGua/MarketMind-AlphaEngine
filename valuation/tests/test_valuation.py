@@ -374,3 +374,49 @@ def test_fragile_dcf_is_downgraded_against_earnings_comps():
     dcf_candidate = [c for c in candidates if c["method"] == "dcf"][0]
     assert dcf_candidate["confidence"] == "medium"
     assert dcf_candidate["weight"] == pytest.approx(0.35)
+
+
+# ── scenario growth ordering (bear <= base <= bull) ──────────────────────────
+
+def test_scenario_growths_bear_never_exceeds_base():
+    # Sub-terminal base growth (e.g. after the weak-margin haircut): bear must
+    # clamp to base, not float up to terminal growth above it.
+    g = runner_mod._scenario_growths(0.01, 0.03, 0.025)
+    assert g["bear"] <= g["base"] <= g["bull"]
+    assert g["bear"] == pytest.approx(0.01)
+
+
+def test_scenario_growths_normal_case_floors_bear_at_terminal():
+    g = runner_mod._scenario_growths(0.20, 0.03, 0.025)
+    assert g == {"bear": pytest.approx(0.17), "base": pytest.approx(0.20),
+                 "bull": pytest.approx(0.23)}
+    # delta larger than base-terminal gap: bear floors at terminal, still <= base
+    g2 = runner_mod._scenario_growths(0.04, 0.10, 0.025)
+    assert g2["bear"] == pytest.approx(0.025)
+    assert g2["bear"] <= g2["base"] <= g2["bull"]
+
+
+# ── zero / negative CAGR growth selection ─────────────────────────────────────
+
+def test_select_growth_zero_cagr_is_a_valid_source():
+    # Flat revenue: CAGR = 0.0 is a measurement, not a missing value.
+    g = dcf_mod.select_growth(_inc(100, 100, 100), {}, {})
+    assert g["source"] == "revenue_cagr_3y"
+    assert g["initial_growth"] == pytest.approx(0.0)
+
+
+def test_select_growth_negative_cagr_floors_at_zero_not_fallback():
+    # Declining revenue, no positive trailing growth: never the +5% default.
+    g = dcf_mod.select_growth(_inc(81, 90, 100), {"revenue_growth": -0.08},
+                              {"base_growth_fallback": 0.05})
+    assert g["source"] == "revenue_cagr_3y_declining"
+    assert g["initial_growth"] == pytest.approx(0.0)
+    assert g["confidence"] == "low"
+    assert "floored at 0.0" in g["reason"]
+
+
+def test_select_growth_negative_cagr_with_positive_trailing_uses_trailing():
+    # Positive trailing growth still outranks the declining-CAGR floor.
+    g = dcf_mod.select_growth(_inc(81, 90, 100), {"revenue_growth": 0.06}, {})
+    assert g["source"] == "revenue_growth_ttm"
+    assert g["initial_growth"] == pytest.approx(0.06)

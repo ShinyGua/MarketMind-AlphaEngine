@@ -125,7 +125,12 @@ Skill files use Claude conventions; map them as follows:
   `discussion.analyst_roles` role files a structured view via
   `mm-discussion-panelist {role} <round>`, `mm-discussion-moderator tally <round>`
   tallies them, and `eval/graders/discussion_convergence_grader.py <ws> <date> <round>`
-  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap. After the
+  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap and
+  anti-conformity guards: exact ties never converge, uncited stance flips carry
+  half conviction, a round-over-round conviction collapse
+  (`conviction_collapse_ratio`) suppresses an early "converged" exit, and a
+  below-threshold score that stops moving (`stall_epsilon`) exits with
+  `exit_reason: "stalled"` + `unresolved_dissent: true`. After the
   loop, `mm-discussion-moderator synthesis` writes `thesis_map.json` /
   `debate_summary.md`. With the panel disabled the memos feed synthesis directly
   (no cross-critique). The headless driver encodes this loop in `st_discuss_debate`.
@@ -133,14 +138,19 @@ Skill files use Claude conventions; map them as follows:
   true, the decide stage runs a multi-round panel: each `discussion.analyst_roles`
   role casts a ballot via `mm-decision-panelist`, `mm-decision-maker tally <round>`
   tallies them, and `eval/graders/panel_convergence_grader.py <ws> <date> <round>`
-  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap. After the
+  (deterministic) decides iterate-vs-exit with a hard `max_rounds` cap and the
+  same anti-conformity guards as the discussion grader (ties, uncited flips,
+  conviction collapse, stalled exit). After the
   loop, `mm-decision-maker` (final) writes `final_decision.json`. With the panel
   disabled it is a single `mm-decision-maker` call (legacy). The headless driver
   `scripts/run_codex_pipeline.py` already encodes this loop in `st_decide`.
+  The driver also resumes: a same-`run_date` re-run skips stages already in
+  `status.json.stages_completed` (an explicit `--from` forces a re-run).
 - **The decision is risk-gated after the fact.** In the reflect stage,
   `eval/graders/decision_risk_grader.py` computes a deterministic confidence
   *ceiling* from reproducible signals (weak panel convergence, retained dissent,
-  low-confidence valuation cited as a reason, thin evidence) and flags when the
+  low-confidence valuation cited as a reason, thin evidence, a stalled panel
+  with unresolved dissent, round-1 near-unanimity) and flags when the
   chair's stated `confidence` exceeds it. It is **advisory and non-mutating** —
   it never rewrites `final_decision.json`; an over-ceiling result makes the
   release gate a *warning*, never *failed*. Both drivers run it (`st_reflect` /

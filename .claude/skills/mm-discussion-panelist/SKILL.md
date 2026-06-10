@@ -83,18 +83,32 @@ exists, use it for historical context, but do not let it override current eviden
    corroboration.
 3. **Self-rate conviction (0.0–1.0)** — how clean and well-supported *your*
    directional case is, NOT a probability of being correct and NOT a price
-   forecast. Calibrate to evidence quality and agreement:
+   forecast. **Before rating, state in one sentence the single strongest reason
+   you would be wrong** (put it in `evidence_gaps`) — then rate against it.
+   Calibrate to evidence quality and agreement:
+   - 0.9+ you would be genuinely shocked to be wrong
    - 0.8+ strong, multiple confirming signals from your lens
    - 0.6–0.8 moderate, some uncertainty
    - 0.4–0.6 low, balanced
    - below 0.4 very low — your stance is probably `neutral`
+   Do not default to the 0.6–0.75 comfort band — use the full scale; the
+   convergence grader weights your stance by this number, so a lazy 0.7 distorts
+   the panel.
 4. **Challenge the other roles.** Name the specific claim from another analyst's
    memo (or last round's view) you most disagree with, and say why with evidence.
+   Every challenge must cite at least one evidence id (ev_…) or a concrete quant
+   data point — "I disagree" without a citation is rhetoric, not a challenge.
    This is what makes the debate productive — do not just restate your own case.
-5. **Round > 1:** read `panel_summary_round_{N-1}.json`. Directly answer the
-   dissent the chair flagged. If the opposing evidence is stronger than you first
-   weighed it, change your stance and say so in `changed_beliefs`; if not, defend
-   your stance with specific evidence. Do not change a stance just to converge.
+5. **Round > 1:** read `panel_summary_round_{N-1}.json` **only** — do NOT read
+   other roles' `*_view.json` files from prior rounds; your stance must stay
+   independent of head-counts. Directly answer the dissent the chair flagged. If
+   the opposing evidence is stronger than you first weighed it, change your
+   stance and say so in `changed_beliefs`; if not, defend your stance with
+   specific evidence. Do not change a stance just to converge. **If you flip,
+   `changed_beliefs` must name the specific evidence id (ev_…) or the other
+   role's named claim that changed your mind, and `answers_to_prior_chair_notes`
+   must engage it — the convergence grader counts uncited flips against the
+   panel, at half conviction weight.**
 
 ## Output
 

@@ -178,7 +178,8 @@ def select_growth(income_statement: list[dict], metrics: dict, cfg: dict,
     """Deterministic, fundamentals-driven initial-growth selection for the DCF.
 
     Hierarchy: forward analyst revenue growth (if ever collected) → 3yr revenue
-    CAGR → trailing revenue growth → fallback. Confidence is then downgraded by a
+    CAGR (>= 0; a measured decline floors growth at 0.0 instead of taking the
+    optimistic fallback) → trailing revenue growth → fallback. Confidence is then downgraded by a
     sign/zero-safe CAGR-vs-trailing divergence guard, a profitability penalty, and
     a financials/brokers sector|industry caveat; growth is finally clamped by a
     size-tiered maturity cap. Pure — returns initial_growth + source + confidence
@@ -200,14 +201,20 @@ def select_growth(income_statement: list[dict], metrics: dict, cfg: dict,
 
     if forward is not None:
         growth, source, confidence = forward, "forward_revenue_growth", "high"
-    elif cagr is not None and cagr > 0:
+    elif cagr is not None and cagr >= 0:
         growth, source, confidence = cagr, "revenue_cagr_3y", "high"
     elif trailing is not None:
         growth, source, confidence = trailing, "revenue_growth_ttm", "medium"
+    elif cagr is not None:
+        # Measured revenue decline with no positive trailing growth: floor at 0
+        # rather than handing a shrinking business the optimistic default.
+        growth, source, confidence = 0.0, "revenue_cagr_3y_declining", "low"
     else:
         growth, source, confidence = fallback, "default_fallback", "low"
 
     reasons = [f"source={source}"]
+    if source == "revenue_cagr_3y_declining":
+        reasons.append(f"measured CAGR {cagr:.3f} < 0 → growth floored at 0.0")
 
     # divergence guard (sign/zero-safe): only when both CAGR and a trailing figure
     # exist. Ratio rule needs both strictly positive; otherwise an absolute-diff

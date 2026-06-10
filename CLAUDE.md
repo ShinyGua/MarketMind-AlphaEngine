@@ -136,9 +136,15 @@ A multi-round panel, modeled on the decision panel (Stage 9). Each round:
 3. **Convergence (deterministic)** — `eval/graders/discussion_convergence_grader.py`
    computes a conviction-weighted convergence score and decides iterate-vs-exit; it
    **auto-exits at `max_rounds`** (hard cap) → `convergence_round_{N}.json`.
+   Anti-conformity guards: exact ties never converge (`tie_between`); a stance
+   flip without a cited cause carries half conviction (`uncited_flips`); a
+   round-over-round total-conviction collapse suppresses an early "converged"
+   exit (`conviction_collapse`); a below-threshold score that stops moving exits
+   with `exit_reason: "stalled"` + `unresolved_dissent: true`.
 
 Config: `discussion.panel` (`enabled`, `min_rounds`, `max_rounds`,
-`convergence_threshold`). `enabled: false` → memos feed synthesis directly.
+`convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`).
+`enabled: false` → memos feed synthesis directly.
 
 **Phase 3 — Synthesis**
 
@@ -170,6 +176,10 @@ A multi-round **decision panel** (default; legacy single-shot when
 3. **Convergence (deterministic)** — `eval/graders/panel_convergence_grader.py`
    computes a conviction-weighted convergence score and decides iterate-vs-exit;
    it **auto-exits at `max_rounds`** (hard cap) → `convergence_round_{N}.json`.
+   Same anti-conformity guards as the discussion panel: ties never converge,
+   uncited vote flips carry half conviction, conviction collapse suppresses an
+   early exit, and a stalled below-threshold panel exits with
+   `unresolved_dissent: true`.
 
 After the loop, **mm-decision-maker** (final mode) produces `final_decision.json`:
 - BUY / HOLD / SELL label + `risk_overlay` hedge stance
@@ -178,7 +188,8 @@ After the loop, **mm-decision-maker** (final mode) produces `final_decision.json
   final tally, convergence score, retained dissent)
 
 Config: `decision.panel` (`enabled`, `min_rounds`, `max_rounds`,
-`convergence_threshold`, `overlay_labels`).
+`convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`,
+`overlay_labels`).
 
 ### Stage 10: Export
 - Write final markdown report to `final/`
@@ -355,7 +366,7 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 
 | Tier | Model | Used For |
 |------|-------|----------|
-| mm-heavy | claude-opus-4-6 | Orchestration, discussion moderation, review, decision |
+| mm-heavy | claude-fable-5 | Orchestration, discussion moderation, review, decision |
 | mm-standard | claude-opus-4-6 | Company resolution, report writing, analyst memos |
 | mm-light | claude-sonnet-4-6 | Data collection desks, quant + valuation computation |
 
@@ -425,10 +436,10 @@ Automated evaluation pipeline under `eval/`:
 | `factuality_grader.py` | Report numbers match quant_summary.json + valuation_summary.json |
 | `evidence_grader.py` | High-materiality cards (>=0.7) cited in report |
 | `consistency_grader.py` | Decision aligns with thesis_map consensus (and panel vote majority when the panel ran) |
-| `discussion_convergence_grader.py` | Discussion-panel views converged (conviction-weighted stance agreement); drives the discuss-stage loop exit |
-| `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit |
+| `discussion_convergence_grader.py` | Discussion-panel views converged (conviction-weighted stance agreement); drives the discuss-stage loop exit; guards against fake consensus (ties, uncited flips, conviction collapse, stalled dissent) |
+| `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit; same anti-conformity guards as the discussion grader |
 | `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety); also warns if the stated `confidence` exceeds what the included method candidates support |
-| `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence); non-mutating, warning-only |
+| `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence, stalled panel with unresolved dissent, round-1 near-unanimity); non-mutating, warning-only |
 | `cost_tracker.py` | Token/cost estimation per run |
 
 ### Run Log

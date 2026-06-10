@@ -218,8 +218,8 @@ The `/mm:init` flow:
 |       | pass ------------------------------+                         |
 |       | fail -> targeted revision -> draft |                         |
 |       v                                (max loops from config)       |
-|  Investment decision                                                 |
-|       | BUY / HOLD / SELL + confidence + risks                       |
+|  Decision panel (multi-round ballots -> chair tally -> converge)     |
+|       | BUY / HOLD / SELL + risk overlay + confidence + risks        |
 |       v                                                              |
 |  Export markdown + JSON + charts + PDF (WeasyPrint)                  |
 |       |                                                              |
@@ -272,7 +272,7 @@ Enable additional analysts by uncommenting roles in `config.yaml`.
 MarketMind-AlphaEngine/
 ├── .claude/
 │   ├── agents/                    # Model tier definitions (heavy/standard/light)
-│   └── skills/                    # 21 agent skills
+│   └── skills/                    # 24 agent skills
 │       ├── mm-orchestrator/       # Pipeline driver (iron law: never stop)
 │       ├── mm-company-resolver/   # Ticker -> profile + peers
 │       ├── mm-market-desk/        # Macro data collection

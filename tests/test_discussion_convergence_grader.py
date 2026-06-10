@@ -116,3 +116,107 @@ def test_score_monotonic_in_agreement(tmp_path):
     s_majority = score(["bullish", "bullish", "bearish"])
     s_unanimous = score(["bullish", "bullish", "bullish"])
     assert s_split < s_majority < s_unanimous
+
+
+def _view_full(ws: Path, rnd: int, role: str, stance: str, conviction: float, **extra):
+    d = ws / "discussion" / DATE / "panel" / f"round_{rnd}"
+    d.mkdir(parents=True, exist_ok=True)
+    payload = {"role": role, "round": rnd, "stance": stance,
+               "conviction": conviction, "core_claims": ["x"], **extra}
+    (d / f"{role}_view.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _prev_convergence(ws: Path, rnd: int, score: float):
+    d = ws / "discussion" / DATE / "panel"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"convergence_round_{rnd}.json").write_text(
+        json.dumps({"convergence_score": score}), encoding="utf-8")
+
+
+def test_exact_tie_is_flagged_and_blocks_convergence(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.45})
+    _view(ws, 1, "a", "bullish", 0.8)
+    _view(ws, 1, "b", "bullish", 0.8)
+    _view(ws, 1, "c", "bearish", 0.8)
+    _view(ws, 1, "d", "bearish", 0.8)
+    r = grader.grade(str(ws), DATE, 1)
+    # cwa 0.5 >= 0.45 would otherwise converge, but a tie can never converge
+    assert r["tie_between"] == ["bullish", "bearish"]
+    assert r["exit"] is False and r["exit_reason"] == "tie_unresolved"
+
+
+def test_exact_tie_at_cap_exits_max_rounds(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.45})
+    _view(ws, 3, "a", "bullish", 0.8)
+    _view(ws, 3, "b", "bearish", 0.8)
+    r = grader.grade(str(ws), DATE, 3)
+    assert r["tie_between"] == ["bullish", "bearish"]
+    assert r["exit"] is True and r["exit_reason"] == "max_rounds"
+    assert r["at_max_rounds"] is True
+
+
+def test_conviction_collapse_suppresses_early_converged_exit(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    _view(ws, 1, "a", "bullish", 0.9)
+    _view(ws, 1, "b", "bullish", 0.85)
+    _view(ws, 1, "c", "bearish", 0.8)
+    # Round 2: unanimous stance but total conviction collapses 2.55 -> 1.0
+    _view(ws, 2, "a", "bullish", 0.35)
+    _view(ws, 2, "b", "bullish", 0.40)
+    _view(ws, 2, "c", "bullish", 0.25)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["conviction_collapse"] is True
+    assert r["conviction_retention"] < 0.75
+    assert r["exit"] is False and r["exit_reason"] == "conviction_collapse"
+
+
+def test_stalled_below_threshold_exits_with_unresolved_dissent(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    for rnd in (1, 2):
+        _view(ws, rnd, "a", "bullish", 0.7)
+        _view(ws, rnd, "b", "bearish", 0.6)
+        _view(ws, rnd, "c", "neutral", 0.5)
+    _prev_convergence(ws, 1, 0.62)  # round-2 score ~0.6333 -> |delta| < 0.05
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["convergence_score"] < 0.70
+    assert r["exit"] is True and r["exit_reason"] == "stalled"
+    assert r["unresolved_dissent"] is True
+
+
+def test_uncited_flip_carries_half_conviction(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.99})
+    _view(ws, 1, "a", "bullish", 0.6)
+    _view(ws, 1, "b", "bearish", 0.6)
+    _view(ws, 1, "c", "bearish", 0.8)
+    _view(ws, 2, "a", "bullish", 0.6)
+    _view(ws, 2, "b", "bearish", 0.6)
+    _view(ws, 2, "c", "bullish", 0.8)  # flip with no cited cause
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["uncited_flips"] == ["c"]
+    # bullish mass 0.6 + 0.8*0.5 = 1.0 of total 1.6, not 1.4 of 2.0
+    assert r["conviction_weighted_agreement"] == round(1.0 / 1.6, 4)
+
+
+def test_cited_flip_keeps_full_conviction(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.99})
+    _view(ws, 1, "a", "bullish", 0.6)
+    _view(ws, 1, "b", "bearish", 0.6)
+    _view(ws, 1, "c", "bearish", 0.8)
+    _view(ws, 2, "a", "bullish", 0.6)
+    _view(ws, 2, "b", "bearish", 0.6)
+    _view_full(ws, 2, "c", "bullish", 0.8,
+               changed_beliefs="bearish->bullish",
+               answers_to_prior_chair_notes="ev_1 resolved the chair's flagged dissent",
+               evidence_ids=["ev_1"])
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["uncited_flips"] == []
+    assert r["conviction_weighted_agreement"] == round(1.4 / 2.0, 4)
+
+
+def test_converged_at_cap_reports_at_max_rounds_flag(tmp_path):
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 2, "convergence_threshold": 0.70})
+    for role in ("a", "b", "c"):
+        _view(ws, 2, role, "bullish", 0.9)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["exit"] is True and r["exit_reason"] == "converged"
+    assert r["at_max_rounds"] is True

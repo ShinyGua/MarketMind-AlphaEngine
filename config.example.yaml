@@ -158,6 +158,8 @@ discussion:
     min_rounds: 1                 # never exit before this many rounds
     max_rounds: 3                 # hard cap — auto-exit at the limit
     convergence_threshold: 0.70   # conviction-weighted stance agreement needed to exit early
+    conviction_collapse_ratio: 0.75   # round-over-round total-conviction retention floor; below it an early "converged" exit is suppressed (fake consensus)
+    stall_epsilon: 0.05           # |Δ convergence_score| below this (and below threshold) = stalled → exit with unresolved_dissent
   require_thesis_map: true
 
 # --- Review ---
@@ -194,6 +196,8 @@ decision:
     min_rounds: 1                 # never exit before this many rounds
     max_rounds: 3                 # hard cap — auto-exit at the limit
     convergence_threshold: 0.70   # conviction-weighted agreement needed to exit early
+    conviction_collapse_ratio: 0.75   # round-over-round total-conviction retention floor; below it an early "converged" exit is suppressed (fake consensus)
+    stall_epsilon: 0.05           # |Δ convergence_score| below this (and below threshold) = stalled → exit with unresolved_dissent
     overlay_labels: [none, hedge, trim, stop]   # hedge stance, separate from BUY/HOLD/SELL
 
 # --- Report Style ---
@@ -241,8 +245,10 @@ eval:
     consistency: true
     cost_tracker: true
   cost_estimation:
-    opus_input_per_1k: 0.015
-    opus_output_per_1k: 0.075
+    fable_input_per_1k: 0.010
+    fable_output_per_1k: 0.050
+    opus_input_per_1k: 0.005
+    opus_output_per_1k: 0.025
     sonnet_input_per_1k: 0.003
     sonnet_output_per_1k: 0.015
 

@@ -469,6 +469,19 @@ def _select_fair_value(dcf_block, implied, price, cfg):
     return _round(fair_value), mos, method, candidates
 
 
+def _scenario_growths(initial_growth: float, delta: float, g_term: float) -> dict:
+    """Bear/base/bull initial-growth levers, bear <= base <= bull guaranteed.
+
+    Bear is floored at terminal growth but never above base — a sub-terminal
+    base (e.g. after the weak-margin haircut) would otherwise invert the range.
+    """
+    return {
+        "bear": min(max(initial_growth - delta, g_term), initial_growth),
+        "base": initial_growth,
+        "bull": initial_growth + delta,
+    }
+
+
 def _write_summary(out_dir, summary):
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "valuation_summary.json"), "w") as fh:
@@ -589,7 +602,9 @@ def main():
         # well above the legacy 0.20 constant-growth cap) fades linearly to terminal
         # growth over fade_years, so fast growers are not understated by a single
         # constant rate. Scenarios move the *initial* growth lever; bear is floored
-        # at terminal so the fade stays monotone and bear <= base <= bull holds.
+        # at terminal but never above base (a sub-terminal base — e.g. after the
+        # weak-margin haircut — would otherwise invert it), so bear <= base <= bull
+        # holds. growth_schedule fades up or down, so a sub-terminal bear is valid.
         # Deterministic, fundamentals-driven growth selection (3yr revenue CAGR
         # preferred, with divergence / profitability / sector / maturity guards).
         gsel = dcf_mod.select_growth(income, metrics, cfg, sector=sector, industry=industry)
@@ -598,9 +613,7 @@ def main():
         fade_years = cfg["fade_years"]
 
         scenarios = {}
-        for name, ig in (("bear", max(initial_growth - delta, g_term)),
-                         ("base", initial_growth),
-                         ("bull", initial_growth + delta)):
+        for name, ig in _scenario_growths(initial_growth, delta, g_term).items():
             res = dcf_mod.intrinsic_value_two_stage(
                 base, ig, fade_years, wacc_rate, g_term, net_debt, shares)
             scenarios[name] = {
@@ -643,6 +656,12 @@ def main():
     intrinsic_base = (dcf_block or {}).get("scenarios", {}).get("base", {}).get("value_per_share")
     fair_value, margin_of_safety, valuation_method, method_candidates = _select_fair_value(
         dcf_block, implied, price, cfg)
+    dcf_cand = next((c for c in method_candidates if c.get("method") == "dcf"), None)
+    if (dcf_block is not None and dcf_cand is not None and not dcf_cand.get("included")
+            and "non-convergent" in (dcf_cand.get("reason") or "")):
+        # The sensitivity grid was built from the same non-convergent growth, so
+        # flag the whole DCF block as illustrative-only for downstream readers.
+        dcf_block["excluded_from_fair_value"] = True
     fair_value_range = None
     if dcf_block and valuation_method in {"dcf", "blended"}:
         fair_value_range = {

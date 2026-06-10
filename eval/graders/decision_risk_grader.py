@@ -4,7 +4,9 @@
 The LLM chair writes ``confidence`` in ``final_decision.json``. This grader does
 NOT trust that number blindly: it computes a *ceiling* from reproducible risk
 signals (weak panel convergence, retained dissent, low-confidence valuation used
-as a reason, thin evidence) and flags when the stated confidence exceeds it.
+as a reason, thin evidence, a stalled panel with unresolved dissent, and round-1
+near-unanimity — instant agreement is a conformity signal, not a strong one) and
+flags when the stated confidence exceeds it.
 
 It is **advisory and non-mutating** — it never rewrites ``final_decision.json``.
 An over-ceiling result makes the release gate a *warning*, never *failed*. This
@@ -35,6 +37,9 @@ _DISSENT_PER = 0.05
 _DISSENT_FLOOR = 0.50
 _LOW_VAL_REASON_CAP = 0.70
 _THIN_EVIDENCE_CAP = 0.70
+_STALLED_DISSENT_CAP = 0.65    # panel exited stalled / with unresolved dissent
+_FAST_UNANIMITY_CAP = 0.85     # round-1 near-unanimity is a conformity risk signal
+_FAST_UNANIMITY_SCORE = 0.95
 
 # Defaults mirror the canonical sources (decision.panel / review.depth).
 _DEFAULT_CONVERGENCE_THRESHOLD = 0.70
@@ -82,13 +87,20 @@ def _evidence_count(ws: Path, date: str) -> int | None:
     return None
 
 
-def _convergence_score(ws: Path, date: str, panel: dict) -> float | None:
-    """Prefer the last round's convergence file; fall back to the panel summary."""
+def _final_convergence(ws: Path, date: str, panel: dict) -> dict | None:
+    """The last round's convergence grader output, or None."""
     rounds = panel.get("rounds_run") if isinstance(panel, dict) else None
     if isinstance(rounds, int) and rounds > 0:
         conv = load_json(panel_convergence_path(ws, date, rounds))
-        if isinstance(conv, dict) and isinstance(conv.get("convergence_score"), (int, float)):
-            return float(conv["convergence_score"])
+        if isinstance(conv, dict):
+            return conv
+    return None
+
+
+def _convergence_score(panel: dict, conv: dict | None) -> float | None:
+    """Prefer the last round's convergence file; fall back to the panel summary."""
+    if isinstance(conv, dict) and isinstance(conv.get("convergence_score"), (int, float)):
+        return float(conv["convergence_score"])
     if isinstance(panel, dict) and isinstance(panel.get("convergence_score"), (int, float)):
         return float(panel["convergence_score"])
     return None
@@ -139,7 +151,8 @@ def grade(workspace: str, date: str) -> dict:
 
     # 1. Weak panel convergence.
     conv_threshold = _convergence_threshold(cfg)
-    conv_score = _convergence_score(ws, date, panel)
+    conv = _final_convergence(ws, date, panel)
+    conv_score = _convergence_score(panel, conv)
     result["inputs"]["convergence_score"] = conv_score
     result["inputs"]["convergence_threshold"] = conv_threshold
     if conv_score is not None and conv_score < conv_threshold:
@@ -175,6 +188,26 @@ def grade(workspace: str, date: str) -> dict:
         ceiling = min(ceiling, _THIN_EVIDENCE_CAP)
         reasons.append(
             f"evidence cards {ev_count} < floor {floor} -> ceiling {_THIN_EVIDENCE_CAP}")
+
+    # 5. Panel exited stalled / with unresolved dissent.
+    rounds_run = panel.get("rounds_run") if isinstance(panel.get("rounds_run"), int) else None
+    exit_reason = (conv or {}).get("exit_reason") or panel.get("exit_reason")
+    unresolved = bool((conv or {}).get("unresolved_dissent")) or exit_reason == "stalled"
+    result["inputs"]["rounds_run"] = rounds_run
+    result["inputs"]["unresolved_dissent"] = unresolved
+    if unresolved:
+        ceiling = min(ceiling, _STALLED_DISSENT_CAP)
+        reasons.append(
+            f"panel stalled with unresolved dissent -> ceiling {_STALLED_DISSENT_CAP}")
+
+    # 6. Fast unanimity: instant round-1 near-unanimous agreement is a
+    # conformity risk signal (arXiv:2509.05396), not a confidence booster.
+    if (rounds_run == 1 and conv_score is not None
+            and conv_score >= _FAST_UNANIMITY_SCORE):
+        ceiling = min(ceiling, _FAST_UNANIMITY_CAP)
+        reasons.append(
+            f"round-1 unanimity (convergence {conv_score:.2f}) "
+            f"-> ceiling {_FAST_UNANIMITY_CAP}")
 
     llm_conf = decision.get("confidence")
     result["llm_confidence"] = llm_conf
