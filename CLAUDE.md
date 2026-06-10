@@ -355,7 +355,7 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 
 | Tier | Model | Used For |
 |------|-------|----------|
-| mm-heavy | claude-opus-4-6 | Orchestration, discussion moderation, review, decision |
+| mm-heavy | claude-fable-5 | Orchestration, discussion moderation, review, decision |
 | mm-standard | claude-opus-4-6 | Company resolution, report writing, analyst memos |
 | mm-light | claude-sonnet-4-6 | Data collection desks, quant + valuation computation |
 
