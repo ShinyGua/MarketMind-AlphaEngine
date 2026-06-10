@@ -197,3 +197,52 @@ def test_missing_decision_returns_unknown(tmp_path):
     r = grader.grade(str(ws), DATE)
     assert r["pass"] is None
     assert r["errors"]
+
+
+def test_stalled_panel_with_unresolved_dissent_caps(tmp_path):
+    dec = _clean_decision(0.80)
+    dec["panel"] = {"rounds_run": 2, "retained_dissent": []}
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "high"})
+    panel_dir = ws / "decision" / DATE / "panel"
+    panel_dir.mkdir(parents=True, exist_ok=True)
+    (panel_dir / "convergence_round_2.json").write_text(json.dumps({
+        "convergence_score": 0.85,  # above threshold -> weak-convergence cap silent
+        "unresolved_dissent": True, "exit_reason": "stalled",
+    }), encoding="utf-8")
+    r = grader.grade(str(ws), DATE)
+    assert r["confidence_ceiling"] == 0.65
+    assert r["inputs"]["unresolved_dissent"] is True
+    assert any("stalled" in s for s in r["cap_reasons"])
+    assert r["pass"] is False  # 0.80 > 0.65
+
+
+def test_round1_unanimity_caps_at_085(tmp_path):
+    dec = _clean_decision(0.90)
+    dec["panel"] = {"rounds_run": 1, "retained_dissent": []}
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "high"},
+             convergence_file=(1, 0.97))
+    r = grader.grade(str(ws), DATE)
+    assert r["confidence_ceiling"] == 0.85
+    assert any("unanimity" in s for s in r["cap_reasons"])
+    assert r["pass"] is False  # 0.90 > 0.85
+
+
+def test_round1_unanimity_within_cap_passes(tmp_path):
+    dec = _clean_decision(0.80)
+    dec["panel"] = {"rounds_run": 1, "retained_dissent": []}
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "high"},
+             convergence_file=(1, 0.97))
+    r = grader.grade(str(ws), DATE)
+    assert r["confidence_ceiling"] == 0.85
+    assert r["pass"] is True
+
+
+def test_multi_round_convergence_no_unanimity_cap(tmp_path):
+    # High convergence reached over 2 rounds is NOT the fast-unanimity signal.
+    dec = _clean_decision(0.90)
+    dec["panel"] = {"rounds_run": 2, "retained_dissent": []}
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "high"},
+             convergence_file=(2, 0.97))
+    r = grader.grade(str(ws), DATE)
+    assert r["confidence_ceiling"] == 1.0
+    assert r["pass"] is True
