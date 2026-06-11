@@ -30,7 +30,13 @@ def extract_keywords(title: str) -> list[str]:
         "has", "have", "its", "but", "not", "new", "all", "can", "may",
         "will", "also", "than", "been", "into", "over", "more", "about",
     }
-    return [w for w in words if len(w) >= 3 and w not in stop_words]
+    kws = [w for w in words if len(w) >= 3 and w not in stop_words]
+    # Chinese titles have no spaces and match no [a-zA-Z0-9]+ words, which made
+    # the >=3-keyword fallback unreachable (cards then pass only by exact id).
+    # Slice each CJK run into overlapping bigrams so paraphrased citations count.
+    for run in re.findall(r"[一-鿿]{2,}", title):
+        kws.extend(run[i:i + 2] for i in range(len(run) - 1))
+    return list(dict.fromkeys(kws))  # dedupe, keep order
 
 
 def check_keyword_overlap(title_keywords: list[str], report_text_lower: str, min_overlap: int = 3) -> bool:

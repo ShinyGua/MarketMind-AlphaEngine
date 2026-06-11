@@ -246,3 +246,101 @@ def test_multi_round_convergence_no_unanimity_cap(tmp_path):
     r = grader.grade(str(ws), DATE)
     assert r["confidence_ceiling"] == 1.0
     assert r["pass"] is True
+
+
+# ── intraday timing-only contract (warning-only) ──────────────────────────────
+
+def _write_ballot(ws, rnd, role, rationale, top_risk=""):
+    d = ws / "decision" / DATE / "panel" / f"round_{rnd}"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{role}_ballot.json").write_text(
+        json.dumps({"role": role, "vote": "BUY", "conviction": 0.7,
+                    "rationale": rationale, "top_risk": top_risk}), encoding="utf-8")
+
+
+def test_intraday_in_ballot_rationale_warns_only(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 1, "market_analyst",
+                  "BUY because the 4h RSI just crossed above 70 — momentum confirms.")
+    r = grader.grade(str(ws), DATE)
+    assert any("market_analyst" in w and "round 1" in w for w in r["warnings"])
+    # advisory-only: warnings never feed the ceiling or pass
+    assert r["confidence_ceiling"] == 1.0
+    assert r["pass"] is True
+
+
+def test_intraday_in_final_top_reasons_warns(tmp_path):
+    dec = _clean_decision(0.70)
+    dec["top_reasons"] = ["1h MACD histogram turned positive", "Valuation supportive"]
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "high"}, evidence_count=20)
+    r = grader.grade(str(ws), DATE)
+    assert any("top_reasons" in w for w in r["warnings"])
+    assert r["pass"] is True
+
+
+def test_chinese_intraday_citation_warns(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 2, "risk_analyst", "4小时RSI超买，建议卖出。")
+    r = grader.grade(str(ws), DATE)
+    assert any("risk_analyst" in w and "round 2" in w for w in r["warnings"])
+
+
+def test_timeframe_without_indicator_no_false_positive(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 1, "company_analyst",
+                  "News flow has an hourly cadence around the launch event; "
+                  "fundamentals justify the entry on a multi-quarter view.")
+    r = grader.grade(str(ws), DATE)
+    assert r["warnings"] == []
+
+
+def test_no_ballots_no_warnings(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    r = grader.grade(str(ws), DATE)
+    assert r["warnings"] == []
+
+
+def test_24h_volume_near_rsi_no_false_positive(tmp_path):
+    # "24h" must not match the 4h timeframe keyword (boundary guard), even with
+    # an indicator word nearby.
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 1, "market_analyst",
+                  "24h trading volume surged while the daily RSI held at 55.")
+    r = grader.grade(str(ws), DATE)
+    assert r["warnings"] == []
+
+
+def test_24_hour_chinese_no_false_positive(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 1, "market_analyst", "24小时成交量放大，日线RSI为55。")
+    r = grader.grade(str(ws), DATE)
+    assert r["warnings"] == []
+
+
+def test_four_hour_spelled_out_warns(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    _write_ballot(ws, 1, "market_analyst",
+                  "BUY: the four-hour RSI just reclaimed 50 — momentum is back.")
+    r = grader.grade(str(ws), DATE)
+    assert any("market_analyst" in w for w in r["warnings"])
+
+
+def test_responds_to_dissent_field_scanned(tmp_path):
+    ws = _ws(tmp_path, decision=_clean_decision(0.70),
+             valuation={"confidence": "high"}, evidence_count=20)
+    d = ws / "decision" / DATE / "panel" / "round_2"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "risk_analyst_ballot.json").write_text(json.dumps({
+        "role": "risk_analyst", "vote": "SELL", "conviction": 0.6,
+        "rationale": "Deteriorating fundamentals.", "top_risk": "guidance cut",
+        "responds_to_dissent": "The bulls lean on the 4h MACD cross, but that is noise.",
+    }), encoding="utf-8")
+    r = grader.grade(str(ws), DATE)
+    assert any("risk_analyst" in w and "round 2" in w for w in r["warnings"])
