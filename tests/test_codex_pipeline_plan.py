@@ -41,6 +41,12 @@ def test_dry_run_plan_covers_all_stages():
     assert "valuation/run_valuation.py" in flat
     assert "templates/render_pdf.py" in flat
     assert "eval/release_gate.py" in flat
+    # macro layer + intraday timing + shared-context bundling (deterministic)
+    assert "scripts/collect_macro_series.py" in flat, "collect stage missing macro collector"
+    assert "scripts/compute_macro_regime.py" in flat, "collect stage missing regime computation"
+    assert "scripts/macro_evidence_cards.py" in flat, "collect stage missing macro evidence cards"
+    assert "scripts/intraday_timing.py" in flat, "quant stage missing intraday timing block"
+    assert "scripts/build_shared_context.py" in flat, "valuation stage missing shared-context bundler"
     # LLM stages issued as codex exec
     assert "codex exec" in flat
     for skill in ("mm-company-analyst", "mm-report-writer", "mm-decision-maker",

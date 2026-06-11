@@ -236,6 +236,11 @@ def st_collect(ctx):
     # Preflight: record which data sources are reachable + which keys are present
     # (sanitized) so a fallback-heavy run self-explains (dns vs auth vs key).
     det(ctx, "scripts/check_data_sources.py", ctx.ws, ctx.date, critical=False)
+    # Deterministic macro layer: FRED-first series collection (yfinance proxy
+    # fallback), regime classification, and per-ticker macro evidence cards.
+    det(ctx, "scripts/collect_macro_series.py", ctx.ws, ctx.date, critical=False)
+    det(ctx, "scripts/compute_macro_regime.py", ctx.ws, ctx.date, critical=False)
+    det(ctx, "scripts/macro_evidence_cards.py", ctx.ws, ctx.date, critical=False)
     desks = ["mm-market-desk", "mm-company-desk", "mm-sector-desk", "mm-web-research"]
     parallel(ctx, [lambda d=d: codex_skill(ctx, d, critical=False) for d in desks])
 
@@ -245,11 +250,17 @@ def st_normalize(ctx):
 
 
 def st_quant(ctx):
+    # Deterministic 1h/4h timing block (timing-only contract: frames entry/exit
+    # zones, never a vote reason). Runs before the quant LLM so it can report status.
+    det(ctx, "scripts/intraday_timing.py", ctx.ws, ctx.date, critical=False)
     codex_skill(ctx, "mm-quant-analyst")
 
 
 def st_valuation(ctx):
     det(ctx, "valuation/run_valuation.py", ctx.ws, ctx.date, critical=False)
+    # Bundle shared context (quant + valuation + profile + peers + catalysts +
+    # macro_regime + intraday) for all downstream agents.
+    det(ctx, "scripts/build_shared_context.py", ctx.ws, ctx.date, critical=False)
 
 
 def st_discuss_memos(ctx):
