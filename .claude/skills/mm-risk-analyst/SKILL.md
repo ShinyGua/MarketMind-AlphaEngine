@@ -28,6 +28,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and flags
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read this when assessing **multi-day** risk signals (volume divergence, support levels, ATR trend); the snapshot above only carries the latest row.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (VIX, TNX, USD, index series) when assessing macro/risk-regime trajectory.
+- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit). Context for risk framing — never by itself a reason to flip a stance.
 - `{workspace}/profile/company_profile.json` — company profile (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events

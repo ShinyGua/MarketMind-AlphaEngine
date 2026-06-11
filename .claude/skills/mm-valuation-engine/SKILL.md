@@ -36,6 +36,12 @@ Run the valuation engine via Bash — it reads the inputs above and writes all a
 .venv/bin/python3 valuation/run_valuation.py {workspace} {date}
 ```
 
+The engine resolves the CAPM **risk-free rate from the live 10Y** in the shared
+macro layer (`workspaces/shared/market_context/{date}/indicators/macro_regime.json`,
+falling back to `raw/macro/DGS10.csv`, then to the config `risk_free_rate`) and
+records provenance in `macro_inputs.risk_free_source` (`DGS10` | `^TNX` |
+`config_fallback`). ERP and cost of debt remain static config values in v1.
+
 The engine is **non-critical and self-degrading**:
 - For ETFs / mutual funds / indices it writes `applicable: false` (DCF/comps are meaningless for these) and exits cleanly.
 - With missing statements, no peers, or non-positive free cash flow it still writes a summary with `confidence: "low"` and an `inputs_missing` list rather than failing. If DCF is unsuitable but peer revenue multiples are valid, it may select a low-confidence comps fair value instead of returning `verdict: unknown`.
@@ -44,7 +50,7 @@ The DCF growth is selected **deterministically from fundamentals** (not free-for
 
 After it runs:
 1. Read `{workspace}/valuation/{date}/valuation_summary.json` and confirm it exists.
-2. Print a one-line confirmation echoing `verdict`, `margin_of_safety`, and `confidence` from the summary.
+2. Print a one-line confirmation echoing `verdict`, `margin_of_safety`, `confidence`, and `macro_inputs.risk_free_source` from the summary.
 3. If the engine printed an error or the summary is missing, report it but do **not** abort the pipeline — downstream stages treat valuation as optional context.
 
 Do not hand-edit the numbers. If something looks wrong, surface it; the QC grader (`eval/graders/valuation_grader.py`) audits the math in the reflect stage.

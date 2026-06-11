@@ -96,6 +96,7 @@ the thesis map and debate summary.
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** validating an analyst's trajectory claim (divergence, cross timing, support/resistance) that the snapshot in `shared_context` can't confirm.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` plus `raw/*.csv` (index + macro asset series). Read **only when** validating an analyst's macro/index claim against the underlying series.
+- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime; use it to validate analysts' macro claims and to ground the thesis-map macro context. Context, not trigger.
 
 **Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/shared_context/{date}.json` instead of individual evidence card, quant, profile, and catalyst files.
 

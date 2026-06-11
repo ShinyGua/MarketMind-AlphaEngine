@@ -56,6 +56,15 @@ Round: $ARGUMENTS[3] (1-based integer)
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your vote hinges on
   macro trajectory the snapshot can't show.
+- `shared_context.macro_regime` — the deterministic macro regime (rates, curve,
+  inflation, policy, VIX percentile, USD, credit). **Context, not trigger**: the
+  regime informs how you frame risks and your hedge `risk_overlay`, but never by
+  itself caps, sets, or flips a vote.
+- `shared_context.intraday` — the 1h/4h timing block. **TIMING-ONLY**: intraday
+  RSI/MACD and swing levels exist to frame staged entry/exit zones. They must
+  NEVER appear in your `rationale` as a reason for your vote or conviction —
+  the decision-risk grader flags such citations as timing-only contract
+  violations.
 - `{workspace}/normalized/{date}/evidence_digest.json` — all evidence cards in one
   file (cite `ev_…` ids).
 - **Round > 1 only:** `{workspace}/decision/{date}/panel/panel_summary_round_{N-1}.json`

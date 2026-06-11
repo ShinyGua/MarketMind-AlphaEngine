@@ -75,21 +75,22 @@ data = yf.download(macro_assets, period="3mo", interval="1d", group_by="ticker")
 
 Save to `workspaces/shared/market_context/{date}/raw/{asset}_prices.csv`.
 
-### 3. Fetch FRED Data (if API key available)
+### 3. Verify Macro Series (collected by the driver — do NOT fetch)
 
-**Via MCP (preferred):**
-Call `mcp__market-data__get_macro_series` with `series_ids: ["DGS10", "DTWEXBGS", "FEDFUNDS"]`. If result contains `fallback_needed: true`, skip FRED data.
+The FRED macro series (CPI, Fed funds, Treasury curve, USD index, HY spread, VIX)
+are collected **deterministically by the pipeline driver** via
+`scripts/collect_macro_series.py` before the desks run — FRED-first, with yfinance
+proxy fallback when keyless. Do not re-fetch them.
 
-**Fallback:**
-```python
-from fredapi import Fred
-fred = Fred(api_key=os.environ["FRED_API_KEY"])
-us10y = fred.get_series("DGS10", observation_start="<3 months ago>")
-```
+Instead, **read** `workspaces/shared/market_context/{date}/raw/macro/macro_sources.json`
+and note in your fetch summary:
+- the collection `mode` (`fred` | `yfinance_proxy` | `mixed` | `unavailable`)
+- any series in `inputs_missing` (keyless runs lack CPI / Fed funds / HY spread)
 
-Save to `workspaces/shared/market_context/{date}/raw/fred_{series}.csv`.
-
-If FRED is unavailable, skip and log a warning — yfinance VIX and treasury ETFs provide fallback coverage.
+The classified regime is at
+`workspaces/shared/market_context/{date}/indicators/macro_regime.json`. If the
+macro directory is absent entirely, log a warning and continue — the snapshot
+yfinance assets above still provide minimum coverage.
 
 ### 4. Fetch Market Headlines
 
