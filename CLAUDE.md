@@ -81,7 +81,16 @@ resolve_config → init_workspace → collect(parallel) → normalize
 - Link shared market context
 
 ### Stage 2: Parallel Data Collection
-Under the headless Codex driver this stage first runs `scripts/check_data_sources.py`, a non-critical preflight that records key presence (never values), DNS reachability, and per-source status (`auth_ok`/`dns_failed`/`auth_failed`/`rate_limited`/`no_key`) to `raw/{date}/diagnostics/data_sources.json` — so a fallback-heavy run self-explains. (Live data requires network egress: Codex's `workspace-write` sandbox needs `[sandbox_workspace_write] network_access = true`; the driver sets it per stage.) Then run these desks in parallel:
+Both drivers first run `scripts/check_data_sources.py`, a non-critical preflight that records key presence (never values), DNS reachability, per-source status (`auth_ok`/`dns_failed`/`auth_failed`/`rate_limited`/`no_key`), and the **macro collection plan** (`macro.mode`: fred vs yfinance_proxy, with per-series routing) to `raw/{date}/diagnostics/data_sources.json` — so a fallback-heavy run self-explains. (Live data requires network egress: Codex's `workspace-write` sandbox needs `[sandbox_workspace_write] network_access = true`; the driver sets it per stage.)
+
+**Then the deterministic macro layer runs** (non-critical, before the desks):
+- `scripts/collect_macro_series.py` — FRED-first collection of CPI (CPIAUCSL/CPILFESL), FEDFUNDS, the Treasury curve (DGS2/5/10/30), DTWEXBGS, HY OAS (BAMLH0A0HYM2), VIXCLS into `workspaces/shared/market_context/{date}/raw/macro/`; keyless runs self-degrade to yfinance proxies (^IRX/^FVX/^TNX/^TYX/DX-Y.NYB/^VIX, treasury quotes ÷10 to FRED percent units) and record CPI/FedFunds/HY in `inputs_missing` (provenance: `macro_sources.json`)
+- `scripts/compute_macro_regime.py` — deterministic classification → `indicators/macro_regime.json`: rate trend, 2s10s curve slope, inflation trend, Fed policy stance, VIX 1y percentile, USD trend, credit regime — every block with `data_quality` (fred/proxy/missing), plus a bilingual `summary` (en+ch; the artifact is shared across same-day workspaces)
+- `scripts/macro_evidence_cards.py` — projects material observations (inverted curve, VIX ≥80th pct, wide/stressed spreads, ≥25bp 10Y moves, easing/tightening, ≥2% USD moves) into per-ticker evidence cards `ev_{date}_macro_*` so macro enters the citable audit trail (benign regime → zero cards)
+
+**Project rule — macro is context, not trigger**: the regime feeds the WACC input, analyst framing, and the risk overlay; it never deterministically flips a vote or caps conviction (same precedent as valuation-as-reference).
+
+Then run these desks in parallel:
 
 - **mm-market-desk**: Macro headlines, index data, macro asset prices (yfinance, FRED)
 - **mm-company-desk**: Company news, SEC filings, catalyst calendar (NewsAPI, EDGAR)
@@ -96,6 +105,7 @@ Under the headless Codex driver this stage first runs `scripts/check_data_source
 - Deduplicate overlapping news items
 
 ### Stage 4: Quant Snapshot
+- First, the deterministic `scripts/intraday_timing.py` (driver-run, non-critical) writes `quant/{date}/intraday_timing.json`: 1h/4h RSI(14) + MACD(12,26,9) on ~90d of yfinance hourly bars, last confirmed 4h swing high/low, 30d range, and a `timing_state` label. **Timing-only contract** (`usage: "timing_only"`): it frames staged entry/exit price zones and risk-overlay language downstream — never a reason to flip a BUY/HOLD/SELL vote or change conviction (the decision-risk grader warns on violations). Tickers without 1h coverage → `available: false`; zones fall back to daily ATR.
 - **mm-quant-analyst** computes technical indicators via Python/pandas
 - RSI(14), MACD(12,26,9), SMA(20,50), EMA(12,26), ATR(14)
 - Return windows: 1d, 5d, 1m, 3m
@@ -106,6 +116,7 @@ Under the headless Codex driver this stage first runs `scripts/check_data_source
 - **mm-valuation-engine** runs the formula-first engine in `valuation/` (`dcf.py`, `comps.py`, `run_valuation.py`)
 - Inputs: yfinance fundamentals collected by the company desk (`raw/{date}/fundamentals/`), via the `get_fundamentals` MCP tool
 - Computes a bull/base/bear **DCF** (CAPM WACC, Gordon terminal value, odd-dimension WACC×terminal-growth sensitivity grid whose center cell equals the base case), peer **comps** with quartile benchmarking, and a **margin of safety** vs the current price → verdict cheap/fair/expensive
+- The CAPM **risk-free rate is the live 10Y** from the shared macro layer (`macro_regime.json` → `raw/macro/DGS10.csv` → config fallback 4.2%), sanity-banded [0.1%, 10%], with provenance recorded in `macro_inputs.risk_free_source` (`DGS10` | `^TNX` | `config_fallback`); ERP and cost of debt stay static config values in v1 (no reliable free live source). After the engine, `scripts/build_shared_context.py` bundles `shared_context/{date}.json` (quant + valuation + profile + peers + catalysts + `macro_regime` + `intraday`) in both drivers
 - The summary `confidence` is **derived from the included method candidates** (`_component_confidence`), not a peer-count heuristic alone: a low-confidence DCF (or any low-confidence component carrying material weight) caps the blend, so a fragile DCF can no longer make the fair value read "high"
 - Free-tier and self-degrading: ETFs/funds → `applicable: false`; sparse data → `confidence: "low"` with an `inputs_missing` list (never aborts the pipeline)
 - Output: `valuation/{date}/valuation_summary.json`, `valuation/{date}/comps.csv`, `valuation/{date}/dcf_sensitivity.csv`
@@ -196,6 +207,13 @@ After the loop, **mm-decision-maker** (final mode) produces `final_decision.json
 - Top reasons, key risks, disconfirming signals, and a `panel` block (rounds,
   final tally, convergence score, retained dissent)
 
+**Macro is context, not trigger; intraday is timing-only.** The macro regime may
+shape the `risk_overlay` framing and confidence narrative but never flips the
+label or caps conviction. The 1h/4h intraday block (`shared_context.intraday`)
+only frames staged entry/exit price zones in `stance_notes` (daily-ATR fallback
+when `available: false`) and must never appear as a vote reason — the
+decision-risk grader warns on violations.
+
 Config: `decision.panel` (`enabled`, `min_rounds`, `max_rounds`,
 `convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`,
 `devils_advocate_round`, `overlay_labels`).
@@ -225,8 +243,10 @@ workspaces/
     market_context/
       {YYYY-MM-DD}/              # Date-stamped shared macro data
         raw/
+          macro/                 # FRED series CSVs + macro_sources.json provenance
         normalized/
         indicators/
+          macro_regime.json      # deterministic regime (rates/curve/CPI/policy/VIX/USD/credit)
 
   {TICKER}/
     config.yaml                  # Undated — company config
@@ -255,6 +275,7 @@ workspaces/
       technical_indicators.csv
       relative_strength.csv
       quant_summary.json
+      intraday_timing.json       # 1h/4h RSI/MACD + swing levels (timing-only)
 
     valuation/{YYYY-MM-DD}/      # Date-stamped valuation (DCF + comps)
       valuation_summary.json
@@ -342,10 +363,10 @@ Later values override earlier values. The system checks for `config.yaml` first;
 
 | Source | API | Used For |
 |--------|-----|----------|
-| yfinance | Free, no key | Stock prices, index data, peer prices, macro assets |
+| yfinance | Free, no key | Stock prices, index data, peer prices, macro assets, 1h intraday bars, macro proxies (^TNX/^FVX/^TYX/^IRX/DX-Y.NYB/^VIX) when FRED is keyless |
 | NewsAPI | Free tier, key required | Market news, sector news, company news |
 | SEC EDGAR | Free, no key | Company filings (10-K, 10-Q, 8-K), insider transactions |
-| FRED | Free, key required | Macro indicators (US10Y, USD index, VIX) |
+| FRED | Free, key required | Macro series: CPI (headline+core), Fed funds, Treasury curve (2/5/10/30Y), broad USD index, HY credit spread, VIX — feeds macro_regime.json and the live DCF risk-free rate |
 | NASDAQ | Free, no key (`api.nasdaq.com`, unofficial) | US-name news + quote (mm-web-research); falls back to nasdaq.com pages |
 | Web search | Claude WebSearch/WebFetch | Provenance-tagged web news (mm-web-research), any market |
 
@@ -447,8 +468,8 @@ Automated evaluation pipeline under `eval/`:
 | `consistency_grader.py` | Decision aligns with thesis_map consensus (and panel vote majority when the panel ran) |
 | `discussion_convergence_grader.py` | Discussion-panel views converged (conviction-weighted stance agreement); drives the discuss-stage loop exit; guards against fake consensus (ties, uncited flips, conviction collapse, stalled dissent) |
 | `panel_convergence_grader.py` | Decision-panel ballots converged (conviction-weighted agreement); drives the decide-stage loop exit; same anti-conformity guards as the discussion grader |
-| `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety); also warns if the stated `confidence` exceeds what the included method candidates support |
-| `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence, stalled panel with unresolved dissent, round-1 near-unanimity); non-mutating, warning-only |
+| `valuation_grader.py` | Valuation math is internally consistent (WACC>g, TV band, sensitivity center == base, margin of safety, risk-free rate inside [0.1%, 10%]); warns if the stated `confidence` exceeds what the included method candidates support, if a live 10Y was available but the DCF fell back to the config rate, or if the stored rate drifted >5bp from the live regime value |
+| `decision_risk_grader.py` | Advisory confidence ceiling: flags when the final `confidence` exceeds what reproducible risk signals support (weak convergence, retained dissent, low-confidence valuation cited, thin evidence, stalled panel with unresolved dissent, round-1 near-unanimity); also warns (never caps) when a ballot rationale or final top_reason cites intraday 1h/4h indicators as a vote reason — timing-only contract; non-mutating, warning-only |
 | `cost_tracker.py` | Token/cost estimation per run |
 
 ### Run Log

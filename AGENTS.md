@@ -108,6 +108,11 @@ If MCP is not attached, fall back to the local Python servers/modules
 - Reports are research views for human review, not investment advice — preserve
   that boundary. Cite evidence IDs + source dates; keep unsupported valuation
   output low-confidence rather than forcing a DCF.
+- `macro_regime.json` is shared across same-day workspaces with possibly
+  different `language` configs: its `summary` is emitted in BOTH en and ch
+  (consumers pick); its thresholds live in the ROOT config's `macro_regime`
+  block only. Macro is **context, not trigger**; the intraday block is
+  **timing-only** (entry/exit zone framing, never a vote reason).
 - Do not rewrite unrelated user changes in this repository.
 
 ## Claude → Codex translation
@@ -162,6 +167,19 @@ Skill files use Claude conventions; map them as follows:
   it never rewrites `final_decision.json`; an over-ceiling result makes the
   release gate a *warning*, never *failed*. Both drivers run it (`st_reflect` /
   the orchestrator reflect stage).
+- **The macro layer and intraday block are deterministic driver stages.** Both
+  drivers run them as committed Python, not LLM passes: in `st_collect`,
+  `scripts/collect_macro_series.py` (FRED-first, yfinance-proxy fallback) →
+  `scripts/compute_macro_regime.py` (regime classification) →
+  `scripts/macro_evidence_cards.py` (per-ticker `ev_{date}_macro_*` cards); in
+  `st_quant`, `scripts/intraday_timing.py` (1h/4h RSI/MACD + swing levels,
+  `usage: "timing_only"`); in `st_valuation`, after `run_valuation.py`,
+  `scripts/build_shared_context.py` bundles `shared_context/{date}.json`
+  including `macro_regime` + `intraday`. All non-critical — they degrade, never
+  abort. The DCF risk-free rate resolves live (`macro_inputs.risk_free_source`:
+  `DGS10` | `^TNX` | `config_fallback`); `valuation_grader.py` audits the band
+  and provenance, and `decision_risk_grader.py` warns (never caps) when a ballot
+  cites intraday indicators as a vote reason.
 - **Valuation confidence is derived, not asserted.** `valuation/run_valuation.py`
   sets the summary `confidence` for `dcf`/`comps_earnings`/`blended` from the
   included method candidates (`_component_confidence`): a low-confidence DCF — or
