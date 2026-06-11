@@ -72,9 +72,28 @@ LABELS = {
 # Global language setting (set by main() from CLI arg or config)
 LANG = 'en'
 
+# Currency symbol for price labels (set by main() from the company profile;
+# A-share/HK/JP names must not render with a '$' prefix)
+CURRENCY_SYMBOLS = {'USD': '$', 'CNY': '¥', 'HKD': 'HK$', 'JPY': '¥',
+                    'EUR': '€', 'GBP': '£', 'KRW': '₩', 'TWD': 'NT$'}
+CURRENCY_SYMBOL = '$'
+
 def L(key):
     """Get localized label."""
     return LABELS.get(LANG, LABELS['en']).get(key, key)
+
+
+_CJK_FONTS = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei',
+              'Noto Sans CJK SC', 'Source Han Sans SC',
+              'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei']
+
+
+def _cjk_font_available():
+    """True if matplotlib can resolve at least one CJK face from _CJK_FONTS."""
+    from matplotlib import font_manager as fm
+
+    installed = {f.name for f in fm.fontManager.ttflist}
+    return bool(installed & set(_CJK_FONTS))
 
 
 def _setup_rcparams():
@@ -83,9 +102,14 @@ def _setup_rcparams():
     if LANG == 'ch':
         # Order by likely availability across OSes; WenQuanYi/Noto are the
         # common Linux CJK faces (WenQuanYi is what ships in this environment).
-        fonts = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei',
-                 'Noto Sans CJK SC', 'Source Han Sans SC',
-                 'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei'] + fonts
+        fonts = _CJK_FONTS + fonts
+        if not _cjk_font_available():
+            # Without a CJK face every Chinese label renders as tofu boxes.
+            # Warn loudly with the fix instead of failing silently.
+            print("charts: WARNING — no CJK font found; Chinese chart labels will "
+                  "render as boxes. Install one, e.g.: "
+                  "apt-get install fonts-noto-cjk, or drop NotoSansCJKsc-*.otf "
+                  "into ~/.local/share/fonts and delete ~/.cache/matplotlib")
     plt.rcParams.update({
         'font.family': 'sans-serif',
         'font.sans-serif': fonts,
@@ -290,9 +314,9 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None, run_da
     latest_price = df['Close'].iloc[-1]
     ax1.scatter([x[-1]], [latest_price], color=COLORS['primary'], s=60, zorder=5,
                 edgecolors='white', linewidth=1.5)
-    ax1.annotate(f'${latest_price:.2f}', (x[-1], latest_price),
+    ax1.annotate(f'{CURRENCY_SYMBOL}{latest_price:.2f}', (x[-1], latest_price),
                  textcoords="offset points", xytext=(-10, 8), ha='right',
-                 fontsize=9, fontweight='bold', color=COLORS['primary'],
+                 fontsize=9, fontweight='bold', color=COLORS['primary'], zorder=7,
                  bbox=dict(boxstyle='round,pad=0.3', facecolor=COLORS['very_light'],
                           edgecolor=COLORS['light_gray'], alpha=0.9))
 
@@ -323,8 +347,17 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None, run_da
                 upcoming.append((cat_date, event))
         upcoming = sorted(upcoming)[:3]
         if upcoming:
-            block = [f"{L('upcoming')}:"] + [f"▸ {d.strftime('%b %d')}  {ev}" for d, ev in upcoming]
-            ax1.text(0.99, 0.92, '\n'.join(block), transform=ax1.transAxes,
+            # '•' instead of '▸': U+25B8 is missing from common CJK fonts
+            # (Noto Sans CJK SC / WenQuanYi) and renders as tofu in ch reports
+            block = [f"{L('upcoming')}:"] + [f"• {d.strftime('%b %d')}  {ev}" for d, ev in upcoming]
+            # Dodge the latest-price label: when the price ends in the upper part
+            # of the axis its label owns the top-right corner, so drop the block
+            # to the mid-right instead of stacking on top of it.
+            ymin_a, ymax_a = ax1.get_ylim()
+            price_frac = ((latest_price - ymin_a) / (ymax_a - ymin_a)
+                          if ymax_a > ymin_a else 0.5)
+            block_y = 0.35 if price_frac > 0.65 else 0.92
+            ax1.text(0.99, block_y, '\n'.join(block), transform=ax1.transAxes,
                      ha='right', va='top', fontsize=6, color=COLORS['secondary'],
                      bbox=dict(boxstyle='round,pad=0.3', facecolor=COLORS['very_light'],
                                edgecolor=COLORS['light_gray'], alpha=0.85))
@@ -586,7 +619,7 @@ def _resolve_benchmark(workspace, date, raw_prices):
 
 
 def main():
-    global LANG
+    global LANG, CURRENCY_SYMBOL
 
     if len(sys.argv) < 4:
         print('Usage: .venv/bin/python3 templates/charts.py <workspace> <date> <ticker> [--lang ch] [catalysts_json]')
@@ -613,6 +646,16 @@ def main():
                 LANG = rc.get('language', 'en')
             except Exception:
                 pass
+
+    # Resolve currency symbol from the company profile (read-only)
+    profile_path = Path(workspace) / 'profile' / 'company_profile.json'
+    if profile_path.exists():
+        try:
+            with open(profile_path) as f:
+                _cur = json.load(f).get('currency', 'USD')
+            CURRENCY_SYMBOL = CURRENCY_SYMBOLS.get(_cur, '$')
+        except Exception:
+            pass
 
     _setup_rcparams()
 
@@ -698,6 +741,10 @@ def main():
                     pfile = raw_prices / f'{pticker}_medium.csv'
                 if not pfile.exists():
                     pfile = raw_prices / f'peer_{pticker}.csv'
+                if not pfile.exists():
+                    # sector desk writes dotted tickers with underscores
+                    # (peer_000651_SZ.csv for 000651.SZ)
+                    pfile = raw_prices / f'peer_{pticker.replace(".", "_")}.csv'
                 if pfile.exists():
                     pdf = load_price_csv(str(pfile))
                     if len(pdf) >= 5:

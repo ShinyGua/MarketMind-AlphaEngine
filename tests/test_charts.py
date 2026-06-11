@@ -66,6 +66,20 @@ def test_generate_price_chart_svg_has_sma_macd_and_volume(tmp_path):
     assert "Vol" in svg
 
 
+def test_upcoming_block_uses_cjk_safe_bullet(tmp_path):
+    # '▸' (U+25B8) is missing from Noto Sans CJK SC / WenQuanYi and rendered as
+    # tofu in Chinese reports — the upcoming-catalyst block must use '•' instead.
+    csv = tmp_path / "T_3mo.csv"
+    _write_csv(_synthetic_df(130), csv)
+    out = tmp_path / "price_chart.svg"
+    catalysts = [{"date": "2026-06-18", "event": "618电商大促"}]  # after the last bar
+    charts.generate_price_chart("T", str(csv), str(out),
+                                catalysts=catalysts, run_date="2026-06-05")
+    svg = out.read_text(encoding="utf-8")
+    assert "▸" not in svg
+    assert "•" in svg  # the upcoming block rendered with the safe bullet
+
+
 def test_no_network_fallback_still_renders(tmp_path, monkeypatch):
     # Short CSV + warm-up fetch unavailable (simulating no network): must still render.
     monkeypatch.setattr(charts, "_fetch_warmup_history", lambda *a, **k: None)
