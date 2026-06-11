@@ -25,7 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "mcp"))
+sys.path.insert(0, str(ROOT / "scripts"))
 from shared.dotenv import load_dotenv  # noqa: E402
+from collect_macro_series import MACRO_SERIES, YF_PROXY_MAP  # noqa: E402
 
 KEYS = ("NEWSAPI_KEY", "FRED_API_KEY")
 
@@ -109,6 +111,18 @@ def probe_fred(present: bool, dns_ok: bool) -> str:
                    "file_type": "json", "limit": 1})
 
 
+def macro_plan(fred_probe: str, series=None, proxies=None) -> dict:
+    """How the macro collector will source each series given the FRED probe result."""
+    series = list(series if series is not None else MACRO_SERIES)
+    proxies = dict(proxies if proxies is not None else YF_PROXY_MAP)
+    if fred_probe == "auth_ok":
+        return {"mode": "fred", "series_via_fred": series,
+                "series_via_proxy": [], "series_unavailable": []}
+    return {"mode": "yfinance_proxy", "series_via_fred": [],
+            "series_via_proxy": [s for s in series if s in proxies],
+            "series_unavailable": [s for s in series if s not in proxies]}
+
+
 def run(show_lengths: bool = True) -> dict:
     import os
 
@@ -132,6 +146,7 @@ def run(show_lengths: bool = True) -> dict:
         "keys": keys,
         "dns": dns,
         "sources": sources,
+        "macro": macro_plan(sources["fred"]),
     }
 
 

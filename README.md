@@ -36,7 +36,9 @@ MarketMind-AlphaEngine is a fully automated equity research pipeline built nativ
 ### What Makes It Different?
 
 - **Multi-Agent Debate**: 3-6 analyst agents independently analyze a stock, then debate it across a multi-round panel — each round every analyst files a directional stance with a conviction self-rating, a moderator tallies the round, and the loop iterates until views converge — producing a balanced thesis rather than a single-agent summary
-- **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety**. The blended fair value's confidence is **derived from its DCF/comps components** (a low-confidence DCF can't make the blend read "high"), and it feeds the BUY/HOLD/SELL call as a **confidence-weighted reference** that informs — but never forces — the decision
+- **Quantitative Valuation Engine**: A formula-first DCF (CAPM WACC, Gordon terminal value, bull/base/bear scenarios, a WACC×terminal-growth sensitivity grid) plus peer comps with quartile benchmarking, producing an intrinsic-value range and a **margin of safety**. The CAPM risk-free rate is the **live 10Y Treasury yield** from the macro layer (with provenance and a config fallback). The blended fair value's confidence is **derived from its DCF/comps components** (a low-confidence DCF can't make the blend read "high"), and it feeds the BUY/HOLD/SELL call as a **confidence-weighted reference** that informs — but never forces — the decision
+- **Macro Regime Layer (context, not trigger)**: A deterministic collector pulls CPI, Fed funds, the Treasury curve, the broad USD index, HY credit spreads, and VIX (FRED-first, yfinance-proxy fallback when keyless) and classifies the regime — rate trend, curve slope, inflation trend, policy stance, VIX percentile, credit regime — into a shared `macro_regime.json` with per-field data quality. Material observations become citable evidence cards. The regime feeds the DCF risk-free rate, analyst framing, and the hedge overlay — it never mechanically flips a vote
+- **Intraday Timing Block (timing-only)**: 1h/4h RSI/MACD and swing levels frame staged entry/exit price zones in the final view; a grader warns if any panelist ever cites intraday momentum as a vote reason — at the research horizon it is noise, not signal
 - **Investment-Bank-Style PDF**: Generates JPM-style research reports — Page-1 rating box, embedded annotated charts, styled tables, and bilingual (EN/中文) typography — via a deterministic Markdown → HTML/CSS → PDF pipeline (WeasyPrint)
 - **Discussion Panel (stance → converge → exit)**: The thesis is forged by a multi-round panel — each round every analyst role files a structured view (stance bullish/neutral/bearish + a conviction self-rating + challenges to the other roles), a deterministic grader (`eval/graders/discussion_convergence_grader.py`) scores convergence, and the loop iterates until views agree or hit a hard round cap. Compact `*_view.json` ballots replace full N×N prose critiques, keeping token cost flat as analyst count scales
 - **Decision Panel (vote → converge → exit)**: The decision is reached by a multi-round panel — each analyst role casts a ballot (BUY/HOLD/SELL + a conviction self-rating + a hedge overlay), a deterministic grader scores convergence, and the loop iterates until the panel agrees or hits a hard round cap. The chair then writes the final call, faithful to the conviction-weighted lean with dissent retained
@@ -240,9 +242,9 @@ The `/mm:init` flow:
 
 | Stage | What Happens | Agents |
 |-------|--------------|--------|
-| **Collect** | Macro, company, and sector data from yfinance, NewsAPI, and EDGAR, plus web/NASDAQ news with source provenance | 4 collectors in parallel |
-| **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python | `mm-quant-analyst` |
-| **Valuation** | Scenario DCF + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
+| **Collect** | Deterministic macro layer first (FRED/proxy series → regime classification → macro evidence cards), then macro, company, and sector data from yfinance, NewsAPI, and EDGAR, plus web/NASDAQ news with source provenance | macro scripts + 4 collectors in parallel |
+| **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python, plus a deterministic 1h/4h intraday timing block (timing-only) | `mm-quant-analyst` |
+| **Valuation** | Scenario DCF (live-10Y risk-free) + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
 | **Debate** | Independent memos, then a multi-round panel of analyst views → chair tally → convergence | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
 | **Review** | Multi-dimensional scoring and iterative revision loop | `mm-report-reviewer` |
@@ -407,7 +409,7 @@ review:
 | yfinance | No | Stock prices, indices, peers, macro assets, and fundamentals (DCF/comps inputs) |
 | NewsAPI | Optional | Market, sector, and company news (free tier) |
 | SEC EDGAR | No | 10-K, 10-Q, 8-K filings, and insider transactions |
-| FRED | Optional | Macro indicators such as US10Y, USD, and VIX |
+| FRED | Optional | Macro series: CPI (headline + core), Fed funds, Treasury curve (2/5/10/30Y), broad USD index, HY credit spread, VIX — keyless runs self-degrade to yfinance proxies (^TNX/^FVX/^TYX/^IRX/DX-Y.NYB/^VIX); CPI, Fed funds, and credit spreads then land in `inputs_missing` |
 | NASDAQ | No | US-name news + quote via `api.nasdaq.com` (unofficial), with nasdaq.com pages as fallback — collected by `mm-web-research` |
 | WebSearch / WebFetch | No | Provenance-tagged web news (`mm-web-research`) and verification, any market |
 

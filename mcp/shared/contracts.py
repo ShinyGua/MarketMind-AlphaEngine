@@ -161,6 +161,17 @@ def evidence_digest_path(ws: Path, date: str) -> Path:
     return ws / "normalized" / date / "evidence_digest.json"
 
 
+def intraday_timing_path(ws: Path, date: str) -> Path:
+    """Deterministic 1h/4h timing artifact (scripts/intraday_timing.py).
+    Timing-only contract: entry/exit zone framing, never a vote reason."""
+    return ws / "quant" / date / "intraday_timing.json"
+
+
+def macro_regime_path(ws: Path, date: str) -> Path:
+    """Shared macro regime artifact (scripts/compute_macro_regime.py)."""
+    return ws.resolve().parent / "shared" / "market_context" / date / "indicators" / "macro_regime.json"
+
+
 def quant_summary_path(ws: Path, date: str) -> Path:
     return ws / "quant" / date / "quant_summary.json"
 

@@ -54,12 +54,42 @@ data_sources:
     max_filings: 5
 
   macro:
-    provider: fred              # FRED API (free)
+    provider: fred              # FRED API (free key) — collected by scripts/collect_macro_series.py
     api_key_env: FRED_API_KEY
     series:
-      - DGS10                   # US 10Y yield
-      - DTWEXBGS                # Trade-weighted USD
+      - CPIAUCSL                # CPI, all items (monthly index)
+      - CPILFESL                # Core CPI (monthly index)
+      - FEDFUNDS                # Effective Fed funds rate
+      - DGS2                    # 2Y Treasury yield
+      - DGS5                    # 5Y Treasury yield
+      - DGS10                   # 10Y Treasury yield (feeds DCF risk-free rate)
+      - DGS30                   # 30Y Treasury yield
+      - DTWEXBGS                # Trade-weighted broad USD index
+      - BAMLH0A0HYM2            # ICE BofA HY credit spread (OAS)
       - VIXCLS                  # VIX
+    yf_proxies:                 # keyless self-degrade map (CPI/FedFunds/HY have no proxy → inputs_missing)
+      DGS2: ^IRX                # 13-week bill — approximate, flagged data_quality: proxy
+      DGS5: ^FVX
+      DGS10: ^TNX
+      DGS30: ^TYX
+      DTWEXBGS: DX-Y.NYB
+      VIXCLS: ^VIX
+    lookback_months: 16         # >= 13 monthly CPI obs for YoY even during the pre-release window (CPI lags ~6wk) + 1y VIX percentile
+
+# --- Macro Regime (scripts/compute_macro_regime.py thresholds) ---
+# Deterministic classification written to shared market_context/{date}/indicators/macro_regime.json.
+# The artifact is shared across same-day workspaces — keep these in the ROOT config only.
+# Project rule: macro regime is CONTEXT for analysts and the risk overlay, never a
+# deterministic BUY/HOLD/SELL trigger or conviction cap.
+macro_regime:
+  rate_stable_band: 0.0025      # |3m 10Y delta| below → "stable"
+  curve_flat_band: 0.0025       # 0 <= 2s10s < band → "flat"
+  vix_percentile_window: 252
+  vix_labels: {calm: 0.30, normal: 0.70, elevated: 0.90}   # percentile cuts; above elevated → "stressed"
+  hy_regime: {tight: 0.030, normal: 0.045, wide: 0.060}    # HY OAS cuts; above wide → "stressed"
+  policy_band: 0.00125          # |3m fedfunds delta| below → "on_hold"
+  usd_trend_band_pct: 2.0       # |3m % change| below → "stable"
+  inflation_band: 0.002         # |3m-annualized − YoY| below → "stable"
 
   nasdaq:                       # public nasdaq.com data (US names only)
     enabled: true
@@ -104,6 +134,17 @@ quant:
   return_windows: [1d, 5d, 1m, 3m]
   relative_strength: true
   event_window: true
+  # 1h/4h timing block (scripts/intraday_timing.py — deterministic, driver-run).
+  # TIMING-ONLY: frames staged entry/exit price zones and the risk overlay;
+  # never a reason to flip a BUY/HOLD/SELL vote or change conviction.
+  intraday:
+    enabled: true
+    period: 90d                 # yfinance 1h lookback (free tier allows ~730d)
+    interval: 1h
+    resample: 4h                # naive clock bins, not exchange-session aligned
+    rsi_window: 14
+    macd: [12, 26, 9]
+    swing_pivot_window: 5       # bars each side to confirm a 4h pivot high/low
 
 # --- Valuation (Scenario DCF + Comps) ---
 # Computed in Stage 6 by mm-valuation-engine (valuation/run_valuation.py).
@@ -112,9 +153,10 @@ quant:
 # sparse data degrades to confidence=low rather than failing.
 valuation:
   enabled: true
-  risk_free_rate: 0.042           # fallback if no macro series; ~US 10Y
-  equity_risk_premium: 0.05       # CAPM ERP for cost of equity
-  cost_of_debt: 0.05              # pre-tax; used when the company carries debt
+  use_live_risk_free: true        # CAPM risk-free = live 10Y from shared macro_regime.json when available
+  risk_free_rate: 0.042           # FALLBACK ONLY — used when no live 10Y (provenance: risk_free_source)
+  equity_risk_premium: 0.05       # CAPM ERP — intentionally static in v1 (no reliable free live source)
+  cost_of_debt: 0.05              # pre-tax — intentionally static in v1 (no free issuer-spread source)
   default_terminal_growth: 0.025  # Gordon-growth terminal rate (must be < WACC)
   projection_years: 5             # explicit FCFF projection horizon
   base_growth_fallback: 0.05      # used when revenue growth is missing/non-positive

@@ -31,7 +31,7 @@ Mode: $ARGUMENTS[2] (optional — "initial" for first draft, "revision" for targ
 
 For initial mode, read `workspace://{TICKER}/{date}/draft_packet` via MCP resource. This returns:
 - `evidence_digest` — all evidence cards in one object
-- `shared_context` — quant, valuation, profile, peers, catalysts
+- `shared_context` — quant, valuation, profile, peers, catalysts, `macro_regime` (deterministic macro classification + bilingual `summary` + `inputs_missing`), `intraday` (1h/4h timing block — timing color only, never a thesis reason)
 - `thesis_map` — debate synthesis (consensus, disagreements, writer_guidance)
 - `debate_summary` — human-readable debate summary
 - `memory_context` — procedural memories (known pitfalls) + episodic memories (prior decisions), or null
@@ -66,7 +66,8 @@ Write to: `{workspace}/drafts/{date}/daily_v1.md`
 (The PDF renderer builds a rating box — decision, confidence, price, fair value, margin of safety — automatically from the JSON, so do NOT restate a rating table here; focus on the narrative bullets.)>
 
 ## Market Context
-<Macro environment, index performance, sector performance. Use relative strength data. Clearly state whether the stock's move is market-driven or company-specific.>
+<Macro environment, index performance, sector performance. Use relative strength data. Clearly state whether the stock's move is market-driven or company-specific.
+Open with a 2-4 line **macro regime block** from `shared_context.macro_regime`: the `summary` line (in the report language) plus the labels that matter for this name (rate trend, curve, inflation, Fed stance, VIX percentile, credit). **Cite the macro evidence cards by exact id** (`ev_{date}_macro_*`) when they exist — high-materiality macro cards (VIX/credit) are enforced by the evidence grader and, especially in Chinese reports, the exact id is the reliable way to register the citation. If `inputs_missing` is non-empty, add one templated caveat line, e.g. "Macro coverage is partial this run (no FRED key): CPI/Fed funds/credit spreads unavailable." Macro regime frames the narrative — it is never itself the reason for the rating.>
 
 ![Relative strength](charts/relative_chart.svg)
 
@@ -90,7 +91,8 @@ Write to: `{workspace}/drafts/{date}/daily_v1.md`
 <Upcoming catalysts with dates. Key risks from debate. Bull/bear summary from thesis_map.>
 
 ## Investment View
-<Synthesized view drawing from thesis_map. Be explicit about confidence level and time horizon. Reference supporting and disconfirming evidence.>
+<Synthesized view drawing from thesis_map. Be explicit about confidence level and time horizon. Reference supporting and disconfirming evidence.
+For staged entry/exit framing, take price zones from `shared_context.intraday` when `available` (swing high/low, 30d range, `timing_state` — e.g. "extended after the run to the 4h swing high: stage entries, first lot toward {swing_low}–{range mid}"); when unavailable, frame zones from the daily ATR (`latest_close ± 1×atr_14`). Cite intraday indicators ONLY as timing color — never as a reason for the directional view itself.>
 
 ## Sources & Evidence
 <List key evidence card IDs used, with source names and dates.>

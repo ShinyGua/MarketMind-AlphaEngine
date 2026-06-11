@@ -23,6 +23,8 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 Read `resolved_config.json` → `language`. If `ch`, pass `--lang ch` to `charts.py` so chart labels are Chinese. The renderer reads the language itself from config and selects Chinese UI strings + CJK font automatically — no other flags needed.
 
+If `charts.py` prints `WARNING — no CJK font found`, Chinese chart labels would render as tofu boxes: install a CJK face first (`apt-get install fonts-noto-cjk`, or drop `NotoSansCJKsc-*.otf` into `~/.local/share/fonts` and delete `~/.cache/matplotlib`), then re-run the charts step. Surface the warning in your completion summary — never ship a garbled PDF silently. When adding chart annotation strings, avoid dingbat glyphs (e.g. `▸`) that CJK faces lack; use `•`.
+
 ## Pipeline
 
 ```

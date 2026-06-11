@@ -34,7 +34,8 @@ _NON_EQUITY = {"ETF", "MUTUALFUND", "INDEX", "CURRENCY", "CRYPTOCURRENCY", "MONE
 
 _DEFAULTS = {
     "enabled": True,
-    "risk_free_rate": 0.042,
+    "use_live_risk_free": True,      # live 10Y from shared macro layer when available
+    "risk_free_rate": 0.042,         # fallback only (provenance: risk_free_source)
     "equity_risk_premium": 0.05,
     "cost_of_debt": 0.05,
     "default_terminal_growth": 0.025,
@@ -67,6 +68,69 @@ def _load_json(path):
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+# ── live risk-free rate (shared macro layer) ──────────────────────────────────
+
+_RF_BAND = (0.001, 0.10)  # sanity band for a live 10Y read (decimal)
+
+
+def _rf_source_label(src):
+    """macro_sources provenance → summary label: fred→DGS10, yfinance:^TNX→^TNX."""
+    if not src or src == "missing":
+        return None
+    if src.startswith("yfinance:"):
+        return src.split(":", 1)[1]
+    return "DGS10" if src == "fred" else src
+
+
+def _resolve_risk_free(workspace, date, cfg):
+    """CAPM risk-free = live 10Y from the shared macro layer when available.
+
+    Resolution order: macro_regime.json rates.us10y → raw DGS10.csv (regime
+    script failed but the collector ran) → config fallback. A live value is
+    accepted only inside _RF_BAND. Returns {"rate", "source", "as_of", "note"}
+    where source is "DGS10" | "^TNX" | "shared_csv" | "config_fallback".
+
+    The macro layer is ADVISORY: a miss is recorded in the returned "note"
+    (surfaced as macro_inputs.risk_free_note), never in the engine's
+    inputs_missing — the config fallback is a perfectly valid rate and must not
+    cap the valuation confidence heuristic.
+    """
+    fallback = {"rate": cfg["risk_free_rate"], "source": "config_fallback",
+                "as_of": None, "note": None}
+    if not cfg.get("use_live_risk_free", True):
+        return fallback
+
+    shared = os.path.join(os.path.dirname(os.path.abspath(os.path.normpath(workspace))),
+                          "shared", "market_context", date)
+    rate, source, as_of = None, None, None
+
+    regime = _load_json(os.path.join(shared, "indicators", "macro_regime.json"))
+    if regime:
+        blk = (regime.get("rates") or {}).get("us10y") or {}
+        if blk.get("value") is not None and blk.get("data_quality") != "missing":
+            rate = blk["value"]  # already decimal in the regime artifact
+            source = _rf_source_label(blk.get("source"))
+            as_of = blk.get("as_of")
+
+    if rate is None:
+        try:
+            lines = open(os.path.join(shared, "raw", "macro", "DGS10.csv")).read().strip().splitlines()[1:]
+            as_of, raw = lines[-1].split(",", 1)
+            rate = round(float(raw) / 100.0, 6)  # CSVs store FRED percent units
+            srcs = _load_json(os.path.join(shared, "raw", "macro", "macro_sources.json")) or {}
+            # No provenance record → don't claim FRED; label the path honestly.
+            source = _rf_source_label(((srcs.get("series") or {}).get("DGS10") or {}).get("source")) \
+                or "shared_csv"
+        except (OSError, ValueError, IndexError):
+            rate = None
+
+    if rate is None:
+        return {**fallback, "note": "live_risk_free unavailable"}
+    if not (_RF_BAND[0] <= rate <= _RF_BAND[1]):
+        return {**fallback, "note": f"live_risk_free out_of_band ({rate})"}
+    return {"rate": rate, "source": source or "shared_csv", "as_of": as_of, "note": None}
 
 
 # ── company-desk → engine schema adapter ──────────────────────────────────────
@@ -553,6 +617,10 @@ def main():
 
     inputs_missing = []
 
+    # live 10Y from the shared macro layer (config fallback when unavailable;
+    # advisory — a fallback never enters inputs_missing / the confidence heuristic)
+    rf = _resolve_risk_free(workspace, date, cfg)
+
     # ── degenerate-input sanitization ─────────────────────────────────────────
     # Neutralize frame-breaking yfinance artifacts (e.g. near-zero price_to_book
     # stub, negative/net-cash-dominated enterprise value) before they reach comps.
@@ -587,7 +655,7 @@ def main():
         beta = metrics.get("beta") or 1.0
         net_debt = (metrics.get("total_debt") or 0.0) - (metrics.get("total_cash") or 0.0)
         wacc_rate = dcf_mod.wacc(
-            risk_free=cfg["risk_free_rate"], beta=beta,
+            risk_free=rf["rate"], beta=beta,
             equity_risk_premium=cfg["equity_risk_premium"],
             equity_value=metrics.get("market_cap") or 0.0,
             debt_value=metrics.get("total_debt") or 0.0,
@@ -628,6 +696,8 @@ def main():
         dcf_block = {
             "model": "fcff_two_stage",
             "wacc": _round(wacc_rate, 4),
+            "risk_free_rate": _round(rf["rate"], 4),
+            "risk_free_source": rf["source"],
             "terminal_growth": _round(g_term, 4),
             "tax_rate": _round(tax_rate, 4),
             "beta": _round(beta, 3),
@@ -740,6 +810,12 @@ def main():
         } if dcf_block else None,
         "margin_of_safety": margin_of_safety,
         "verdict": verdict,
+        "macro_inputs": {
+            "risk_free_rate": _round(rf["rate"], 4),
+            "risk_free_source": rf["source"],
+            "risk_free_as_of": rf["as_of"],
+            "risk_free_note": rf["note"],
+        },
         "dcf": dcf_block,
         "comps": comps_table["benchmarks"] if comps_table else None,
         "comps_implied_value": implied,

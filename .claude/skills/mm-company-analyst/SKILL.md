@@ -29,6 +29,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (index + macro asset price series) only when you need macro trajectory.
+- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit). Context for framing (funding costs, FX, multiple) — never by itself a reason to flip a stance.
 - `{workspace}/profile/company_profile.json` — company profile (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events

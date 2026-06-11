@@ -28,6 +28,15 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `workspaces/shared/market_context/{date}/raw/*_prices.csv` — index data
 - `{workspace}/profile/market_context_link.json` — which index is primary
 
+## Intraday Timing Block (driver-run — do NOT recompute)
+
+`{workspace}/quant/{date}/intraday_timing.json` is produced by the deterministic
+driver stage `scripts/intraday_timing.py` (1h/4h RSI/MACD + swing levels,
+`usage: "timing_only"`). Do not recompute or duplicate it in your script.
+Verify the file exists and mention its `available` status (and `timing_state`
+when available) in your completion summary; if it is missing, note that and
+continue — daily indicators below are unaffected.
+
 ## Process
 
 Run a single Python script via Bash that computes all indicators. The script must:

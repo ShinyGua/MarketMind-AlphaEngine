@@ -29,6 +29,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
 - `{workspace}/profile/company_profile.json` — company context (undated)
 - `workspaces/shared/market_context/{date}/normalized/market_context_snapshot.json` — shared macro snapshot (index levels, regime, notes); the cheap default read.
+- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — **deterministic macro regime** (rate trend, curve slope, CPI trend, Fed stance, VIX percentile, USD trend, credit regime — each with `data_quality`, plus `inputs_missing` and a bilingual `summary`). Also available as `shared_context.macro_regime`. This feeds your MANDATORY Macro Regime section below.
 - `workspaces/shared/market_context/{date}/indicators/market_indicators.csv` — computed macro indicator series.
 - `workspaces/shared/market_context/{date}/raw/*.csv` — full index and macro asset price series (SPY, QQQ, VIX, TNX, HSI, HS300, BTC, GLD, oil, USD…). Read the raw series **only when you need trajectory** the snapshot can't show.
 
@@ -71,6 +72,14 @@ The memo MUST contain these sections:
 
 ## Core Thesis
 <1-2 paragraph assessment of the current macro/market environment>
+
+## Macro Regime
+<MANDATORY. Read macro_regime.json and interpret it FOR THIS COMPANY: what do the
+rate trend, curve slope, inflation trend, Fed policy stance, VIX percentile, USD
+trend, and credit regime mean for this name's multiple, funding costs, FX exposure,
+and sector rotation? Cite ev_{date}_macro_* card ids where they exist. When a field
+is in inputs_missing (keyless run), say so explicitly rather than guessing.
+Macro regime is CONTEXT for framing — never a standalone reason to flip your stance.>
 
 ## Key Supporting Points
 1. <point with evidence card reference>

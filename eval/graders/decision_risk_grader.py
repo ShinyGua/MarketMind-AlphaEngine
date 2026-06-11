@@ -48,6 +48,20 @@ _DEFAULT_MIN_EVIDENCE_CARDS = 12
 # Substrings that mean "valuation is carrying this decision" (case-insensitive).
 _VAL_KEYWORDS = ("valuation", "fair value", "margin of safety", "dcf", "comps", "price target")
 
+# Intraday timing-only contract: 1h/4h TA may frame entry/exit zones but must
+# never appear as a vote reason. A timeframe keyword counts only when an
+# indicator keyword sits within this many characters (cuts "hourly news cadence"
+# style false positives). Boundary guards reject "24h"/"24小时" and alphanumeric
+# run-ons. Violations are WARNING-ONLY — they never cap or fail.
+import re as _re
+
+_INTRADAY_TF_RE = _re.compile(
+    r"(?<![0-9a-z])(?:[14]hr?|intraday|hourly|four-hour|one-hour)(?![0-9a-z])"
+    r"|(?<![0-9])[14]小时"
+    r"|小时线")
+_INTRADAY_IND = ("rsi", "macd", "overbought", "oversold", "超买", "超卖")
+_INTRADAY_PROXIMITY = 40
+
 
 def load_json(path: Path):
     try:
@@ -124,6 +138,40 @@ def _valuation_cited(decision: dict) -> bool:
     return any(kw in blob for kw in _VAL_KEYWORDS)
 
 
+def _cites_intraday_as_reason(text: str) -> bool:
+    """True when an intraday timeframe keyword sits near an indicator keyword."""
+    blob = text.lower()
+    for m in _INTRADAY_TF_RE.finditer(blob):
+        lo = max(0, m.start() - _INTRADAY_PROXIMITY)
+        window = blob[lo:m.end() + _INTRADAY_PROXIMITY]
+        if any(ind in window for ind in _INTRADAY_IND):
+            return True
+    return False
+
+
+def _intraday_cited_as_reason(ws: Path, date: str, decision: dict) -> list[str]:
+    """Scan ballot rationales and final top_reasons for intraday-indicator vote
+    reasons (timing-only contract). Returns warning strings; never caps."""
+    warnings = []
+    panel_root = ws / "decision" / date / "panel"
+    for ballot_path in sorted(panel_root.glob("round_*/*_ballot.json")):
+        ballot = load_json(ballot_path) or {}
+        blob = " ".join(str(ballot.get(k) or "")
+                        for k in ("rationale", "top_risk", "responds_to_dissent"))
+        if _cites_intraday_as_reason(blob):
+            role = ballot_path.stem.replace("_ballot", "")
+            rnd = ballot_path.parent.name.replace("round_", "")
+            warnings.append(
+                f"ballot {role} round {rnd} cites intraday indicators as a vote "
+                f"reason (timing-only contract)")
+    reasons = decision.get("top_reasons")
+    if isinstance(reasons, list) and _cites_intraday_as_reason(" ".join(map(str, reasons))):
+        warnings.append(
+            "final_decision.top_reasons cites intraday indicators as a vote reason "
+            "(timing-only contract)")
+    return warnings
+
+
 def grade(workspace: str, date: str) -> dict:
     ws = Path(workspace)
     result = {
@@ -133,6 +181,7 @@ def grade(workspace: str, date: str) -> dict:
         "confidence_ceiling": 1.0,
         "exceeded": False,
         "cap_reasons": [],
+        "warnings": [],  # advisory-only: never feeds the ceiling or pass
         "inputs": {},
         "errors": [],
     }
@@ -208,6 +257,9 @@ def grade(workspace: str, date: str) -> dict:
         reasons.append(
             f"round-1 unanimity (convergence {conv_score:.2f}) "
             f"-> ceiling {_FAST_UNANIMITY_CAP}")
+
+    # 7. Intraday timing-only contract (warning-only — no cap, no fail).
+    result["warnings"].extend(_intraday_cited_as_reason(ws, date, decision))
 
     llm_conf = decision.get("confidence")
     result["llm_confidence"] = llm_conf

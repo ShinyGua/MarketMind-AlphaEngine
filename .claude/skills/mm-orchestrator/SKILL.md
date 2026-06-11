@@ -196,7 +196,18 @@ Verify `{workspace}/profile/company_profile.json` exists.
 **Then immediately proceed to stage 3.**
 
 ### 3. collect
-Dispatch 4 collection skills **in parallel** via Agent tool:
+**First run the deterministic macro layer** (non-critical — log and continue on failure):
+```bash
+.venv/bin/python3 scripts/collect_macro_series.py {workspace} {date}
+.venv/bin/python3 scripts/compute_macro_regime.py {workspace} {date}
+.venv/bin/python3 scripts/macro_evidence_cards.py {workspace} {date}
+```
+This fetches the FRED macro series (CPI, Fed funds, Treasury curve, USD, HY spread, VIX;
+yfinance proxies when keyless), classifies the regime into
+`workspaces/shared/market_context/{date}/indicators/macro_regime.json`, and projects
+material macro observations into per-ticker evidence cards (`ev_{date}_macro_*`).
+
+Then dispatch 4 collection skills **in parallel** via Agent tool:
 - **mm-market-desk** with args: `{workspace} {date}`
 - **mm-company-desk** with args: `{workspace} {date}`
 - **mm-sector-desk** with args: `{workspace} {date}`
@@ -217,7 +228,16 @@ This clusters by canonical URL + near-identical title, keeps the richest/highest
 **Then immediately proceed to stage 5.**
 
 ### 5. quant
-Dispatch **mm-quant-analyst** with args: `{workspace} {date}`. Wait.
+**First run the deterministic intraday timing block** (non-critical):
+```bash
+.venv/bin/python3 scripts/intraday_timing.py {workspace} {date}
+```
+This writes `{workspace}/quant/{date}/intraday_timing.json` (1h/4h RSI/MACD + swing
+levels). **Timing-only contract**: it frames staged entry/exit price zones and the
+risk overlay downstream — never a reason to flip a vote or change conviction.
+Tickers without 1h coverage produce `available: false`; continue regardless.
+
+Then dispatch **mm-quant-analyst** with args: `{workspace} {date}`. Wait.
 Verify `{workspace}/quant/{date}/quant_summary.json` exists.
 
 **Then immediately proceed to stage 6 (valuation).**
@@ -226,31 +246,9 @@ Verify `{workspace}/quant/{date}/quant_summary.json` exists.
 Dispatch **mm-valuation-engine** with args: `{workspace} {date}`. Wait.
 Verify `{workspace}/valuation/{date}/valuation_summary.json` exists. This stage is **non-critical** — if the engine reports `applicable: false` (ETF/fund) or `confidence: "low"` (sparse data), that is expected; continue regardless. Only a missing summary file warrants a retry.
 
-**Then create shared_context.json** — bundle shared data that ALL downstream agents need (now including the valuation snapshot):
+**Then create shared_context.json** — bundle shared data that ALL downstream agents need (quant + valuation + profile + peers + catalysts + `macro_regime` + `intraday`):
 ```bash
-.venv/bin/python3 -c "
-import json, os
-ws = '{workspace}'
-date = '{date}'
-ctx = {}
-for name, path in [
-    ('quant', f'{ws}/quant/{date}/quant_summary.json'),
-    ('valuation', f'{ws}/valuation/{date}/valuation_summary.json'),
-    ('profile', f'{ws}/profile/company_profile.json'),
-    ('peers', f'{ws}/profile/peer_set.json'),
-]:
-    if os.path.exists(path):
-        ctx[name] = json.load(open(path))
-# Try catalysts
-for cp in [f'{ws}/raw/{date}/calendar/catalysts.json', f'{ws}/raw/calendar/catalysts.json']:
-    if os.path.exists(cp):
-        ctx['catalysts'] = json.load(open(cp))
-        break
-os.makedirs(f'{ws}/shared_context', exist_ok=True)
-with open(f'{ws}/shared_context/{date}.json', 'w') as out:
-    json.dump(ctx, out, indent=2)
-print(f'shared_context/{date}.json: {len(ctx)} sections')
-"
+.venv/bin/python3 scripts/build_shared_context.py {workspace} {date}
 ```
 
 **Then immediately proceed to stage 7 (analyst memos).**

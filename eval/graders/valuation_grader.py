@@ -62,6 +62,38 @@ def _center_cell(csv_path: Path):
         return None
 
 
+_RF_BAND = (0.001, 0.10)   # same sanity band the engine enforces
+_RF_STALE_TOL = 0.0005     # 5bp drift between summary rf and the live regime value
+
+
+def _check_risk_free(summary: dict, ws: Path, date: str, check, result: dict) -> bool:
+    """Hard: rf within the sanity band when the DCF ran. Warning: live 10Y was
+    available in the shared macro regime but not used, or the stored rate drifted
+    >5bp from it (stale read). The shared dir may legitimately be absent on
+    partial runs, so provenance issues never fail the audit."""
+    macro = summary.get("macro_inputs") or {}
+    rf, src = macro.get("risk_free_rate"), macro.get("risk_free_source")
+    ok = True
+    if summary.get("dcf") and rf is not None:
+        ok = check("risk_free_in_band", _RF_BAND[0] <= rf <= _RF_BAND[1],
+                   f"risk_free_rate={rf}, band={_RF_BAND}")
+
+    regime = load_json(ws.resolve().parent / "shared" / "market_context" / date
+                       / "indicators" / "macro_regime.json")
+    live = ((regime or {}).get("rates") or {}).get("us10y") or {}
+    live_ok = live.get("value") is not None and live.get("data_quality") != "missing"
+    if live_ok and src == "config_fallback":
+        result["warnings"].append(
+            f"live 10Y {live['value']} available in macro_regime but valuation used "
+            f"config_fallback rf={rf}")
+    elif live_ok and src != "config_fallback" and rf is not None \
+            and abs(rf - live["value"]) > _RF_STALE_TOL:
+        result["warnings"].append(
+            f"risk_free_rate {rf} ({src}) drifted >5bp from live regime value "
+            f"{live['value']} (stale read)")
+    return ok
+
+
 def grade(workspace: str, date: str) -> dict:
     ws = Path(workspace)
     summary_path = ws / "valuation" / date / "valuation_summary.json"
@@ -163,6 +195,9 @@ def grade(workspace: str, date: str) -> dict:
             hard_ok &= check("fair_value_matches_candidate",
                              any(abs(v - fair_value) <= _ABS_TOL for v in vals),
                              f"fair_value={fair_value}, candidates={vals}")
+
+    # 7. live risk-free rate sanity + provenance
+    hard_ok &= _check_risk_free(summary, ws, date, check, result)
 
     # ── warnings (do not fail) ────────────────────────────────────────────────
     if dcf and dcf.get("tv_fraction_in_band") is False:

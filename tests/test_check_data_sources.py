@@ -80,6 +80,26 @@ def test_missing_key_is_no_key(monkeypatch):
     assert r["keys"]["NEWSAPI_KEY"]["present"] is False
 
 
+def test_macro_plan_keyed_routes_all_via_fred(keyed_env, monkeypatch):
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(200))
+    plan = cds.run(show_lengths=True)["macro"]
+    assert plan["mode"] == "fred"
+    assert "CPIAUCSL" in plan["series_via_fred"]
+    assert plan["series_via_proxy"] == [] and plan["series_unavailable"] == []
+
+
+def test_macro_plan_keyless_splits_proxy_vs_unavailable(monkeypatch):
+    monkeypatch.delenv("NEWSAPI_KEY", raising=False)
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    monkeypatch.setattr(cds, "load_dotenv", lambda *a, **k: {})
+    monkeypatch.setattr(socket, "gethostbyname", lambda h: "127.0.0.1")
+    plan = cds.run(show_lengths=True)["macro"]
+    assert plan["mode"] == "yfinance_proxy"
+    assert "DGS10" in plan["series_via_proxy"]
+    for sid in ("CPIAUCSL", "CPILFESL", "FEDFUNDS", "BAMLH0A0HYM2"):
+        assert sid in plan["series_unavailable"]
+
+
 def test_writes_sanitized_json(tmp_path, keyed_env, monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(200))
     ws = tmp_path / "ORCL"

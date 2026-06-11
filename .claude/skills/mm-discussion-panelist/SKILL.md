@@ -58,6 +58,14 @@ Round: $ARGUMENTS[3] (1-based integer)
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your stance hinges on
   macro trajectory the snapshot can't show.
+- `shared_context.macro_regime` — the deterministic macro regime (rates, curve,
+  inflation, policy, VIX percentile, USD, credit). **Context, not trigger**: the
+  regime informs how you frame and weigh risks, but is never by itself a reason
+  to set or flip your stance.
+- `shared_context.intraday` — the 1h/4h timing block. **TIMING-ONLY**: it exists
+  to frame entry/exit price zones downstream. Never cite 1h/4h RSI/MACD or other
+  intraday indicators as a reason for your stance or conviction — intraday
+  momentum is noise at the research horizon.
 - `{workspace}/normalized/{date}/evidence_digest.json` — all evidence cards in one
   file (cite `ev_…` ids).
 - **Round > 1 only:** `{workspace}/discussion/{date}/panel/panel_summary_round_{N-1}.json`
