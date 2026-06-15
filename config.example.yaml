@@ -167,6 +167,27 @@ valuation:
   fade_years: 10                  # two-stage DCF high-growth phase; growth fades to terminal
   max_initial_growth: 0.35        # default-tier cap on year-1 high-growth rate
   fragile_tv_fraction: 0.80       # downgrade DCF when terminal value exceeds this share of EV
+  # --- per-market CAPM inputs, routed by profile.market_profile (US|HK|CN|JP|UK|EU) ---
+  # Ke = risk_free + beta*equity_risk_premium(mature) + country_risk_premium.
+  # US uses the live 10Y (risk_free_rate: null → live path) and CRP 0. Non-US markets
+  # use a STATIC, currency-matched risk-free PLUS a beta-INDEPENDENT country_risk_premium
+  # — the lever that gives a low-beta defensive name a sensible discount rate (a bare
+  # risk-free swap to a lower local rate would CUT WACC and inflate the DCF, and a
+  # beta*ERP bump alone is dampened by low beta). No reliable free live non-US source
+  # (same v1 precedent as ERP/cost_of_debt). All values tunable. equity_risk_premium /
+  # cost_of_debt omitted → fall back to the global values above.
+  # (Overriding this map in a local config REPLACES it wholesale — valuation merges shallowly.)
+  market_capm:
+    US: { risk_free_rate: null,  country_risk_premium: 0.0,   cost_of_debt: 0.05 }
+    CN: { risk_free_rate: 0.022, country_risk_premium: 0.035, cost_of_debt: 0.05 }
+    HK: { risk_free_rate: 0.035, country_risk_premium: 0.015, cost_of_debt: 0.05 }
+    JP: { risk_free_rate: 0.010, country_risk_premium: 0.015, cost_of_debt: 0.03 }
+    UK: { risk_free_rate: 0.040, country_risk_premium: 0.010, cost_of_debt: 0.05 }
+    EU: { risk_free_rate: 0.025, country_risk_premium: 0.015, cost_of_debt: 0.04 }
+  # optional DCF-vs-comps sanity net (off by default): when DCF base intrinsic value
+  # exceeds cap × comps blended, cap the DCF blend weight and downgrade its confidence.
+  dcf_comps_divergence_cap: null    # e.g. 2.0 to enable
+  dcf_comps_divergence_weight: 0.35 # weight cap applied when the guard fires
   # --- deterministic, fundamentals-driven growth selection (select_growth) ---
   cagr_years: 3                   # revenue-CAGR window for growth selection
   growth_divergence_ratio: 2.0    # CAGR vs trailing ratio (both positive) → confidence downgrade
