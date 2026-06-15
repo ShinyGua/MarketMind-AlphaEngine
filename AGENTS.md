@@ -176,10 +176,19 @@ Skill files use Claude conventions; map them as follows:
   `usage: "timing_only"`); in `st_valuation`, after `run_valuation.py`,
   `scripts/build_shared_context.py` bundles `shared_context/{date}.json`
   including `macro_regime` + `intraday`. All non-critical — they degrade, never
-  abort. The DCF risk-free rate resolves live (`macro_inputs.risk_free_source`:
-  `DGS10` | `^TNX` | `config_fallback`); `valuation_grader.py` audits the band
-  and provenance, and `decision_risk_grader.py` warns (never caps) when a ballot
-  cites intraday indicators as a vote reason.
+  abort. CAPM inputs are **market-aware** (routed by `profile.market_profile` via
+  `valuation.market_capm`): Ke = risk_free + β·ERP(mature) + country_risk_premium.
+  US uses the live 10Y (`macro_inputs.risk_free_source`: `DGS10` | `^TNX` |
+  `config_fallback`) with CRP 0; non-US (CN/HK/JP/UK/EU) use a static,
+  currency-matched risk-free + a beta-independent country_risk_premium
+  (`config_market:{MARKET}`) — a bare risk-free swap to a lower local rate would
+  cut WACC and a β·ERP bump is dampened by low beta, so the flat CRP is the lever
+  that lands a low-beta name at a sensible WACC. `summary.meta` carries
+  `market_profile`/`currency`.
+  `valuation_grader.py` audits the band/provenance, hard-fails an unordered
+  `fair_value_range` (low≤base≤high, mirroring `intrinsic_range`), and warns on a
+  currency mismatch (non-US name on a US risk-free); `decision_risk_grader.py`
+  warns (never caps) when a ballot cites intraday indicators as a vote reason.
 - **Valuation confidence is derived, not asserted.** `valuation/run_valuation.py`
   sets the summary `confidence` for `dcf`/`comps_earnings`/`blended` from the
   included method candidates (`_component_confidence`): a low-confidence DCF — or

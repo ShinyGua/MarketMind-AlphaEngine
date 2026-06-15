@@ -420,3 +420,108 @@ def test_select_growth_negative_cagr_with_positive_trailing_uses_trailing():
     g = dcf_mod.select_growth(_inc(81, 90, 100), {"revenue_growth": 0.06}, {})
     assert g["source"] == "revenue_growth_ttm"
     assert g["initial_growth"] == pytest.approx(0.06)
+
+
+# ── market-aware CAPM (per-market risk-free + ERP) ───────────────────────────
+
+_MARKET_CFG = {"market_capm": runner_mod._DEFAULTS["market_capm"],
+               "risk_free_rate": 0.042, "use_live_risk_free": True}
+
+
+def test_resolve_risk_free_cn_uses_static_config_market():
+    # CNY A-share: currency-matched static rate wins, with config_market provenance.
+    rf = runner_mod._resolve_risk_free("/nonexistent/ws", "2026-06-15", _MARKET_CFG, "CN")
+    assert rf["rate"] == pytest.approx(0.022)
+    assert rf["source"] == "config_market:CN"
+
+
+def test_resolve_risk_free_us_falls_through_to_live_path():
+    # US has no static rate (None) → not config_market; absent shared dir → fallback.
+    rf = runner_mod._resolve_risk_free("/nonexistent/ws", "2026-06-15", _MARKET_CFG, "US")
+    assert not rf["source"].startswith("config_market")
+    assert rf["rate"] == pytest.approx(0.042)  # config_fallback
+
+
+def test_resolve_risk_free_out_of_band_static_ignored():
+    # A nonsensical static rate (50%) is outside _RF_BAND → ignored, not used.
+    cfg = {"market_capm": {"CN": {"risk_free_rate": 0.5}},
+           "risk_free_rate": 0.042, "use_live_risk_free": False}
+    rf = runner_mod._resolve_risk_free("/nonexistent/ws", "2026-06-15", cfg, "CN")
+    assert rf["source"] == "config_fallback"
+
+
+def test_market_and_currency_aliases():
+    assert runner_mod._market_and_currency(
+        {"market_profile": "CN", "currency": "CNY"}) == ("CN", "CNY")
+    # RMB normalizes to CNY; absent market_profile defaults to US
+    assert runner_mod._market_and_currency({"currency": "RMB"}) == ("US", "CNY")
+    # resolver alias field + lowercase
+    assert runner_mod._market_and_currency({"market_profile_actual": "cn"}) == ("CN", "USD")
+    assert runner_mod._market_and_currency({}) == ("US", "USD")
+
+
+# ── coherent fair_value_range (low <= base <= high by construction) ───────────
+
+def test_fair_value_range_coherent_when_comps_below_dcf_bear():
+    # Regression: blended base pulled BELOW the DCF bear scenario by low comps must
+    # NOT invert the range (the old bug emitted low=182.31 > base=147.31).
+    dcf_block = {"scenarios": {"bear": {"value_per_share": 182.31},
+                               "base": {"value_per_share": 206.39},
+                               "bull": {"value_per_share": 233.35}}}
+    candidates = [{"method": "dcf", "value": 206.39, "weight": 0.5, "included": True},
+                  {"method": "comps_earnings", "value": 62.91, "weight": 0.35, "included": True}]
+    rng = runner_mod._build_fair_value_range(147.31, candidates, dcf_block)
+    assert rng["low"] <= rng["base"] <= rng["high"]
+    assert rng["base"] == pytest.approx(147.31)
+    assert rng["low"] == pytest.approx(62.91)    # comps drags the low below DCF bear
+    assert rng["high"] == pytest.approx(233.35)
+
+
+def test_fair_value_range_none_when_no_fair_value():
+    assert runner_mod._build_fair_value_range(None, [], None) is None
+
+
+# ── DCF-vs-comps divergence guard (config-gated) ─────────────────────────────
+
+def test_dcf_comps_divergence_guard_caps_weight_when_enabled():
+    dcf = {"wacc": 0.07, "terminal_growth": 0.025, "tv_fraction_in_band": True,
+           "scenarios": {"base": {"value_per_share": 206.0, "tv_fraction": 0.45}}}
+    implied = {"blended": 63.0}
+    cfg = {"dcf_min_wacc_spread": 0.015, "dcf_comps_divergence_cap": 2.0,
+           "dcf_comps_divergence_weight": 0.35}
+    _, _, _, candidates = runner_mod._select_fair_value(dcf, implied, price=80.0, cfg=cfg)
+    dcf_c = [c for c in candidates if c["method"] == "dcf"][0]
+    assert dcf_c["weight"] == pytest.approx(0.35)
+    assert dcf_c["confidence"] == "low"
+    assert "exceeds comps blended" in dcf_c["reason"]
+
+
+def test_dcf_comps_divergence_guard_noop_when_disabled():
+    dcf = {"wacc": 0.07, "terminal_growth": 0.025, "tv_fraction_in_band": True,
+           "scenarios": {"base": {"value_per_share": 206.0, "tv_fraction": 0.45}}}
+    implied = {"blended": 63.0}
+    cfg = {"dcf_min_wacc_spread": 0.015}  # cap unset → None → no-op
+    _, _, _, candidates = runner_mod._select_fair_value(dcf, implied, price=80.0, cfg=cfg)
+    dcf_c = [c for c in candidates if c["method"] == "dcf"][0]
+    assert dcf_c["weight"] == pytest.approx(0.65)  # unchanged
+
+
+# ── country risk premium (beta-independent CAPM add-on) ──────────────────────
+
+def test_cost_of_equity_adds_country_risk_premium_flat():
+    # CRP is added flat (beta-independent): a low beta must NOT dampen it.
+    ke = dcf_mod.cost_of_equity(0.022, 0.55, 0.05, country_risk_premium=0.035)
+    assert ke == pytest.approx(0.022 + 0.55 * 0.05 + 0.035)
+
+
+def test_wacc_includes_country_risk_premium():
+    # no debt → WACC == Ke, including the CRP term
+    w = dcf_mod.wacc(0.022, 0.55, 0.05, equity_value=1e9, debt_value=0,
+                     cost_of_debt=0.05, tax_rate=0.2, country_risk_premium=0.035)
+    assert w == pytest.approx(dcf_mod.cost_of_equity(0.022, 0.55, 0.05, 0.035))
+
+
+def test_country_risk_premium_defaults_zero_backward_compat():
+    # omitting CRP reproduces the legacy CAPM exactly (US path unchanged)
+    assert dcf_mod.cost_of_equity(0.045, 1.0, 0.05) == pytest.approx(0.095)
+    assert dcf_mod.wacc(0.045, 1.0, 0.05, 1e9, 0, 0.05, 0.2) == pytest.approx(0.095)

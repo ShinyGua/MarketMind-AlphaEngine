@@ -9,10 +9,12 @@ the numbers the engine wrote are mutually consistent and obey the guardrails:
     - sensitivity-grid center cell != base-case intrinsic value
     - margin_of_safety != (fair_value - price) / price
     - intrinsic range not ordered bear <= base <= bull
+    - fair_value_range not ordered low <= base <= high
     - comps blended implied value != mean of its components
   WARN (model fragile, not a failure):
     - terminal value outside 50–70% of enterprise value
     - confidence == "low"
+    - non-US/non-USD name discounted with a US risk-free (currency mismatch)
 
 A not-applicable valuation (ETF/fund) passes with a note — there is nothing to audit.
 """
@@ -78,6 +80,10 @@ def _check_risk_free(summary: dict, ws: Path, date: str, check, result: dict) ->
         ok = check("risk_free_in_band", _RF_BAND[0] <= rf <= _RF_BAND[1],
                    f"risk_free_rate={rf}, band={_RF_BAND}")
 
+    # US-rate provenance labels (the live-10Y path). A config_market:{MARKET}
+    # source is a deliberate currency-matched static rate, not a US-10Y read, so
+    # the live-10Y "available/drift" checks below must NOT apply to it.
+    us_rate_src = src in ("DGS10", "^TNX", "shared_csv", "config_fallback")
     regime = load_json(ws.resolve().parent / "shared" / "market_context" / date
                        / "indicators" / "macro_regime.json")
     live = ((regime or {}).get("rates") or {}).get("us10y") or {}
@@ -86,11 +92,21 @@ def _check_risk_free(summary: dict, ws: Path, date: str, check, result: dict) ->
         result["warnings"].append(
             f"live 10Y {live['value']} available in macro_regime but valuation used "
             f"config_fallback rf={rf}")
-    elif live_ok and src != "config_fallback" and rf is not None \
+    elif live_ok and us_rate_src and src != "config_fallback" and rf is not None \
             and abs(rf - live["value"]) > _RF_STALE_TOL:
         result["warnings"].append(
             f"risk_free_rate {rf} ({src}) drifted >5bp from live regime value "
             f"{live['value']} (stale read)")
+
+    # currency mismatch: a non-US/non-USD name should NOT discount CNY/HKD/etc.
+    # cash flows with a US risk-free (expected source: config_market:{MARKET}).
+    meta = summary.get("meta") or {}
+    mp = (meta.get("market_profile") or "US").upper()
+    cur = (meta.get("currency") or "USD").upper()
+    if (mp != "US" or cur != "USD") and rf is not None and us_rate_src:
+        result["warnings"].append(
+            f"market_profile={mp}/currency={cur} but risk_free_source={src} is a US "
+            f"rate (cash flows likely non-USD — expected config_market:{mp})")
     return ok
 
 
@@ -147,6 +163,14 @@ def grade(workspace: str, date: str) -> dict:
     if None not in (bear, base, bull):
         hard_ok &= check("intrinsic_range_ordered", bear <= base <= bull,
                          f"bear={bear}, base={base}, bull={bull}")
+
+    # 2b. fair-value range ordering low <= base <= high (the published band must be
+    # coherent — a blended base must sit inside its own low/high bounds)
+    frng = summary.get("fair_value_range") or {}
+    f_low, f_base, f_high = frng.get("low"), frng.get("base"), frng.get("high")
+    if None not in (f_low, f_base, f_high):
+        hard_ok &= check("fair_value_range_ordered", f_low <= f_base <= f_high,
+                         f"low={f_low}, base={f_base}, high={f_high}")
 
     # 3. sensitivity center cell == base intrinsic value
     base_iv = summary.get("intrinsic_value_base")

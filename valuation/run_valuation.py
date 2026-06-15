@@ -49,6 +49,27 @@ _DEFAULTS = {
     "fade_years": 10,                # two-stage high-growth phase; fades to terminal
     "max_initial_growth": 0.35,      # default-tier cap on year-1 high-growth rate
     "fragile_tv_fraction": 0.80,     # downgrade DCF when terminal value exceeds this share
+    # per-market CAPM inputs, routed by profile.market_profile. Ke = risk_free
+    # + beta*ERP(mature) + country_risk_premium. US uses the live 10Y
+    # (risk_free_rate None → live path) and CRP 0. Non-US markets use a STATIC,
+    # currency-matched risk-free plus a beta-INDEPENDENT country_risk_premium — the
+    # lever that gives a low-beta defensive name a sensible discount rate (a bare
+    # risk-free swap to a lower local rate would cut WACC and inflate the DCF; a
+    # beta*ERP bump alone is dampened by low beta). No reliable free live non-US
+    # source (same v1 precedent as ERP/cost_of_debt). All values tunable.
+    # equity_risk_premium/cost_of_debt None → fall back to the global cfg values.
+    "market_capm": {
+        "US": {"risk_free_rate": None,  "country_risk_premium": 0.0,   "cost_of_debt": 0.05},
+        "CN": {"risk_free_rate": 0.022, "country_risk_premium": 0.035, "cost_of_debt": 0.05},
+        "HK": {"risk_free_rate": 0.035, "country_risk_premium": 0.015, "cost_of_debt": 0.05},
+        "JP": {"risk_free_rate": 0.010, "country_risk_premium": 0.015, "cost_of_debt": 0.03},
+        "UK": {"risk_free_rate": 0.040, "country_risk_premium": 0.010, "cost_of_debt": 0.05},
+        "EU": {"risk_free_rate": 0.025, "country_risk_premium": 0.015, "cost_of_debt": 0.04},
+    },
+    # optional DCF-vs-comps sanity net: when the DCF base intrinsic value exceeds
+    # cap × comps blended, cap the DCF weight and downgrade its confidence. None = off.
+    "dcf_comps_divergence_cap": None,
+    "dcf_comps_divergence_weight": 0.35,
     # deterministic, fundamentals-driven growth selection (select_growth)
     "cagr_years": 3,                 # revenue-CAGR window
     "growth_divergence_ratio": 2.0,  # CAGR vs trailing ratio (both positive) → downgrade
@@ -70,6 +91,20 @@ def _load_json(path):
         return None
 
 
+def _market_and_currency(profile):
+    """(market_profile, currency) from a company profile, normalizing resolver
+    field aliases (market_profile_actual/config) and the RMB→CNY currency alias.
+    Defaults to US/USD when absent (backward compat for old profiles)."""
+    mp = (profile.get("market_profile")
+          or profile.get("market_profile_actual")
+          or profile.get("market_profile_config")
+          or "US").upper()
+    cur = (profile.get("currency") or "USD").upper()
+    if cur == "RMB":
+        cur = "CNY"
+    return mp, cur
+
+
 # ── live risk-free rate (shared macro layer) ──────────────────────────────────
 
 _RF_BAND = (0.001, 0.10)  # sanity band for a live 10Y read (decimal)
@@ -84,13 +119,18 @@ def _rf_source_label(src):
     return "DGS10" if src == "fred" else src
 
 
-def _resolve_risk_free(workspace, date, cfg):
+def _resolve_risk_free(workspace, date, cfg, market_profile="US"):
     """CAPM risk-free = live 10Y from the shared macro layer when available.
 
-    Resolution order: macro_regime.json rates.us10y → raw DGS10.csv (regime
-    script failed but the collector ran) → config fallback. A live value is
-    accepted only inside _RF_BAND. Returns {"rate", "source", "as_of", "note"}
-    where source is "DGS10" | "^TNX" | "shared_csv" | "config_fallback".
+    Non-US markets first try a STATIC per-market risk-free from
+    cfg["market_capm"][market_profile] (the live US 10Y is the wrong currency for
+    a CNY/HKD/etc. asset). When that is set (inside _RF_BAND) it wins, with
+    source "config_market:{MARKET}". Otherwise (US, or a market with no static
+    rate) the resolution order is: macro_regime.json rates.us10y → raw DGS10.csv
+    (regime script failed but the collector ran) → config fallback. A live value
+    is accepted only inside _RF_BAND. Returns {"rate", "source", "as_of", "note"}
+    where source is "config_market:{MARKET}" | "DGS10" | "^TNX" | "shared_csv" |
+    "config_fallback".
 
     The macro layer is ADVISORY: a miss is recorded in the returned "note"
     (surfaced as macro_inputs.risk_free_note), never in the engine's
@@ -98,6 +138,11 @@ def _resolve_risk_free(workspace, date, cfg):
     cap the valuation confidence heuristic.
     """
     fallback = {"rate": cfg["risk_free_rate"], "source": "config_fallback",
+                "as_of": None, "note": None}
+    # Per-market static risk-free (non-US): currency-matched to the cash flows.
+    static_rf = ((cfg.get("market_capm") or {}).get(market_profile) or {}).get("risk_free_rate")
+    if static_rf is not None and _RF_BAND[0] <= static_rf <= _RF_BAND[1]:
+        return {"rate": static_rf, "source": f"config_market:{market_profile}",
                 "as_of": None, "note": None}
     if not cfg.get("use_live_risk_free", True):
         return fallback
@@ -491,6 +536,21 @@ def _select_fair_value(dcf_block, implied, price, cfg):
                 dcf_conf = "medium"
             note = f"growth confidence {gconf}"
             dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
+        # Optional DCF-vs-comps sanity net (config-gated; off by default). A DCF
+        # sitting far above the comps blended value is a divergence signal (e.g. a
+        # low-beta WACC inflating a CNY name); cap its weight and downgrade its
+        # confidence so it can't anchor the fair value. Only ever lowers weight.
+        cap = cfg.get("dcf_comps_divergence_cap")
+        comps_anchor = (implied or {}).get("blended")
+        if (cap and dcf_weight > 0 and _positive(intrinsic_base)
+                and _positive(comps_anchor) and intrinsic_base > cap * comps_anchor):
+            wcap = cfg.get("dcf_comps_divergence_weight", 0.35)
+            if dcf_weight > wcap:
+                dcf_weight = wcap
+            dcf_conf = _min_conf(dcf_conf, "low")
+            note = ("downgraded: DCF base %.0f exceeds comps blended %.0f by >%.1fx"
+                    % (intrinsic_base, comps_anchor, cap))
+            dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
     else:
         dcf_reason = "not available"
     candidates.append(_candidate("dcf", intrinsic_base, dcf_weight, dcf_conf,
@@ -543,6 +603,31 @@ def _scenario_growths(initial_growth: float, delta: float, g_term: float) -> dic
         "bear": min(max(initial_growth - delta, g_term), initial_growth),
         "base": initial_growth,
         "bull": initial_growth + delta,
+    }
+
+
+def _build_fair_value_range(fair_value, method_candidates, dcf_block):
+    """Coherent fair-value band (low <= base <= high by construction). The band is
+    the dispersion of the INCLUDED method candidates (the same ones feeding the
+    blended base) unioned with the DCF bull/bear scenarios. Because base is a
+    weighted average of the included candidate values it always lies within
+    [min,max] of that pool; the min/max clamps absorb 2dp rounding. Distinct from
+    intrinsic_range, which stays a DCF-scenario-only band."""
+    if fair_value is None:
+        return None
+    pool = [c["value"] for c in (method_candidates or [])
+            if c.get("included") and _positive(c.get("value"))]
+    if dcf_block:
+        for nm in ("bear", "bull"):
+            v = (dcf_block.get("scenarios", {}).get(nm, {}) or {}).get("value_per_share")
+            if _positive(v):
+                pool.append(v)
+    if not pool:
+        return None
+    return {
+        "low": _round(min(min(pool), fair_value)),
+        "base": fair_value,
+        "high": _round(max(max(pool), fair_value)),
     }
 
 
@@ -608,6 +693,8 @@ def main():
     profile = _load_json(os.path.join(workspace, "profile", "company_profile.json")) or {}
     sector = profile.get("sector") or profile.get("sector_profile")
     industry = profile.get("industry")
+    # market/currency drive market-aware CAPM inputs (per-market risk-free + ERP)
+    market_profile, currency = _market_and_currency(profile)
 
     # peers
     peer_files = sorted(glob.glob(
@@ -619,7 +706,7 @@ def main():
 
     # live 10Y from the shared macro layer (config fallback when unavailable;
     # advisory — a fallback never enters inputs_missing / the confidence heuristic)
-    rf = _resolve_risk_free(workspace, date, cfg)
+    rf = _resolve_risk_free(workspace, date, cfg, market_profile)
 
     # ── degenerate-input sanitization ─────────────────────────────────────────
     # Neutralize frame-breaking yfinance artifacts (e.g. near-zero price_to_book
@@ -654,12 +741,23 @@ def main():
     if base and base > 0 and shares:
         beta = metrics.get("beta") or 1.0
         net_debt = (metrics.get("total_debt") or 0.0) - (metrics.get("total_cash") or 0.0)
+        # market-aware CAPM: mature ERP (global, override per market), a flat
+        # country risk premium, and cost of debt (fall back to global cfg values)
+        _mc = (cfg.get("market_capm") or {}).get(market_profile) or {}
+        erp = _mc.get("equity_risk_premium")
+        if erp is None:
+            erp = cfg["equity_risk_premium"]
+        cod = _mc.get("cost_of_debt")
+        if cod is None:
+            cod = cfg["cost_of_debt"]
+        crp = _mc.get("country_risk_premium") or 0.0
         wacc_rate = dcf_mod.wacc(
             risk_free=rf["rate"], beta=beta,
-            equity_risk_premium=cfg["equity_risk_premium"],
+            equity_risk_premium=erp,
             equity_value=metrics.get("market_cap") or 0.0,
             debt_value=metrics.get("total_debt") or 0.0,
-            cost_of_debt=cfg["cost_of_debt"], tax_rate=tax_rate,
+            cost_of_debt=cod, tax_rate=tax_rate,
+            country_risk_premium=crp,
         )
         g_term = cfg["default_terminal_growth"]
         # keep WACC strictly above terminal growth
@@ -698,6 +796,9 @@ def main():
             "wacc": _round(wacc_rate, 4),
             "risk_free_rate": _round(rf["rate"], 4),
             "risk_free_source": rf["source"],
+            "equity_risk_premium": _round(erp, 4),
+            "country_risk_premium": _round(crp, 4),
+            "cost_of_debt": _round(cod, 4),
             "terminal_growth": _round(g_term, 4),
             "tax_rate": _round(tax_rate, 4),
             "beta": _round(beta, 3),
@@ -732,19 +833,9 @@ def main():
         # The sensitivity grid was built from the same non-convergent growth, so
         # flag the whole DCF block as illustrative-only for downstream readers.
         dcf_block["excluded_from_fair_value"] = True
-    fair_value_range = None
-    if dcf_block and valuation_method in {"dcf", "blended"}:
-        fair_value_range = {
-            "low": (dcf_block or {}).get("scenarios", {}).get("bear", {}).get("value_per_share"),
-            "base": fair_value,
-            "high": (dcf_block or {}).get("scenarios", {}).get("bull", {}).get("value_per_share"),
-        }
-    elif implied:
-        vals = [implied.get(k) for k in (
-            "by_pe", "by_ev_ebitda", "by_ev_revenue", "by_ev_revenue_growth_adjusted")]
-        vals = [v for v in vals if _positive(v)]
-        if vals and fair_value:
-            fair_value_range = {"low": _round(min(vals)), "base": fair_value, "high": _round(max(vals))}
+    # fair_value_range: coherent by construction (low <= base <= high), distinct
+    # from the DCF-scenario-only intrinsic_range below.
+    fair_value_range = _build_fair_value_range(fair_value, method_candidates, dcf_block)
 
     # ── verdict + confidence ─────────────────────────────────────────────────
     if margin_of_safety is None:
@@ -796,6 +887,7 @@ def main():
     summary = {
         "ticker": ticker,
         "applicable": True,
+        "meta": {"market_profile": market_profile, "currency": currency},
         "confidence": confidence,
         "current_price": _round(price) if price else None,
         "fair_value": fair_value,

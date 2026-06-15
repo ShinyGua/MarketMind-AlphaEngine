@@ -62,15 +62,22 @@ def base_fcff(income_statement: list[dict], cash_flow: list[dict],
     return None
 
 
-def cost_of_equity(risk_free: float, beta: float, equity_risk_premium: float) -> float:
-    return risk_free + beta * equity_risk_premium
+def cost_of_equity(risk_free: float, beta: float, equity_risk_premium: float,
+                   country_risk_premium: float = 0.0) -> float:
+    """Ke = risk_free + beta * (mature-market ERP) + country_risk_premium.
+
+    The country risk premium is added FLAT (beta-independent, Damodaran-style), so
+    a low-beta defensive name in a higher-risk market still carries the market's
+    equity risk — a beta-multiplied ERP alone would under-discount it."""
+    return risk_free + beta * equity_risk_premium + (country_risk_premium or 0.0)
 
 
 def wacc(risk_free: float, beta: float, equity_risk_premium: float,
          equity_value: float, debt_value: float,
-         cost_of_debt: float, tax_rate: float) -> float:
+         cost_of_debt: float, tax_rate: float,
+         country_risk_premium: float = 0.0) -> float:
     """Weighted average cost of capital. If debt is ~0 or unknown, WACC == Ke."""
-    ke = cost_of_equity(risk_free, beta, equity_risk_premium)
+    ke = cost_of_equity(risk_free, beta, equity_risk_premium, country_risk_premium)
     total = (equity_value or 0.0) + (debt_value or 0.0)
     if not total or debt_value is None or debt_value <= 0:
         return ke

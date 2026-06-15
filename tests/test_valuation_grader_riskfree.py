@@ -83,3 +83,55 @@ def test_no_shared_dir_no_warning(tmp_path):
     r = vg.grade(str(ws), DATE)
     assert r["pass"]
     assert r["warnings"] == []
+
+
+# ── currency mismatch warning + fair_value_range ordering (added with market_capm) ──
+
+def test_currency_mismatch_warns_only(tmp_path):
+    # CNY name discounted with a US rate (^TNX) → warning, not a failure.
+    s = _summary(rf=0.0449, src="^TNX")
+    s["meta"] = {"market_profile": "CN", "currency": "CNY"}
+    ws = _make(tmp_path, s)  # no regime → no drift/available warnings
+    r = vg.grade(str(ws), DATE)
+    assert r["pass"]
+    assert any("market_profile=CN" in w for w in r["warnings"])
+
+
+def test_no_currency_warning_when_config_market(tmp_path):
+    # Currency-matched static rate → no mismatch warning.
+    s = _summary(rf=0.022, src="config_market:CN")
+    s["meta"] = {"market_profile": "CN", "currency": "CNY"}
+    ws = _make(tmp_path, s)
+    r = vg.grade(str(ws), DATE)
+    assert r["pass"]
+    assert not any("market_profile" in w for w in r["warnings"])
+
+
+def test_config_market_rate_no_false_drift_warning(tmp_path):
+    # A CN static rate (2.2%) must NOT be flagged as drifting from the US 10Y (4.54%).
+    s = _summary(rf=0.022, src="config_market:CN")
+    s["meta"] = {"market_profile": "CN", "currency": "CNY"}
+    ws = _make(tmp_path, s, regime=_regime(0.0454))
+    r = vg.grade(str(ws), DATE)
+    assert r["pass"]
+    assert not any("stale" in w for w in r["warnings"])
+
+
+def test_fair_value_range_ordered_hard_fails(tmp_path):
+    s = _summary()
+    s["fair_value_range"] = {"low": 182.31, "base": 147.31, "high": 200.0}
+    ws = _make(tmp_path, s)
+    r = vg.grade(str(ws), DATE)
+    c = _check(r, "fair_value_range_ordered")
+    assert c and not c["ok"]
+    assert not r["pass"]
+
+
+def test_fair_value_range_ordered_passes(tmp_path):
+    s = _summary()
+    s["fair_value_range"] = {"low": 62.91, "base": 147.31, "high": 233.35}
+    ws = _make(tmp_path, s)
+    r = vg.grade(str(ws), DATE)
+    c = _check(r, "fair_value_range_ordered")
+    assert c and c["ok"]
+    assert r["pass"]
