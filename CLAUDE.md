@@ -110,6 +110,7 @@ Then run these desks in parallel:
 - RSI(14), MACD(12,26,9), SMA(20,50), EMA(12,26), ATR(14)
 - Return windows: 1d, 5d, 1m, 3m
 - Relative strength vs index, sector, peers
+- A deterministic **`trend_regime`** block in `quant_summary.json` pre-digests the daily SMAs into ONE bounded label (`label` uptrend/downtrend/transition/range, from the SMA20/50 stack + SMA50 slope + `price_vs_sma50_pct`). **Context-only contract** (`usage: "context_only"`): analysts/panelists consume the single `trend_regime.label` as trend backdrop — moving averages never set, flip, or cap a stance/vote (same precedent as macro = context, intraday = timing-only, valuation = reference). It propagates to `shared_context.quant.trend_regime` via the bundler (whole quant summary loaded)
 - Output: `quant/{date}/technical_indicators.csv`, `quant/{date}/quant_summary.json`
 
 ### Stage 5: Valuation (Scenario DCF + Comps)
@@ -207,12 +208,15 @@ After the loop, **mm-decision-maker** (final mode) produces `final_decision.json
 - Top reasons, key risks, disconfirming signals, and a `panel` block (rounds,
   final tally, convergence score, retained dissent)
 
-**Macro is context, not trigger; intraday is timing-only.** The macro regime may
-shape the `risk_overlay` framing and confidence narrative but never flips the
-label or caps conviction. The 1h/4h intraday block (`shared_context.intraday`)
-only frames staged entry/exit price zones in `stance_notes` (daily-ATR fallback
-when `available: false`) and must never appear as a vote reason — the
-decision-risk grader warns on violations.
+**Macro is context, not trigger; intraday is timing-only; SMA/trend is backdrop.**
+The macro regime may shape the `risk_overlay` framing and confidence narrative but
+never flips the label or caps conviction. The 1h/4h intraday block
+(`shared_context.intraday`) only frames staged entry/exit price zones in
+`stance_notes` (daily-ATR fallback when `available: false`) and must never appear
+as a vote reason — the decision-risk grader warns on violations. The daily
+`shared_context.quant.trend_regime` label is trend **backdrop**: a price-vs-SMA
+position or a golden/death cross is never the sole reason for a stance or vote
+(prompt-level de-weighting in the analyst memos and both panels; no grader).
 
 Config: `decision.panel` (`enabled`, `min_rounds`, `max_rounds`,
 `convergence_threshold`, `conviction_collapse_ratio`, `stall_epsilon`,
@@ -396,7 +400,7 @@ See `market_report_agent_codex_spec.md` sections 11.1–11.6 for complete schema
 
 | Tier | Model | Used For |
 |------|-------|----------|
-| mm-heavy | claude-fable-5 | Orchestration, discussion moderation, review, decision |
+| mm-heavy | claude-opus-4-8 | Orchestration, discussion moderation, review, decision |
 | mm-standard | claude-opus-4-6 | Company resolution, report writing, analyst memos |
 | mm-light | claude-sonnet-4-6 | Data collection desks, quant + valuation computation |
 

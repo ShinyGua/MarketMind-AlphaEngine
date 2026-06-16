@@ -26,7 +26,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 - `{workspace}/normalized/{date}/evidence_cards/market_*.json` — market evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and relative strength
-- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (MACD cross timing, divergence, momentum slope); the snapshot above is sufficient for a point-in-time read. **Moving averages (SMA20/50) are trend backdrop, not the case** — consume the single `shared_context.quant.trend_regime.label`; do not anchor your memo on price-vs-SMA or a golden/death cross. Lead with the macro/market regime, news, and MACD/relative-strength; SMA only colors *how* you frame the trend.
 - `{workspace}/profile/company_profile.json` — company context (undated)
 - `workspaces/shared/market_context/{date}/normalized/market_context_snapshot.json` — shared macro snapshot (index levels, regime, notes); the cheap default read.
 - `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — **deterministic macro regime** (rate trend, curve slope, CPI trend, Fed stance, VIX percentile, USD trend, credit regime — each with `data_quality`, plus `inputs_missing` and a bilingual `summary`). Also available as `shared_context.macro_regime`. This feeds your MANDATORY Macro Regime section below.

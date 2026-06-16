@@ -26,7 +26,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 - `{workspace}/normalized/{date}/evidence_cards/*.json` — all evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and flags
-- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read this when assessing **multi-day** risk signals (volume divergence, support levels, ATR trend); the snapshot above only carries the latest row.
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read this when assessing **multi-day** risk signals (volume divergence, ATR trend, momentum divergence); the snapshot above only carries the latest row. **Moving averages (SMA20/50) are trend backdrop, not the case** — consume the single `shared_context.quant.trend_regime.label`; do not anchor your memo on price-vs-SMA or a golden/death cross. Lead with downside scenarios, ATR/volume, and support breaks; SMA only colors *how* you frame the trend.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (VIX, TNX, USD, index series) when assessing macro/risk-regime trajectory.
 - `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit). Context for risk framing — never by itself a reason to flip a stance.
 - `{workspace}/profile/company_profile.json` — company profile (undated)

@@ -52,8 +52,13 @@ Round: $ARGUMENTS[3] (1-based integer)
   one file (read this instead of the individual files).
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator
   series (RSI/MACD/SMA/EMA/ATR). Read **only when** your stance hinges on indicator
-  trajectory (divergence, cross timing, support/resistance) that the snapshot in
-  `shared_context` can't show.
+  trajectory (divergence, cross timing) that the snapshot in `shared_context`
+  can't show.
+- `shared_context.quant.trend_regime` — the deterministic daily-SMA trend label
+  (`uptrend`/`downtrend`/`transition`/`range`). **Backdrop, not a stance driver**:
+  consume `label`; do not set or flip a stance on price-vs-SMA or a golden/death
+  cross. Momentum (MACD/RS), news/catalysts, fundamentals, valuation, and risk
+  carry the stance — SMA only colors how you frame the trend.
 - `workspaces/shared/market_context/{date}/` — shared macro data:
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your stance hinges on
@@ -175,6 +180,9 @@ Write to: `{workspace}/discussion/{date}/panel/round_{N}/{role}_view.json`
 - A **low-confidence DCF (or low-confidence blended fair value) cannot be the sole
   reason** for a bullish or bearish stance — pair it with role-lens evidence
   (fundamentals, catalysts, risk, technicals, news); on its own it is a caveat.
+- A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
+  for a stance — pair it with role-lens evidence (fundamentals, catalysts, risk,
+  news, MACD/RS); on its own it is trend color, not a thesis.
 - `stance` must be exactly `bullish`, `neutral`, or `bearish`. `conviction` is a
   float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.

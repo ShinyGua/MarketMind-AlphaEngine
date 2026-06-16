@@ -27,7 +27,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/normalized/{date}/evidence_cards/company_*.json` — company evidence cards
 - `{workspace}/normalized/{date}/evidence_cards/sector_*.json` — sector evidence cards
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators
-- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (indicator slope, MACD cross timing, divergence, support/resistance); the snapshot above is sufficient for a point-in-time read.
+- `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when you need trajectory** (MACD cross timing, divergence, momentum slope); the snapshot above is sufficient for a point-in-time read. **Moving averages (SMA20/50) are trend backdrop, not the case** — consume the single `shared_context.quant.trend_regime.label`; do not anchor your memo on price-vs-SMA or a golden/death cross. Lead with fundamentals, catalysts, and news; SMA only colors *how* you frame the trend.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (index + macro asset price series) only when you need macro trajectory.
 - `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit). Context for framing (funding costs, FX, multiple) — never by itself a reason to flip a stance.
 - `{workspace}/profile/company_profile.json` — company profile (undated)

@@ -111,6 +111,32 @@ Detect notable conditions:
 - `rsi_overbought` (RSI > 70) / `rsi_oversold` (RSI < 30)
 - `volume_above_20d_avg` (latest volume > 1.5x 20-day average)
 
+### 4b. Trend Regime (deterministic, context-only)
+
+Pre-digest the daily SMAs into ONE bounded trend label so downstream analysts
+consume a single backdrop instead of re-deriving "trend" from raw moving-average
+values. This is **context only** — it never sets, flips, or caps a stance/vote
+(same precedent as macro = context, intraday = timing-only, valuation =
+reference). Compute from the already-computed `sma_20`/`sma_50` series and the
+latest close — no new data source:
+
+```python
+latest = df.iloc[-1]
+close = float(latest["Close"]); s20 = float(latest["sma_20"]); s50 = float(latest["sma_50"])
+# SMA50 slope over ~10 bars (trend health, not just side)
+s50_prev = float(df["sma_50"].iloc[-11]) if len(df) >= 11 else float(df["sma_50"].iloc[0])
+slope_pct = (s50 - s50_prev) / s50_prev * 100.0
+sma50_slope = "rising" if slope_pct > 0.5 else "falling" if slope_pct < -0.5 else "flat"
+price_vs_sma50_pct = (close - s50) / s50 * 100.0          # extension / stretch
+if   close > s20 > s50: ma_stack = "bullish"
+elif close < s20 < s50: ma_stack = "bearish"
+else:                   ma_stack = "mixed"
+if   ma_stack == "bullish" and sma50_slope == "rising":  trend_label = "uptrend"
+elif ma_stack == "bearish" and sma50_slope == "falling": trend_label = "downtrend"
+elif sma50_slope == "flat" and abs(price_vs_sma50_pct) <= 3: trend_label = "range"
+else: trend_label = "transition"
+```
+
 ### 5. Trim to Analysis Window
 
 The raw price data contains 6 months for indicator warm-up, but the output should only cover the **last 3 months** (~63 trading days). After computing all indicators:
@@ -144,6 +170,14 @@ The `quant_summary.json` should report values from the **latest row only** — t
     "ema_12": 0.0,
     "ema_26": 0.0,
     "atr_14": 0.0
+  },
+  "trend_regime": {
+    "label": "uptrend|downtrend|transition|range",
+    "ma_stack": "bullish|bearish|mixed",
+    "sma50_slope": "rising|falling|flat",
+    "price_vs_sma50_pct": 0.0,
+    "basis": "daily SMA20/50 + SMA50 slope",
+    "usage": "context_only"
   },
   "relative_strength": {
     "vs_primary_index_5d": 0.0,
@@ -187,7 +221,7 @@ def fmt(val, kind='default'):
 
 Apply to fields:
 - `latest_close`, `sma_*`, `ema_*`, `atr_14` → `fmt(val, 'price')`
-- `returns.*` → `fmt(val, 'pct')`
+- `returns.*`, `trend_regime.price_vs_sma50_pct` → `fmt(val, 'pct')`
 - `rsi_14`, `macd*` → `fmt(val, 'indicator')`
 
 **Never output raw floats** like `135.66000366210938` — always round.

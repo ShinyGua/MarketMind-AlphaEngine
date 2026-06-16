@@ -113,6 +113,13 @@ If MCP is not attached, fall back to the local Python servers/modules
   (consumers pick); its thresholds live in the ROOT config's `macro_regime`
   block only. Macro is **context, not trigger**; the intraday block is
   **timing-only** (entry/exit zone framing, never a vote reason).
+- `quant_summary.json` carries a deterministic **`trend_regime`** block
+  (`label` uptrend/downtrend/transition/range from the SMA20/50 stack + SMA50
+  slope, `usage: "context_only"`) that propagates to
+  `shared_context.quant.trend_regime`. SMA/trend is **backdrop**: analysts and
+  both panels consume the single `trend_regime.label` and never set or flip a
+  stance/vote on a price-vs-SMA position or a golden/death cross (prompt-level
+  de-weighting; no grader).
 - Do not rewrite unrelated user changes in this repository.
 
 ## Claude → Codex translation

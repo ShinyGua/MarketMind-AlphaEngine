@@ -50,8 +50,13 @@ Round: $ARGUMENTS[3] (1-based integer)
   one file (read this instead of the individual files).
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator
   series (RSI/MACD/SMA/EMA/ATR). Read **only when** your vote hinges on indicator
-  trajectory (divergence, cross timing, support/resistance) that the snapshot in
-  `shared_context` can't show.
+  trajectory (divergence, cross timing) that the snapshot in `shared_context`
+  can't show.
+- `shared_context.quant.trend_regime` — the deterministic daily-SMA trend label
+  (`uptrend`/`downtrend`/`transition`/`range`). **Backdrop, not a vote driver**:
+  consume `label`; do not set or flip a vote on price-vs-SMA or a golden/death
+  cross. Momentum (MACD/RS), news/catalysts, fundamentals, valuation, and risk
+  carry the vote — SMA only colors how you frame the trend.
 - `workspaces/shared/market_context/{date}/` — shared macro data:
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your vote hinges on
@@ -166,6 +171,9 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
   reason** for a BUY or SELL vote — pair it with role-lens evidence
   (fundamentals, catalysts, risk, technicals, news); on its own it is a caveat,
   not a vote driver.
+- A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
+  for a BUY or SELL vote — pair it with role-lens evidence (fundamentals,
+  catalysts, risk, news, MACD/RS); on its own it is trend color, not a vote driver.
 - `vote` must be exactly `BUY`, `HOLD`, or `SELL`. `risk_overlay` must be one of
   `none`, `hedge`, `trim`, `stop`. `conviction` is a float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.
