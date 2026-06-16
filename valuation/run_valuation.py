@@ -536,19 +536,25 @@ def _select_fair_value(dcf_block, implied, price, cfg):
                 dcf_conf = "medium"
             note = f"growth confidence {gconf}"
             dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
-        # Optional DCF-vs-comps sanity net (config-gated; off by default). A DCF
+        # DCF-vs-comps sanity net (config-gated; enabled by default at 2.0x). A DCF
         # sitting far above the comps blended value is a divergence signal (e.g. a
-        # low-beta WACC inflating a CNY name); cap its weight and downgrade its
-        # confidence so it can't anchor the fair value. Only ever lowers weight.
+        # low-beta WACC inflating a CNY name): the discounted intrinsic value can't
+        # be reconciled with how the market actually prices the peer set, so the
+        # comps anchor is the reliable read. Capping the DCF to a weight equal to
+        # comps (the old behaviour) still let a discredited DCF co-anchor at ~50%
+        # effective weight and pull a blended fair value *above* the price — reading
+        # "cheap" off the very input that is wrong. Instead EXCLUDE the DCF from the
+        # fair-value anchor (weight 0), mirroring the non-convergence guard above;
+        # it is retained as an included:false candidate and as the upper tail of
+        # fair_value_range (the DCF bull scenario), so the upside is never hidden.
+        # `dcf_comps_divergence_weight` is deprecated/legacy under the exclude path.
         cap = cfg.get("dcf_comps_divergence_cap")
         comps_anchor = (implied or {}).get("blended")
         if (cap and dcf_weight > 0 and _positive(intrinsic_base)
                 and _positive(comps_anchor) and intrinsic_base > cap * comps_anchor):
-            wcap = cfg.get("dcf_comps_divergence_weight", 0.35)
-            if dcf_weight > wcap:
-                dcf_weight = wcap
-            dcf_conf = _min_conf(dcf_conf, "low")
-            note = ("downgraded: DCF base %.0f exceeds comps blended %.0f by >%.1fx"
+            dcf_conf, dcf_weight = "low", 0.0
+            note = ("excluded: DCF base %.0f exceeds comps blended %.0f by >%.1fx "
+                    "(divergent from market comps)"
                     % (intrinsic_base, comps_anchor, cap))
             dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
     else:
@@ -829,9 +835,12 @@ def main():
         dcf_block, implied, price, cfg)
     dcf_cand = next((c for c in method_candidates if c.get("method") == "dcf"), None)
     if (dcf_block is not None and dcf_cand is not None and not dcf_cand.get("included")
-            and "non-convergent" in (dcf_cand.get("reason") or "")):
-        # The sensitivity grid was built from the same non-convergent growth, so
-        # flag the whole DCF block as illustrative-only for downstream readers.
+            and any(tok in (dcf_cand.get("reason") or "")
+                    for tok in ("non-convergent", "divergent"))):
+        # The DCF was excluded from the fair-value anchor — either non-convergent
+        # (explicit phase explodes) or divergent (>cap x the comps anchor). Either
+        # way the sensitivity grid rests on the same discredited DCF, so flag the
+        # whole block as illustrative-only for downstream readers.
         dcf_block["excluded_from_fair_value"] = True
     # fair_value_range: coherent by construction (low <= base <= high), distinct
     # from the DCF-scenario-only intrinsic_range below.

@@ -483,24 +483,51 @@ def test_fair_value_range_none_when_no_fair_value():
 
 # ── DCF-vs-comps divergence guard (config-gated) ─────────────────────────────
 
-def test_dcf_comps_divergence_guard_caps_weight_when_enabled():
+def test_dcf_comps_divergence_guard_excludes_dcf_when_enabled():
+    # A DCF >2x the comps blended anchor (e.g. a low-beta WACC inflating a CNY
+    # name) is EXCLUDED from the fair-value anchor, not merely down-weighted: the
+    # headline must rest on the reliable comps anchor, not the divergent DCF.
     dcf = {"wacc": 0.07, "terminal_growth": 0.025, "tv_fraction_in_band": True,
-           "scenarios": {"base": {"value_per_share": 206.0, "tv_fraction": 0.45}}}
+           "scenarios": {"base": {"value_per_share": 206.0, "tv_fraction": 0.45},
+                         "bull": {"value_per_share": 240.0}}}
     implied = {"blended": 63.0}
-    cfg = {"dcf_min_wacc_spread": 0.015, "dcf_comps_divergence_cap": 2.0,
-           "dcf_comps_divergence_weight": 0.35}
-    _, _, _, candidates = runner_mod._select_fair_value(dcf, implied, price=80.0, cfg=cfg)
+    cfg = {"dcf_min_wacc_spread": 0.015, "dcf_comps_divergence_cap": 2.0}
+    fair_value, mos, method, candidates = runner_mod._select_fair_value(
+        dcf, implied, price=80.0, cfg=cfg)
     dcf_c = [c for c in candidates if c["method"] == "dcf"][0]
-    assert dcf_c["weight"] == pytest.approx(0.35)
+    assert dcf_c["weight"] == pytest.approx(0.0)
+    assert dcf_c["included"] is False
     assert dcf_c["confidence"] == "low"
-    assert "exceeds comps blended" in dcf_c["reason"]
+    assert "divergent" in dcf_c["reason"]
+    # fair value is now the comps anchor; price 80 > 63 → negative MOS (expensive).
+    assert fair_value == pytest.approx(63.0)
+    assert method == "comps_earnings"
+    assert mos < -0.15
+    # DCF upside is retained as the upper tail of the band, not hidden.
+    rng = runner_mod._build_fair_value_range(fair_value, candidates, dcf)
+    assert rng["high"] == pytest.approx(240.0)
+    assert rng["base"] == pytest.approx(63.0)
+
+
+def test_dcf_comps_divergence_guard_keeps_dcf_within_cap():
+    # Control: DCF within 2x of comps is NOT divergent → stays in the blend.
+    dcf = {"wacc": 0.07, "terminal_growth": 0.025, "tv_fraction_in_band": True,
+           "scenarios": {"base": {"value_per_share": 70.0, "tv_fraction": 0.45}}}
+    implied = {"blended": 63.0}
+    cfg = {"dcf_min_wacc_spread": 0.015, "dcf_comps_divergence_cap": 2.0}
+    _, _, method, candidates = runner_mod._select_fair_value(
+        dcf, implied, price=65.0, cfg=cfg)
+    dcf_c = [c for c in candidates if c["method"] == "dcf"][0]
+    assert dcf_c["included"] is True
+    assert dcf_c["weight"] > 0
+    assert method == "blended"
 
 
 def test_dcf_comps_divergence_guard_noop_when_disabled():
     dcf = {"wacc": 0.07, "terminal_growth": 0.025, "tv_fraction_in_band": True,
            "scenarios": {"base": {"value_per_share": 206.0, "tv_fraction": 0.45}}}
     implied = {"blended": 63.0}
-    cfg = {"dcf_min_wacc_spread": 0.015}  # cap unset → None → no-op
+    cfg = {"dcf_min_wacc_spread": 0.015, "dcf_comps_divergence_cap": None}  # disabled
     _, _, _, candidates = runner_mod._select_fair_value(dcf, implied, price=80.0, cfg=cfg)
     dcf_c = [c for c in candidates if c["method"] == "dcf"][0]
     assert dcf_c["weight"] == pytest.approx(0.65)  # unchanged

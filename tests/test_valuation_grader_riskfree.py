@@ -135,3 +135,48 @@ def test_fair_value_range_ordered_passes(tmp_path):
     c = _check(r, "fair_value_range_ordered")
     assert c and c["ok"]
     assert r["pass"]
+
+
+# ── verdict-honesty warning (cheap vs price above every comps anchor) ─────────
+
+def test_verdict_cheap_above_comps_anchor_warns_only(tmp_path):
+    # The pre-fix shape: a divergent DCF (included) drags the blend above price so
+    # verdict reads "cheap", yet the only comps anchor (62.17) is below the price
+    # (78.96) → warn that "cheap" rests on the divergent DCF, not the comps anchor.
+    s = _summary()
+    s["valuation_method"] = "blended"
+    s["current_price"] = 78.96
+    s["fair_value"] = 113.9
+    s["margin_of_safety"] = 0.4425
+    s["verdict"] = "cheap"
+    s["method_candidates"] = [
+        {"method": "dcf", "value": 165.63, "weight": 0.35, "included": True,
+         "confidence": "low"},
+        {"method": "comps_earnings", "value": 62.17, "weight": 0.35, "included": True,
+         "confidence": "medium"},
+    ]
+    ws = _make(tmp_path, s)
+    r = vg.grade(str(ws), DATE)
+    assert r["pass"]  # warning, not a failure
+    assert any("comps anchor" in w for w in r["warnings"])
+
+
+def test_verdict_expensive_after_dcf_excluded_no_warning(tmp_path):
+    # The post-fix shape: divergent DCF excluded, fair value = comps anchor, verdict
+    # honestly "expensive" → no verdict-honesty warning.
+    s = _summary()
+    s["valuation_method"] = "comps_earnings"
+    s["current_price"] = 78.96
+    s["fair_value"] = 62.17
+    s["margin_of_safety"] = -0.2126
+    s["verdict"] = "expensive"
+    s["method_candidates"] = [
+        {"method": "dcf", "value": 165.63, "weight": 0.0, "included": False,
+         "confidence": "low", "reason": "excluded: ... (divergent from market comps)"},
+        {"method": "comps_earnings", "value": 62.17, "weight": 0.35, "included": True,
+         "confidence": "medium"},
+    ]
+    ws = _make(tmp_path, s)
+    r = vg.grade(str(ws), DATE)
+    assert r["pass"]
+    assert not any("comps anchor" in w for w in r["warnings"])

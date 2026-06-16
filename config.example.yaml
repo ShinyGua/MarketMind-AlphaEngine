@@ -184,10 +184,13 @@ valuation:
     JP: { risk_free_rate: 0.010, country_risk_premium: 0.015, cost_of_debt: 0.03 }
     UK: { risk_free_rate: 0.040, country_risk_premium: 0.010, cost_of_debt: 0.05 }
     EU: { risk_free_rate: 0.025, country_risk_premium: 0.015, cost_of_debt: 0.04 }
-  # optional DCF-vs-comps sanity net (off by default): when DCF base intrinsic value
-  # exceeds cap × comps blended, cap the DCF blend weight and downgrade its confidence.
-  dcf_comps_divergence_cap: null    # e.g. 2.0 to enable
-  dcf_comps_divergence_weight: 0.35 # weight cap applied when the guard fires
+  # DCF-vs-comps sanity net (enabled by default): when DCF base intrinsic value
+  # exceeds cap × comps blended, the DCF is EXCLUDED from the fair-value anchor
+  # (weight 0, confidence low) so a low-beta WACC inflating a CNY/low-beta name
+  # can't make the headline read "cheap". The DCF is retained as an included:false
+  # candidate and as the upper tail of fair_value_range (its bull scenario).
+  dcf_comps_divergence_cap: 2.0     # null to disable; DCF > 2.0× comps → excluded
+  dcf_comps_divergence_weight: 0.35 # DEPRECATED/legacy: ignored under the exclude path
   # --- deterministic, fundamentals-driven growth selection (select_growth) ---
   cagr_years: 3                   # revenue-CAGR window for growth selection
   growth_divergence_ratio: 2.0    # CAGR vs trailing ratio (both positive) → confidence downgrade

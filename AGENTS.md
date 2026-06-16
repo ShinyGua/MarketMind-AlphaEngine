@@ -202,6 +202,16 @@ Skill files use Claude conventions; map them as follows:
   any low-confidence component carrying material weight — caps the blend, so a
   fragile DCF can't make the fair value read "high". `valuation_grader.py` warns
   if the stated confidence ever exceeds what the components support.
+- **Divergence-exclude guard** (`dcf_comps_divergence_cap`, default `2.0`): when the
+  DCF base intrinsic value exceeds cap × the comps blended anchor, the DCF is
+  **excluded from the fair-value anchor** (weight 0, `excluded_from_fair_value`),
+  mirroring the non-convergence guard — so a low-beta WACC inflating a CNY/low-beta
+  name can't pull a blended fair value above the price and read "cheap". The
+  headline `fair_value`/`margin_of_safety`/`verdict` reflect the comps anchor; the
+  DCF survives as an `included:false` candidate + the `fair_value_range` upper tail.
+  `valuation_grader.py` warns when `verdict` is "cheap" while the price sits at/above
+  every included comps anchor. The PDF rating box renders these JSON fields verbatim
+  (renderer stays read-only) — the fix lives in the engine, not the template.
 - **Tools**: `Read`/`Glob`/`Grep`/`Bash`/`Write`/`Edit` → Codex shell tools +
   `apply_patch`; `rg` for search. `TodoWrite` → Codex plan/status updates.
   `WebSearch`/`WebFetch` → Codex web browsing. `mcp__*__*` → the `config.toml`

@@ -249,6 +249,27 @@ def grade(workspace: str, date: str) -> dict:
                 f"stated confidence '{stated}' exceeds component-supported '{ceiling}' "
                 f"for method '{method}'")
 
+    # Verdict-honesty lock (warning only): a "cheap" verdict must be supported by
+    # the reliable comps anchor, not by a discredited high component (e.g. a
+    # low-beta DCF). If the price sits at/above every included comps anchor yet the
+    # verdict reads "cheap", the cheap read can only come from a divergent/excluded
+    # or low-confidence component — flag it. Mirrors the engine's divergence-exclude
+    # guard so the gate catches a regression even if that logic drifts.
+    price = summary.get("current_price")
+    comps_anchors = [c["value"] for c in candidates
+                     if c.get("included") and str(c.get("method", "")).startswith("comps")
+                     and isinstance(c.get("value"), (int, float)) and c["value"] > 0]
+    if not comps_anchors:
+        blended = (summary.get("comps_implied_value") or {}).get("blended")
+        if isinstance(blended, (int, float)) and blended > 0:
+            comps_anchors = [blended]
+    if (summary.get("verdict") == "cheap" and isinstance(price, (int, float))
+            and comps_anchors and price >= max(comps_anchors)):
+        result["warnings"].append(
+            f"verdict 'cheap' but price {price} is at/above every comps anchor "
+            f"{sorted(comps_anchors)} — 'cheap' rests on a non-comps (e.g. divergent "
+            f"DCF) component, not the reliable anchor")
+
     result["pass"] = hard_ok
     if hard_ok:
         result["details"].append(
