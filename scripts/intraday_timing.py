@@ -212,6 +212,12 @@ def build(ticker: str, cfg: dict) -> dict:
 
 def run(workspace: Path, date: str) -> dict:
     ticker = os.path.basename(os.path.normpath(str(workspace)))
+    try:
+        profile = json.loads(
+            (workspace / "profile" / "company_profile.json").read_text(encoding="utf-8"))
+        ticker = profile.get("yfinance_symbol") or ticker
+    except (OSError, ValueError):
+        pass
     cfg = dict(DEFAULTS)
     try:
         rc = json.loads((workspace / "resolved_config.json").read_text(encoding="utf-8"))

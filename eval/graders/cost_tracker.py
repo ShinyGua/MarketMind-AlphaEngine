@@ -25,16 +25,15 @@ STAGE_TO_TIER = {
     "collect": "sonnet",
     "normalize": "sonnet",
     "quant": "sonnet",
-    "discuss": "fable",
+    "discuss": "opus",
     "draft": "opus",
-    "review": "fable",
-    "decide": "fable",
+    "review": "opus",
+    "decide": "opus",
     "export": "opus",
 }
 
 # Pricing per 1K tokens (USD)
 PRICING = {
-    "fable": {"input": 0.010, "output": 0.050},
     "opus": {"input": 0.005, "output": 0.025},
     "sonnet": {"input": 0.003, "output": 0.015},
 }
@@ -128,7 +127,7 @@ def compute_costs(stage_files: dict[str, list[dict]]) -> dict:
                 prev_files = stage_files.get(prev_stage, [])
                 input_tokens += sum(f["tokens"] for f in prev_files)
 
-        tier = STAGE_TO_TIER.get(stage, "fable")
+        tier = STAGE_TO_TIER.get(stage, "opus")
         pricing = PRICING[tier]
 
         input_cost = (input_tokens / 1000) * pricing["input"]

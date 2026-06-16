@@ -316,8 +316,6 @@ eval:
     consistency: true
     cost_tracker: true
   cost_estimation:
-    fable_input_per_1k: 0.010
-    fable_output_per_1k: 0.050
     opus_input_per_1k: 0.005
     opus_output_per_1k: 0.025
     sonnet_input_per_1k: 0.003

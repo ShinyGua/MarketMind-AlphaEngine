@@ -332,7 +332,7 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None, run_da
         upcoming = []
         for cat in catalysts:
             try:
-                cat_date = pd.Timestamp(cat['date'])
+                cat_date = pd.Timestamp(cat['date']).tz_localize(None).normalize()
             except (ValueError, KeyError, TypeError):
                 continue
             event = (cat.get('event') or '')[:18]

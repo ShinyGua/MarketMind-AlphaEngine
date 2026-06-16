@@ -48,26 +48,39 @@ def extract_valuation_values(val: dict) -> list[dict]:
 
     Only emits entries for an applicable valuation with present numbers, so
     ETF/fund or sparse runs add no checks (and cannot drag the pass ratio down).
+    DCF-derived intrinsic value fields are only checkable when DCF participates
+    in the stated valuation conclusion; excluded DCF diagnostics should not
+    force reports to cite low-confidence headline values.
     """
     entries = []
     if not val or not val.get("applicable"):
         return entries
 
-    base = val.get("intrinsic_value_base")
-    if isinstance(base, (int, float)):
-        entries.append({"field": "intrinsic_value_base", "value": base, "category": "price"})
+    candidates = val.get("method_candidates") or []
+    dcf_candidate = next(
+        (c for c in candidates if c.get("method") == "dcf"),
+        None,
+    )
+    dcf_included = bool(dcf_candidate.get("included")) if dcf_candidate else True
+    dcf_excluded = bool((val.get("dcf") or {}).get("excluded_from_fair_value"))
+    check_dcf_fields = dcf_included and not dcf_excluded
 
-    rng = val.get("intrinsic_range") or {}
-    for k in ("bear", "bull"):
-        v = rng.get(k)
-        if isinstance(v, (int, float)):
-            entries.append({"field": f"intrinsic_{k}", "value": v, "category": "price"})
+    if check_dcf_fields:
+        base = val.get("intrinsic_value_base")
+        if isinstance(base, (int, float)):
+            entries.append({"field": "intrinsic_value_base", "value": base, "category": "price"})
 
-    mos = val.get("margin_of_safety")
-    if isinstance(mos, (int, float)):
-        # stored as a fraction (e.g. -0.36); reports state it as a percent (-36%)
-        entries.append({"field": "margin_of_safety", "value": round(mos * 100, 2),
-                        "category": "percentage"})
+        rng = val.get("intrinsic_range") or {}
+        for k in ("bear", "bull"):
+            v = rng.get(k)
+            if isinstance(v, (int, float)):
+                entries.append({"field": f"intrinsic_{k}", "value": v, "category": "price"})
+
+        mos = val.get("margin_of_safety")
+        if isinstance(mos, (int, float)):
+            # stored as a fraction (e.g. -0.36); reports state it as a percent (-36%)
+            entries.append({"field": "margin_of_safety", "value": round(mos * 100, 2),
+                            "category": "percentage"})
 
     return entries
 
