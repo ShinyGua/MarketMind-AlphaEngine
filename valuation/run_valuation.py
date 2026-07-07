@@ -272,6 +272,77 @@ def _nonan(v):
     return v
 
 
+# ── peer FX normalization ────────────────────────────────────────────────────
+# Static, offline cross-rates (no network in the valuation stage). Values are
+# units of currency per 1 USD, mid-2026 approximate. Only ratios are derived
+# from these, so small drift is immaterial — the goal is to remove a whole-
+# currency mismatch (e.g. a CNY-reporting / HKD-trading mainland carrier whose
+# yfinance EV/EBITDA is EV(HKD) ÷ EBITDA(CNY)), not to price to the basis point.
+_USD_PER = {
+    "USD": 1.0,
+    "HKD": 7.80,
+    "CNY": 7.20,
+    "RMB": 7.20,
+    "SGD": 1.35,
+    "TWD": 32.0,
+    "JPY": 150.0,
+    "GBP": 0.79,
+    "EUR": 0.92,
+    "KRW": 1370.0,
+}
+
+
+def _fx_rate(from_ccy: str, to_ccy: str):
+    """Multiplier to convert an amount in `from_ccy` into `to_ccy` (None if unknown)."""
+    f = _USD_PER.get((from_ccy or "").upper())
+    t = _USD_PER.get((to_ccy or "").upper())
+    if not f or not t:
+        return None
+    return t / f  # amount_to = amount_from * (USD_per_to / USD_per_from)
+
+
+def _normalize_peer_ev_multiples(raw: dict, target_ccy: str):
+    """Restate a peer's EV-based multiples onto a same-currency, target-currency basis.
+
+    yfinance reports `enterpriseValue` / `marketCap` in the *trading* currency but
+    `ebitda` / `totalRevenue` in the *financial-statement* currency. For a peer that
+    trades and reports in different currencies (e.g. a mainland carrier: HKD price,
+    CNY statements), the raw `enterpriseToEbitda` / `enterpriseToRevenue` is a mixed-
+    currency ratio (EV in trading ccy ÷ flow in statement ccy) — overstated by the
+    cross-rate. We rebuild the ratio with a consistent numerator and denominator.
+
+    P/E and P/B are price-over-per-share-metric in the *same* listing currency and
+    are FX-invariant — left untouched. Mutates `raw["valuation_ratios"]` in place and
+    returns a (note, applied) tuple for provenance; applied=False when no change.
+    """
+    vr = raw.get("valuation_ratios") or raw.get("info") or {}
+    trade_ccy = (vr.get("currency") or raw.get("reporting_currency") or "").upper()
+    stmt_ccy = (vr.get("financialCurrency") or raw.get("financial_currency") or "").upper()
+    tkr = raw.get("ticker", "?")
+    if not trade_ccy or not stmt_ccy or trade_ccy == stmt_ccy:
+        return (None, False)  # consistent within the peer already
+
+    # Convert the statement-currency flows into the trading currency so the ratio
+    # numerator (EV, trading ccy) and denominator (flow) share a currency, then we
+    # are comparing every peer on a common (target == company) currency basis.
+    fx_stmt_to_trade = _fx_rate(stmt_ccy, trade_ccy)
+    if not fx_stmt_to_trade:
+        return (f"{tkr}: unknown FX {stmt_ccy}->{trade_ccy}, EV multiples left raw", False)
+
+    changed = []
+    for key in ("enterpriseToEbitda", "enterpriseToRevenue"):
+        val = vr.get(key)
+        if isinstance(val, (int, float)) and val == val and val > 0:
+            # raw = EV(trade) / flow(stmt). same-currency = EV(trade) / flow(trade)
+            #     = EV(trade) / (flow(stmt) * fx_stmt_to_trade) = raw / fx_stmt_to_trade
+            vr[key] = val / fx_stmt_to_trade
+            changed.append(key)
+    if not changed:
+        return (None, False)
+    return (f"{tkr}: EV multiples FX-normalized {stmt_ccy}->{trade_ccy} "
+            f"(÷{fx_stmt_to_trade:.4f}): {', '.join(changed)}", True)
+
+
 # ── degenerate-input sanitization ─────────────────────────────────────────────
 # Some yfinance fundamentals carry frame-breaking artifacts that, left alone,
 # distort comps. The two we guard here both show up on net-cash-rich /
@@ -343,21 +414,30 @@ def _norm_statements(raw: dict):
     Prefers annual statements; falls back to quarterly when annual are empty
     (e.g. WOLF post-Chapter 11 reporting gap).
 
-    Supports three layouts:
+    Supports four layouts:
       • schema A: raw["financials"]["income_statement"] + raw["cashflow"]
       • schema B: raw["income_statement"] + raw["cash_flow"]  (direct yfinance)
       • schema C: raw["financials"] is a flat date-keyed dict (older layout)
+      • schema E: raw["statements"]["income_statement"|"cashflow"|"balance_sheet"]
+        — desk "statements"-wrapped layout (item-keyed series), e.g. the HK/CN
+        carriers (0941 et al.) whose income+cashflow live under this wrapper.
     """
     fin = raw.get("financials") or {}
+    stm = raw.get("statements") or {}
     inc_period = (_latest_period(fin.get("income_statement"))
                   or _latest_period(fin.get("income_statement_q"))
                   or _latest_period(raw.get("income_statement"))
+                  or _latest_period(stm.get("income_statement"))
+                  or _latest_period(stm.get("income_statement_q"))
                   or _latest_period(fin))
     cf_period = (_latest_period(raw.get("cashflow"))
                  or _latest_period(raw.get("cashflow_q"))
                  or _latest_period(raw.get("cash_flow"))
                  or _latest_period(fin.get("cashflow"))
-                 or _latest_period(fin.get("cashflow_q")))
+                 or _latest_period(fin.get("cashflow_q"))
+                 or _latest_period(stm.get("cashflow"))
+                 or _latest_period(stm.get("cashflow_q"))
+                 or _latest_period(stm.get("cash_flow")))
 
     income = []
     if inc_period:
@@ -401,7 +481,8 @@ def _adapt_fundamentals(raw: dict) -> dict:
     has_ratios_schema = ("valuation_ratios" in raw or "financials" in raw
                          or "ratios" in raw)
     has_info_schema = ("info" in raw or "income_statement" in raw
-                       or "cash_flow" in raw or "cashflow" in raw)
+                       or "cash_flow" in raw or "cashflow" in raw
+                       or "statements" in raw)
     has_flat_schema = "quoteType" in raw or "currentPrice" in raw
     if not (has_ratios_schema or has_info_schema or has_flat_schema):
         return raw
@@ -702,11 +783,24 @@ def main():
     # market/currency drive market-aware CAPM inputs (per-market risk-free + ERP)
     market_profile, currency = _market_and_currency(profile)
 
-    # peers
+    # peers — FX-normalize each peer's EV multiples onto the company's currency
+    # BEFORE adapting to the engine metrics shape. A mainland carrier that trades
+    # in HKD but reports in CNY has a mixed-currency yfinance EV/EBITDA; left raw
+    # it reads ~8% rich and corrupts the peer quartile anchor.
     peer_files = sorted(glob.glob(
         os.path.join(workspace, "raw", date, "fundamentals", "peers", "*.json")))
-    peers = [p for p in (_adapt_fundamentals(_load_json(f)) for f in peer_files)
-             if p and p.get("metrics")]
+    fx_notes = []
+    peers = []
+    for f in peer_files:
+        raw_peer = _load_json(f)
+        if not raw_peer:
+            continue
+        note, _applied = _normalize_peer_ev_multiples(raw_peer, currency)
+        if note:
+            fx_notes.append(note)
+        adapted = _adapt_fundamentals(raw_peer)
+        if adapted and adapted.get("metrics"):
+            peers.append(adapted)
 
     inputs_missing = []
 
@@ -922,7 +1016,8 @@ def main():
         "comps_implied_value": implied,
         "inputs_missing": inputs_missing,
         "summary": summary_text,
-        "metadata": {"date": date, "source": "yfinance", "peers_used": len(peers)},
+        "metadata": {"date": date, "source": "yfinance", "peers_used": len(peers),
+                     "peer_fx_normalization": fx_notes},
     }
     _write_summary(out_dir, summary)
 

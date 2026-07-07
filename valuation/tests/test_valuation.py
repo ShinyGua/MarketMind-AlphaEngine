@@ -34,6 +34,37 @@ def test_base_fcff_fallback_to_ocf():
     assert dcf_mod.base_fcff(inc, cf, 0.21) == pytest.approx(380.0)
 
 
+def test_norm_statements_reads_statements_wrapper():
+    # desk "statements"-wrapped, item-keyed (transposed) layout — e.g. HK/CN
+    # carriers (0941) whose income+cashflow live under raw["statements"]. The
+    # normalizer must extract the latest period, not drop it (DCF would then
+    # mis-report financial_statements as missing). Synthetic values only.
+    raw = {
+        "ticker": "TEST.HK",
+        "statements": {
+            "income_statement": {
+                "EBIT": {"2024-12-31": 1000.0, "2023-12-31": 900.0},
+                "Pretax Income": {"2024-12-31": 950.0, "2023-12-31": 850.0},
+                "Tax Provision": {"2024-12-31": 200.0, "2023-12-31": 180.0},
+            },
+            "cashflow": {
+                "Operating Cash Flow": {"2024-12-31": 1200.0, "2023-12-31": 1100.0},
+                "Capital Expenditure": {"2024-12-31": -300.0, "2023-12-31": -280.0},
+                "Depreciation And Amortization": {"2024-12-31": 150.0, "2023-12-31": 140.0},
+            },
+        },
+    }
+    income, cash_flow = runner_mod._norm_statements(raw)
+    assert income and cash_flow, "statements wrapper must yield non-empty statements"
+    assert income[0]["ebit"] == 1000.0          # newest period only
+    assert cash_flow[0]["capex"] == -300.0
+    assert cash_flow[0]["dep_amort"] == 150.0
+    assert cash_flow[0]["operating_cash_flow"] == 1200.0
+    # and the adapter recognizes the schema (not passed through untouched)
+    adapted = runner_mod._adapt_fundamentals(raw)
+    assert "metrics" in adapted and adapted["income_statement"][0]["ebit"] == 1000.0
+
+
 def test_terminal_value_requires_wacc_above_growth():
     with pytest.raises(ValueError):
         dcf_mod.terminal_value(100, 0.03, 0.03)
