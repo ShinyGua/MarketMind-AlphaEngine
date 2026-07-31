@@ -167,6 +167,32 @@ def intraday_timing_path(ws: Path, date: str) -> Path:
     return ws / "quant" / date / "intraday_timing.json"
 
 
+def chip_structure_path(ws: Path, date: str) -> Path:
+    """Deterministic volume/chip-structure artifact (scripts/compute_chip_structure.py).
+
+    DIRECTIONAL contract — unlike macro (context), intraday (timing_only) and
+    trend_regime (context_only), this layer MAY carry a stance on its own.
+    Volume and chip turnover are the closest reproducible proxy for the buying
+    and selling force behind price; they are evidence, not backdrop."""
+    return ws / "quant" / date / "chip_structure.json"
+
+
+def peer_divergence_path(ws: Path, date: str) -> Path:
+    """Per-peer price-path divergence within the cohort (scripts/peer_divergence.py)."""
+    return ws / "quant" / date / "peer_divergence.json"
+
+
+def story_map_path(ws: Path, date: str) -> Path:
+    """Narrative/game artifact from the discussion synthesis: is there a story,
+    is it big enough, how certain is it, how far along is the telling."""
+    return ws / "discussion" / date / "story_map.json"
+
+
+def investor_profile_path(ws: Path) -> Path:
+    """Undated investor cognition block: horizon, edge hypothesis, position state."""
+    return ws / "profile" / "investor_profile.json"
+
+
 def macro_regime_path(ws: Path, date: str) -> Path:
     """Shared macro regime artifact (scripts/compute_macro_regime.py)."""
     return ws.resolve().parent / "shared" / "market_context" / date / "indicators" / "macro_regime.json"
@@ -186,6 +212,38 @@ def thesis_map_path(ws: Path, date: str) -> Path:
 
 def user_review_path(ws: Path, date: str) -> Path:
     return ws / "reviews" / date / "user_review.json"
+
+
+# ── Company profile helpers ──────────────────────────────────────────
+
+# Canonical key is `yf_ticker`. The others are historical spellings found in
+# already-resolved workspaces (603072 wrote `yf_symbol`; nothing ever wrote
+# `yfinance_symbol`, yet intraday_timing.py read only that one — so every CN/HK
+# workspace silently fell back to the bare directory name, which yfinance
+# cannot resolve without an exchange suffix).
+_YF_SYMBOL_KEYS = ("yf_ticker", "yf_symbol", "yfinance_symbol", "yahoo_symbol")
+
+
+def resolve_yf_symbol(ws: Path) -> str:
+    """The yfinance-resolvable symbol for a workspace (e.g. '300685.SZ').
+
+    Reads profile/company_profile.json and tries the canonical key first, then
+    the historical spellings, then falls back to the workspace directory name.
+    Never raises — a missing/corrupt profile just yields the directory name.
+    """
+    ticker = Path(str(ws)).name
+    try:
+        profile = json.loads(
+            (Path(ws) / "profile" / "company_profile.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ticker
+    if not isinstance(profile, dict):
+        return ticker
+    for key in _YF_SYMBOL_KEYS:
+        val = profile.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ticker
 
 
 # ── Grader result paths ──────────────────────────────────────────────

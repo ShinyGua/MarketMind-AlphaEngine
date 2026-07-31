@@ -105,11 +105,14 @@ Save to `{workspace}/quant/{date}/relative_strength.csv`.
 Detect notable conditions:
 - `above_sma_20` / `below_sma_20`
 - `above_sma_50` / `below_sma_50`
-- `golden_cross_recent` (SMA20 crossed above SMA50 in last 5 days)
-- `death_cross_recent` (SMA20 crossed below SMA50 in last 5 days)
 - `positive_macd_cross_recent` / `negative_macd_cross_recent`
 - `rsi_overbought` (RSI > 70) / `rsi_oversold` (RSI < 30)
 - `volume_above_20d_avg` (latest volume > 1.5x 20-day average)
+
+Do NOT emit golden-cross / death-cross flags. MA crossovers carry no meaning
+for institutional readers; the SMAs exist only to feed `trend_regime` below.
+Volume and chip structure (the deterministic `chip_structure.json`, computed
+before this skill runs) are the reproducible signal for buying/selling force.
 
 ### 4b. Trend Regime (deterministic, context-only)
 

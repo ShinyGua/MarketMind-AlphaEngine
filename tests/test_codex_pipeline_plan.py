@@ -47,6 +47,15 @@ def test_dry_run_plan_covers_all_stages():
     assert "scripts/macro_evidence_cards.py" in flat, "collect stage missing macro evidence cards"
     assert "scripts/intraday_timing.py" in flat, "quant stage missing intraday timing block"
     assert "scripts/build_shared_context.py" in flat, "valuation stage missing shared-context bundler"
+    # chip layer: CN flows in collect, structure + cards before dedup in normalize
+    assert "scripts/collect_cn_chips.py" in flat, "collect stage missing CN chip collector"
+    assert "scripts/compute_chip_structure.py" in flat, "normalize stage missing chip structure"
+    assert "scripts/chip_evidence_cards.py" in flat, "normalize stage missing chip evidence cards"
+    norm_calls = [" ".join(c) for c in ctx.plan if "chip" in " ".join(c) or "dedup" in " ".join(c)]
+    dedup_idx = next(i for i, c in enumerate(norm_calls) if "dedup_evidence" in c)
+    chip_idx = next(i for i, c in enumerate(norm_calls) if "compute_chip_structure" in c)
+    cards_idx = next(i for i, c in enumerate(norm_calls) if "chip_evidence_cards" in c)
+    assert chip_idx < cards_idx < dedup_idx, "chip structure/cards must run before dedup"
     # LLM stages issued as codex exec
     assert "codex exec" in flat
     for skill in ("mm-company-analyst", "mm-report-writer", "mm-decision-maker",

@@ -69,3 +69,7 @@ scripts/*_build_*.py
 # Stray rendered report artifacts if produced outside workspaces/
 /report.pdf
 /report.html
+# User-supplied reference research PDFs dropped at the repo root
+/*.pdf
+# User-supplied reference notes dropped at the repo root
+/*.html

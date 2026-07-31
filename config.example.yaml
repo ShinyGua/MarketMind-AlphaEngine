@@ -16,6 +16,33 @@ company:
   market_profile:               # resolved by /mm:init (US | HK | CN | JP | UK | EU)
   sector_profile:               # resolved by /mm:init
 
+# --- Investor Strategy (filled by /mm:init Step 4b — the cognition layer) ---
+# WHOSE question is the pipeline answering? A swing question is not answered
+# with a 3-year DCF argument. Mirrored to profile/investor_profile.json and
+# bundled into shared_context.investor for every analyst/panelist.
+strategy:
+  horizon: swing                # short (days–weeks) | swing (1–3 months) | long (6 months+)
+  edge_hypothesis: ""           # the user's own framework & highest-win-rate stock type, verbatim
+  position_state: none          # none | holding | adding
+  cost_basis:                   # number in listing currency, when holding
+
+# --- Cap Tiers & Playbook (how capital plays a story at each size) ---
+# Thresholds are per-market (an A-share "small cap" is not a US "small cap"),
+# in the listing currency. The resolver stamps `cap_tier` into
+# company_profile.json; analysts read the playbook to judge whether a story is
+# big enough FOR THIS TIER and how the dominant money will trade it.
+cap_tiers:
+  US:  {mega: 200e9, large: 10e9, mid: 2e9, small: 300e6}   # below small → micro
+  CN:  {mega: 500e9, large: 80e9, mid: 15e9, small: 4e9}
+  HK:  {mega: 500e9, large: 80e9, mid: 15e9, small: 4e9}
+  # other markets: use US bands on the USD-converted cap
+cap_tier_playbook:
+  mega:  "Institution-priced. The story must be industry-scale and verifiable; re-rating is slow, entries/exits take weeks. Narrative surprises move it less than earnings revisions."
+  large: "Institution-led with retail beta. Story needs numbers behind it within 2 quarters; sector rotation dominates single-name narrative."
+  mid:   "Mixed game. A credible story plus a clean chip structure can re-rate it 30-50%; watch who is telling the story (institutions vs hot money)."
+  small: "Theme- and hot-money-driven. The story may stay hazy — certainty matters less than freshness and float; liquidity evaporates on the way down. Chip structure IS the thesis."
+  micro: "Shell/restructuring/manipulation territory. Fundamentals rarely price it; only the game does. Extreme caution — most edges here are someone else's exit."
+
 # --- Workspace ---
 workspace:
   base_dir: workspaces
@@ -75,6 +102,13 @@ data_sources:
       DTWEXBGS: DX-Y.NYB
       VIXCLS: ^VIX
     lookback_months: 16         # >= 13 monthly CPI obs for YoY even during the pre-release window (CPI lags ~6wk) + 1y VIX percentile
+
+  cn_chips:
+    provider: akshare           # free, keyless — A-share chip/flow signals only (market_profile: CN)
+    # blocks: turnover 换手率, main_force 主力资金流, lhb 龙虎榜, northbound 北向持股,
+    #         margin 融资余额, holder_count 股东户数, restricted_release 解禁
+    # Each block degrades independently (data_quality: akshare | unavailable);
+    # some eastmoney hosts intermittently drop connections — that is expected.
 
 # --- Macro Regime (scripts/compute_macro_regime.py thresholds) ---
 # Deterministic classification written to shared market_context/{date}/indicators/macro_regime.json.
@@ -145,6 +179,23 @@ quant:
     rsi_window: 14
     macd: [12, 26, 9]
     swing_pivot_window: 5       # bars each side to confirm a 4h pivot high/low
+  # Volume & chip structure (scripts/compute_chip_structure.py +
+  # scripts/collect_cn_chips.py + scripts/chip_evidence_cards.py — deterministic).
+  # DIRECTIONAL: unlike macro (context), intraday (timing-only) and trend_regime
+  # (context-only), chip/volume structure is first-class stance evidence —
+  # analysts and panelists may ground a stance or vote in it.
+  chips:
+    enabled: true
+    history_period: 400d        # yfinance daily fetch when the raw CSV is thin
+    chip_window_days: 120       # VPVR volume-at-price window
+    histogram_bins: 40
+    swing_pivot_window: 5
+    platform_window_days: 60    # box/base detection window
+    platform_max_width_pct: 18.0
+    breakout_volume_mult: 1.5   # 5d avg vol vs base avg → volume-confirmed
+    volume_ratio_expanding: 1.5 # 量比 thresholds (daily proxy)
+    volume_ratio_contracting: 0.6
+    min_rows: 60
 
 # --- Valuation (Scenario DCF + Comps) ---
 # Computed in Stage 6 by mm-valuation-engine (valuation/run_valuation.py).
@@ -214,10 +265,10 @@ discussion:
   enabled: true
   analyst_roles:                  # ranked by importance, uncomment to enable
     - company_analyst             # 1. fundamentals, events, catalysts
-    - risk_analyst                # 2. bear case, failure conditions
-    - market_analyst              # 3. macro context, alpha vs beta
-    # - valuation_analyst         # 4. P/E, DCF, price target (uncomment to enable)
-    # - technical_analyst         # 5. chart patterns, momentum signals (uncomment to enable)
+    - chips_analyst               # 2. chip structure & game (筹码博弈) — volume/flow evidence, operator's view
+    - risk_analyst                # 3. bear case, failure conditions
+    - market_analyst              # 4. macro context, alpha vs beta
+    # - valuation_analyst         # 5. P/E, DCF, price target (uncomment to enable)
     # - catalyst_analyst          # 6. event timing, earnings calendar (uncomment to enable)
   analyst_risk_profiles:          # asymmetric loss mandate per role (risk_averse | risk_neutral)
     risk_analyst: risk_averse     # penalizes drawdown 2x vs missed upside

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / ".claude" / "skills"
 
 MEMO_SKILLS = ("mm-market-analyst", "mm-company-analyst", "mm-risk-analyst",
-               "mm-valuation-analyst", "mm-technical-analyst", "mm-catalyst-analyst")
+               "mm-valuation-analyst", "mm-chips-analyst", "mm-catalyst-analyst")
 PANELIST_SKILLS = ("mm-discussion-panelist", "mm-decision-panelist")
 
 # The fence that keeps mandates analytical: must survive verbatim in every copy.

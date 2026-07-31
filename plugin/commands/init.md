@@ -83,6 +83,53 @@ Report type? (daily / weekly, default: daily)
 - If user replies "weekly" or "w" → set run_mode to weekly
 - Any other reply (including empty/enter) → default to daily
 
+### 4b. Investor Profile (三问 — the cognition layer)
+
+The pipeline writes for a specific investor, not a generic reader. Ask three
+questions, one at a time; each has a default so the user can just press enter.
+
+**Q1 — Horizon (周期):**
+
+**English:**
+```
+Your holding horizon for this name? (short: days–weeks / swing: 1–3 months / long: 6 months+, default: swing)
+```
+
+**Chinese:**
+```
+这只票你打算做什么周期？（short 短线：数日至数周 / swing 波段：1–3个月 / long 中长线：6个月以上，默认：swing）
+```
+
+Map replies (`短线`/`s`/`short` → `short`; `波段`/`swing` → `swing`; `长线`/`l`/`long` → `long`) → `strategy.horizon`.
+
+**Q2 — Edge hypothesis (选股框架与胜率假设):**
+
+**English:**
+```
+In one or two sentences: what is your stock-picking framework, and what TYPE of stock has given you the highest win rate? (free text; enter to skip)
+```
+
+**Chinese:**
+```
+用一两句话说说：你的选股框架是什么？哪种类型的股票你的胜率最高？（自由文本；直接回车可跳过）
+```
+
+Store verbatim → `strategy.edge_hypothesis` (empty string if skipped — do NOT invent one).
+
+**Q3 — Position state (持仓状态):**
+
+**English:**
+```
+Current position in this name? (none / holding — include cost basis if holding / adding, default: none)
+```
+
+**Chinese:**
+```
+目前持仓状态？（none 未持有 / holding 已持有——请附上成本价 / adding 考虑加仓，默认：none）
+```
+
+Map → `strategy.position_state` (`none` | `holding` | `adding`) and, when given, `strategy.cost_basis` (number in the listing currency).
+
 ### 5. Enrich via yfinance (Optional)
 
 Try to get additional details:
@@ -176,8 +223,22 @@ Create `workspaces/{TICKER}/config.yaml` with:
 - `company.market_profile` → inferred market
 - `company.sector_profile` → resolved sector (lowercase, underscores)
 - `run_mode` → user's choice (daily/weekly)
+- `strategy.horizon` / `strategy.edge_hypothesis` / `strategy.position_state` (+ `strategy.cost_basis` when given) → from Step 4b
 
 Keep all other values as defaults.
+
+**Also write `workspaces/{TICKER}/profile/investor_profile.json`** (undated —
+bundled into `shared_context.investor` by the context builder):
+
+```json
+{
+  "horizon": "short|swing|long",
+  "edge_hypothesis": "<the user's verbatim answer, or \"\">",
+  "position_state": "none|holding|adding",
+  "cost_basis": null,
+  "captured_at": "<YYYY-MM-DD>"
+}
+```
 
 ### 10. Initialize status.json
 

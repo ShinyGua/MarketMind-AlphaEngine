@@ -10,6 +10,13 @@ macro layer:
   - intraday:     quant/{date}/intraday_timing.json (timing-only — frames entry/
                   exit zones, never a vote reason)
 
+  - chips:        quant/{date}/chip_structure.json (DIRECTIONAL — volume/chip
+                  structure is first-class stance evidence; histogram stripped
+                  to keep the bundle lean)
+  - peer_divergence: quant/{date}/peer_divergence.json (per-peer path classes)
+  - investor:     profile/investor_profile.json (horizon / edge hypothesis /
+                  position state — whose question the pipeline is answering)
+
 Absent inputs are skipped (self-degrading). Always exits 0.
 
 Usage:
@@ -35,6 +42,9 @@ def build(workspace: Path, date: str) -> dict:
         "peers": ws / "profile" / "peer_set.json",
         "macro_regime": contracts.macro_regime_path(ws, date),
         "intraday": contracts.intraday_timing_path(ws, date),
+        "chips": contracts.chip_structure_path(ws, date),
+        "peer_divergence": contracts.peer_divergence_path(ws, date),
+        "investor": contracts.investor_profile_path(ws),
     }
     ctx = {}
     for name, path in sections.items():
@@ -42,6 +52,9 @@ def build(workspace: Path, date: str) -> dict:
             ctx[name] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+    # the VPVR histogram is chart fodder — too token-heavy for analyst context
+    if isinstance(ctx.get("chips"), dict):
+        (ctx["chips"].get("chip_distribution") or {}).pop("histogram", None)
     for cp in (ws / "raw" / date / "calendar" / "catalysts.json",
                ws / "raw" / "calendar" / "catalysts.json"):
         try:

@@ -66,6 +66,11 @@ _DEFAULTS = {
         "UK": {"risk_free_rate": 0.040, "country_risk_premium": 0.010, "cost_of_debt": 0.05},
         "EU": {"risk_free_rate": 0.025, "country_risk_premium": 0.015, "cost_of_debt": 0.04},
     },
+    # role of valuation in the decision, per market: "anchor" (US — full weight
+    # in the thesis) vs "reference" (CN/HK — a value floor / sanity read; the
+    # story+chips game layer leads and valuation must not appear in top_reasons).
+    "role_by_market": {"US": "anchor", "CN": "reference", "HK": "reference",
+                       "JP": "anchor", "UK": "anchor", "EU": "anchor"},
     # optional DCF-vs-comps sanity net: when the DCF base intrinsic value exceeds
     # cap × comps blended, cap the DCF weight and downgrade its confidence. None = off.
     "dcf_comps_divergence_cap": None,
@@ -987,10 +992,13 @@ def main():
                         f"({valuation_method}), margin of safety {mos_txt}, "
                         f"verdict {verdict} (confidence {confidence}).")
 
+    role_map = cfg.get("role_by_market") or {}
+    valuation_role = role_map.get(market_profile, "anchor")
     summary = {
         "ticker": ticker,
         "applicable": True,
         "meta": {"market_profile": market_profile, "currency": currency},
+        "role": valuation_role,
         "confidence": confidence,
         "current_price": _round(price) if price else None,
         "fair_value": fair_value,

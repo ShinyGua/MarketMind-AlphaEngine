@@ -27,7 +27,7 @@ explicitly (`$mm-…`) only for targeted debugging.
 | `normalize` | `.claude/skills/mm-orchestrator/SKILL.md` |
 | `quant` | `.claude/skills/mm-quant-analyst/SKILL.md` |
 | `valuation` | `.claude/skills/mm-valuation-engine/SKILL.md` |
-| `discuss_memos` | `.claude/skills/mm-market-analyst/SKILL.md`, `.claude/skills/mm-company-analyst/SKILL.md`, `.claude/skills/mm-risk-analyst/SKILL.md`, optional `.claude/skills/mm-valuation-analyst/SKILL.md`, `.claude/skills/mm-technical-analyst/SKILL.md`, `.claude/skills/mm-catalyst-analyst/SKILL.md` |
+| `discuss_memos` | `.claude/skills/mm-market-analyst/SKILL.md`, `.claude/skills/mm-company-analyst/SKILL.md`, `.claude/skills/mm-risk-analyst/SKILL.md`, optional `.claude/skills/mm-valuation-analyst/SKILL.md`, `.claude/skills/mm-chips-analyst/SKILL.md`, `.claude/skills/mm-catalyst-analyst/SKILL.md` |
 | `discuss_debate` | `.claude/skills/mm-discussion-panelist/SKILL.md` (per-round views), `.claude/skills/mm-discussion-moderator/SKILL.md` (tally) |
 | `discuss_synthesis` | `.claude/skills/mm-discussion-moderator/SKILL.md` |
 | `draft` | `.claude/skills/mm-report-writer/SKILL.md` |
@@ -59,7 +59,7 @@ explicitly (`$mm-…`) only for targeted debugging.
 - `mm-report-writer`: daily/weekly report drafting.
 - `mm-risk-analyst`: risk memo and counterarguments.
 - `mm-sector-desk`: sector news, peers, industry context.
-- `mm-technical-analyst`: chart and momentum interpretation.
+- `mm-chips-analyst`: chip structure & game analysis (筹码博弈) — volume/flow directional evidence.
 - `mm-valuation-analyst`: valuation memo.
 - `mm-valuation-engine`: formula-first DCF/comps engine.
 - `mm-web-research`: web/NASDAQ news collection with provenance.

@@ -22,9 +22,12 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "mcp"))
+from shared import contracts  # noqa: E402
 
 DEFAULTS = {
     "enabled": True,
@@ -211,13 +214,10 @@ def build(ticker: str, cfg: dict) -> dict:
 
 
 def run(workspace: Path, date: str) -> dict:
-    ticker = os.path.basename(os.path.normpath(str(workspace)))
-    try:
-        profile = json.loads(
-            (workspace / "profile" / "company_profile.json").read_text(encoding="utf-8"))
-        ticker = profile.get("yfinance_symbol") or ticker
-    except (OSError, ValueError):
-        pass
+    # Canonical symbol resolution (yf_ticker → yf_symbol → … → dir name);
+    # the old lookup read a key nobody wrote, so CN/HK names lost their
+    # exchange suffix and always came back available:false.
+    ticker = contracts.resolve_yf_symbol(workspace)
     cfg = dict(DEFAULTS)
     try:
         rc = json.loads((workspace / "resolved_config.json").read_text(encoding="utf-8"))

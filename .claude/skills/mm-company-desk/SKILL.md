@@ -128,7 +128,7 @@ Call mcp__market-data__get_fundamentals with: ticker: {TICKER}
 
 Save the response verbatim to `{workspace}/raw/{date}/fundamentals/{TICKER}.json`.
 
-Then read `{workspace}/profile/peer_set.json` and, for each entry in its `peers[]` list, call `get_fundamentals` with that peer's `ticker` and save to `{workspace}/raw/{date}/fundamentals/peers/{PEER_TICKER}.json`. Peers power the comps quartile benchmarking, so fetch all of them (typically 4–6).
+Then read `{workspace}/profile/peer_set.json` and, for each entry in its `peers[]` list, call `get_fundamentals` with that peer's `ticker` and save to `{workspace}/raw/{date}/fundamentals/peers/{PEER_TICKER}.json`. Peers power the comps quartile benchmarking, so fetch all of them (typically 5–10).
 
 This is best-effort: if a fundamentals fetch fails or returns an `error` for a given ticker, skip that ticker and continue — the valuation engine degrades gracefully on missing peers or statements. Do **not** let a fundamentals failure abort the desk; price data remains the critical output.
 

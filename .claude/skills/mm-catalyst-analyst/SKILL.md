@@ -31,6 +31,15 @@ The debate that follows this memo happens in the discussion panel loop, where yo
 - `{workspace}/quant/{date}/quant_summary.json` — price context
 - `{workspace}/profile/company_profile.json` — company context (undated)
 
+- `{workspace}/quant/{date}/chip_structure.json` — volume & chip structure (量比, VPVR cost distribution, profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/融资/龙虎榜/股东户数/解禁). **DIRECTIONAL** — unlike macro/intraday/trend_regime, chip evidence may carry a stance on its own; cite `ev_{date}_chip_*` card ids. Also available as `shared_context.chips`.
+
+- `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
+  `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
+  land your conclusion on their horizon (no 3-year DCF answer to a swing
+  question, no day-trade framing for a long-horizon holder), and if this stock
+  does not fit their stated edge hypothesis, SAY SO explicitly instead of
+  forcing it into the frame. Absent file → assume swing horizon, no stated edge.
+
 **Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
 ## Risk Mandate
@@ -84,6 +93,11 @@ The memo MUST contain:
 
 ## Time Horizon Judgment
 <How does the catalyst calendar affect the optimal holding period?>
+## Story & Game (故事与博弈)
+<From YOUR lens, answer the four game questions in 3-6 sentences: (1) What story is this stock telling? (2) Is the story big enough for this company's size? (3) How certain is it — confirmed / high-probability / hazy-but-coming / pure theme? (4) Where is the telling — untold / starting / fermenting / consensus / realized / falsified? If your lens has nothing to add on one question, skip it rather than pad.>
+
+## Off-Template Factors (框架之外)
+<Where does this stock NOT fit your framework? What edge factor — an ownership situation, a pending deal, a regulatory wildcard, a mania theme — could drive a violent move your structured analysis would miss? Answer honestly; "none visible" is acceptable, an invented anomaly is not. The moderator carries this verbatim into thesis_map.unconventional_factors.>
 ```
 
 ## Quality Rules
