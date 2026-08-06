@@ -35,7 +35,7 @@ it plainly; never imply it is a guaranteed outcome.
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
-Role: $ARGUMENTS[2] (e.g. `company_analyst`, `risk_analyst`, `market_analyst`, `valuation_analyst`, `technical_analyst`, `catalyst_analyst`)
+Role: $ARGUMENTS[2] (e.g. `company_analyst`, `risk_analyst`, `market_analyst`, `valuation_analyst`, `chips_analyst`, `catalyst_analyst`)
 Round: $ARGUMENTS[3] (1-based integer)
 
 **All paths below use `{date}` = $ARGUMENTS[1], `{role}` = $ARGUMENTS[2], `{N}` = $ARGUMENTS[3].**
@@ -59,6 +59,17 @@ Round: $ARGUMENTS[3] (1-based integer)
   consume `label`; do not set or flip a stance on price-vs-SMA or a golden/death
   cross. Momentum (MACD/RS), news/catalysts, fundamentals, valuation, and risk
   carry the stance — SMA only colors how you frame the trend.
+- `shared_context.chips` — volume & chip structure (量比, VPVR cost distribution,
+  profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/
+  融资/龙虎榜/股东户数/解禁). **DIRECTIONAL**: unlike trend_regime (backdrop),
+  macro (context) and intraday (timing-only), chip evidence may carry a stance/
+  vote on its own — cite the `ev_…_chip_*` cards. Respect per-block `data_quality`.
+- `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
+  `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
+  land your conclusion on their horizon (no 3-year DCF answer to a swing
+  question, no day-trade framing for a long-horizon holder), and if this stock
+  does not fit their stated edge hypothesis, SAY SO explicitly instead of
+  forcing it into the frame. Absent file → assume swing horizon, no stated edge.
 - `workspaces/shared/market_context/{date}/` — shared macro data:
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your stance hinges on
@@ -101,7 +112,9 @@ rhetorical confidence. The conviction rubric is unchanged.
 
 1. **Adopt your role's lens.** A `risk_analyst` weighs the bear case and failure
    conditions; a `company_analyst` weighs fundamentals and catalysts; a
-   `market_analyst` weighs macro/alpha-vs-beta; a `valuation_analyst` weighs the
+   `market_analyst` weighs macro/alpha-vs-beta; a `chips_analyst` weighs the
+   volume/chip structure and the operator's game (a DIRECTIONAL lens — chip
+   evidence may carry the stance on its own); a `valuation_analyst` weighs the
    valuation reference (DCF + comps + blended fair value), leading with its
    confidence; etc. Your memo already states this position — start there.
 2. **Form a stance from the evidence**, weighing your lens against the other memos.
@@ -169,7 +182,8 @@ Write to: `{workspace}/discussion/{date}/panel/round_{N}/{role}_view.json`
   "changed_beliefs": "none|bearish->neutral|bullish->bearish|...",
   "evidence_gaps": [
     "<what data would sharpen or change this stance>"
-  ]
+  ],
+  "anomaly_watch": "<REQUIRED: where does this stock NOT fit your framework — the off-template factor that could drive a violent move your lens would miss. Honest 'none visible' is acceptable; an invented anomaly is not. The moderator carries this verbatim into thesis_map.unconventional_factors.>"
 }
 ```
 
@@ -180,9 +194,18 @@ Write to: `{workspace}/discussion/{date}/panel/round_{N}/{role}_view.json`
 - A **low-confidence DCF (or low-confidence blended fair value) cannot be the sole
   reason** for a bullish or bearish stance — pair it with role-lens evidence
   (fundamentals, catalysts, risk, technicals, news); on its own it is a caveat.
+- **Reference-role valuation (CN/HK)**: when `valuation_summary.role` is
+  `"reference"`, the fair-value read may only corroborate or add a caveat — it
+  must not be the stated reason for your stance. In game-driven markets the
+  story, chips, and fundamentals lead; valuation is a floor/sanity check.
 - A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
   for a stance — pair it with role-lens evidence (fundamentals, catalysts, risk,
   news, MACD/RS); on its own it is trend color, not a thesis.
+- **Chip/volume structure IS valid sole grounds for a stance** (`shared_context.chips`,
+  `ev_…_chip_*` cards) — this asymmetry with the SMA and valuation rules is
+  deliberate: chip exchange is the reproducible trace of buying/selling force,
+  not derived chart decoration. Respect `data_quality` — an `unavailable` block
+  supports nothing.
 - `stance` must be exactly `bullish`, `neutral`, or `bearish`. `conviction` is a
   float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.

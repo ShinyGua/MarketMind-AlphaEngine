@@ -192,13 +192,27 @@
           {{ quant.technical.macd_hist >= 0 ? '+' : '' }}{{ quant.technical.macd_hist }}
         </span>
       </div>
-      <div class="flex flex-col">
-        <span class="text-xs text-gray-400 uppercase tracking-wide">SMA20</span>
-        <span class="font-semibold">{{ quant.technical.sma_20 }}</span>
+      <div v-if="chips && chips.volume && chips.volume.volume_ratio != null" class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">量比 Vol Ratio</span>
+        <span :class="chips.volume.volume_ratio >= 1.5 ? 'text-amber-600' : ''" class="font-semibold">
+          {{ chips.volume.volume_ratio }}
+        </span>
       </div>
-      <div class="flex flex-col">
-        <span class="text-xs text-gray-400 uppercase tracking-wide">SMA50</span>
-        <span class="font-semibold">{{ quant.technical.sma_50 }}</span>
+      <div v-if="chips && chips.chip_distribution && chips.chip_distribution.concentration != null" class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">筹码集中度</span>
+        <span class="font-semibold">{{ chips.chip_distribution.concentration }}</span>
+      </div>
+      <div v-if="chips && chips.chip_distribution && chips.chip_distribution.profit_ratio != null" class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">获利盘</span>
+        <span :class="chips.chip_distribution.profit_ratio >= 0.5 ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+          {{ Math.round(chips.chip_distribution.profit_ratio * 100) }}%
+        </span>
+      </div>
+      <div v-if="chips && chips.cn_flows && chips.cn_flows.main_force && chips.cn_flows.main_force.net_5d != null" class="flex flex-col">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">主力5日净流入</span>
+        <span :class="chips.cn_flows.main_force.net_5d >= 0 ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+          {{ (chips.cn_flows.main_force.net_5d / 1e8).toFixed(2) }}亿
+        </span>
       </div>
       <div v-if="quant.technical.atr_14" class="flex flex-col">
         <span class="text-xs text-gray-400 uppercase tracking-wide">ATR(14)</span>
@@ -311,6 +325,7 @@ createApp({
     const reportMarkdown = ref('')
     const decision    = ref(null)
     const quant       = ref(null)
+    const chips       = ref(null)
     const hasPdf      = ref(false)
 
     const loading       = ref(false)
@@ -434,19 +449,23 @@ createApp({
       loadingReport.value = true
       decision.value = null
       quant.value = null
+      chips.value = null
       hasPdf.value = false
       reportMarkdown.value = ''
 
       // Load in parallel
-      const [mdResp, decisionData, quantData] = await Promise.allSettled([
+      const [mdResp, decisionData, quantData, chipsData] = await Promise.allSettled([
         fetch(`/api/tickers/${ticker}/${date}/report`).then(r => r.ok ? r.text() : ''),
         api(`/api/tickers/${ticker}/${date}/decision`),
         api(`/api/tickers/${ticker}/${date}/quant`),
+        api(`/api/tickers/${ticker}/${date}/chips`),
       ])
 
       if (mdResp.status === 'fulfilled')  reportMarkdown.value = mdResp.value
       if (decisionData.status === 'fulfilled') decision.value = decisionData.value
       if (quantData.status === 'fulfilled')    quant.value = quantData.value
+      if (chipsData.status === 'fulfilled' && chipsData.value && chipsData.value.available)
+        chips.value = chipsData.value
 
       // Check PDF availability
       const pdfCheck = await fetch(`/api/tickers/${ticker}/${date}/pdf`, { method: 'HEAD' })
@@ -561,7 +580,7 @@ createApp({
 
     return {
       view, route, tickers, tickerInfo, tickerDates,
-      decision, quant, hasPdf, loading, loadingReport,
+      decision, quant, chips, hasPdf, loading, loadingReport,
       reportMode, reportModes, slideIndex, slides,
       renderedReport, pdfUrl,
       decisionClass, goHome, goTicker, goReport, prevSlide, nextSlide, goToSlide, handleSlideWheel,

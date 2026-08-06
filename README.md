@@ -202,7 +202,7 @@ The `/mm:init` flow:
 |       |                                                              |
 |       v                                                              |
 |  Quant snapshot                                                      |
-|       | RSI, MACD, SMA, ATR, relative strength                       |
+|       | RSI, MACD, volume & chip structure, relative strength        |
 |       v                                                              |
 |  Valuation (scenario DCF + comps)                                    |
 |       | intrinsic-value range, margin of safety, verdict             |
@@ -243,7 +243,7 @@ The `/mm:init` flow:
 | Stage | What Happens | Agents |
 |-------|--------------|--------|
 | **Collect** | Deterministic macro layer first (FRED/proxy series → regime classification → macro evidence cards), then macro, company, and sector data from yfinance, NewsAPI, and EDGAR, plus web/NASDAQ news with source provenance | macro scripts + 4 collectors in parallel |
-| **Quant** | RSI, MACD, SMA, ATR, and relative strength calculations in Python, plus a deterministic 1h/4h intraday timing block (timing-only) | `mm-quant-analyst` |
+| **Quant** | RSI, MACD, SMA, ATR and relative strength in Python, plus the deterministic chip-structure engine (volume/cost distribution/support-resistance — directional evidence), peer-path divergence, and a 1h/4h intraday timing block (timing-only) | `mm-quant-analyst` |
 | **Valuation** | Scenario DCF (live-10Y risk-free) + peer comps + margin of safety from yfinance fundamentals | `mm-valuation-engine` |
 | **Debate** | Independent memos, then a multi-round panel of analyst views → chair tally → convergence | 3-6 analysts |
 | **Draft** | JPM-style narrative report with evidence traceability | `mm-report-writer` |
@@ -258,10 +258,10 @@ The `/mm:init` flow:
 | # | Role | Focus | Default |
 |---|------|-------|:-------:|
 | 1 | `company_analyst` | Fundamentals, company events, catalysts | ✓ |
-| 2 | `risk_analyst` | Bear case, downside risks, failure conditions | ✓ |
-| 3 | `market_analyst` | Macro context, sector positioning, alpha vs beta | ✓ |
-| 4 | `valuation_analyst` | Interprets the valuation engine's DCF range, comps, and margin of safety | |
-| 5 | `technical_analyst` | Chart patterns, momentum, trading signals | |
+| 2 | `chips_analyst` | Chip structure & game (筹码博弈): volume/flow evidence, operator's view | ✓ |
+| 3 | `risk_analyst` | Bear case, downside risks, failure conditions | ✓ |
+| 4 | `market_analyst` | Macro context, sector positioning, alpha vs beta | ✓ |
+| 5 | `valuation_analyst` | Interprets the valuation engine's DCF range, comps, and margin of safety | |
 | 6 | `catalyst_analyst` | Event timing, earnings calendar, near-term catalysts | |
 
 Enable additional analysts by uncommenting roles in `config.yaml`.
@@ -287,7 +287,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-company-analyst/    # Company fundamentals analysis
 │       ├── mm-risk-analyst/       # Risk identification + counter-arguments
 │       ├── mm-valuation-analyst/  # Valuation framework + price target
-│       ├── mm-technical-analyst/  # Chart interpretation + signals
+│       ├── mm-chips-analyst/      # Chip structure & game (筹码博弈)
 │       ├── mm-catalyst-analyst/   # Event timing + catalyst calendar
 │       ├── mm-discussion-panelist/ # Per-role panel view (stance + conviction + challenges)
 │       ├── mm-discussion-moderator/ # Panel chair: per-round tally + synthesis
@@ -444,7 +444,7 @@ review:
 - [ ] **Historical Comparison**: Compare the latest report against previous runs and track thesis evolution
 - [ ] **Sentiment Analysis**: Social sentiment, options flow, and institutional positioning
 - [ ] **Real-Time Dashboard**: Live monitoring with auto-refresh
-- [ ] **Chinese Market Support**: Full A-share coverage with local data sources such as Tushare and AKShare
+- [x] **Chinese Market Support (v1)**: A-share chip/flow signals via AKShare (换手率/主力资金/龙虎榜/北向/融资/股东户数/解禁), chip-structure engine, story & game layer, CN valuation-as-reference
 - [ ] **Automated Scheduling**: Cron-based daily report generation
 - [ ] **Custom Analyst Personas**: Configurable risk appetite, directional bias, and horizon overlays
 

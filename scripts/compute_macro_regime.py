@@ -169,8 +169,17 @@ _CH = {
 }
 
 
-def build_summary(regime: dict) -> dict:
-    """Deterministic one-line summary in both languages from available blocks."""
+def build_summary(regime: dict, lang: str | None = None):
+    """Deterministic one-line summary from the available blocks.
+
+    `lang=None` returns the bilingual `{"en": ..., "ch": ...}` CACHE — which is
+    what this artifact stores, deliberately. macro_regime.json lives under
+    workspaces/shared/ and every workspace's run overwrites it for the same
+    date; with four `ch` and two `en` workspaces, a single-language file would
+    take the language of whichever workspace ran last. The language boundary
+    therefore sits at the per-workspace bundle (build_shared_context.py), not
+    here. Pass an explicit lang to get one string.
+    """
     en, ch = [], []
     r = regime["rates"]["us10y"]
     if r.get("value") is not None and r.get("direction"):
@@ -201,14 +210,20 @@ def build_summary(regime: dict) -> dict:
         en.append(f"HY spreads {cr['regime']}")
         ch.append(f"高收益利差{_CH.get(cr['regime'], cr['regime'])}")
     if not en:
-        return {"en": "Macro data unavailable for this run (free-tier degradation).",
+        both = {"en": "Macro data unavailable for this run (free-tier degradation).",
                 "ch": "本次运行宏观数据不可用（免费数据源降级）。"}
-    return {"en": "; ".join(en) + ".", "ch": "；".join(ch) + "。"}
+    else:
+        both = {"en": "; ".join(en) + ".", "ch": "；".join(ch) + "。"}
+    if lang is None:
+        return both
+    return both.get(lang, both["en"])
 
 
 def _quality(sources: dict, sid: str) -> str:
     src = (sources.get("series", {}).get(sid) or {}).get("source", "missing")
-    if src == "fred":
+    # fred_csv = the same FRED series over the keyless public CSV endpoint; it is
+    # real FRED data in FRED units, so it carries full "fred" quality, not "proxy".
+    if src in ("fred", "fred_csv"):
         return "fred"
     if src.startswith("yfinance"):
         return "proxy"
@@ -283,7 +298,10 @@ def compute(workspace: Path, date: str) -> dict:
         "credit": {**credit_regime(hy, th["hy_regime"]), "data_quality": mhy["data_quality"]},
         "inputs_missing": list(sources.get("inputs_missing", [])),
     }
-    regime["summary"] = build_summary(regime)
+    # `summary_i18n`, not `summary`: the name says "cache, pick one" rather than
+    # "report-ready". A surviving dict-valued `summary` is then a detectable
+    # pre-fix artifact. build_shared_context.py resolves it per workspace.
+    regime["summary_i18n"] = build_summary(regime)
 
     # temp file + os.replace: concurrent same-date readers (other tickers'
     # valuation runs) must never see a truncated shared artifact

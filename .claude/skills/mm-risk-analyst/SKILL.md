@@ -17,6 +17,23 @@ Identify risks and failure conditions, and — when the evidence warrants — bu
 ## Language
 Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
 
+### Language Map
+
+| `en` (as written below) | `ch` |
+|---|---|
+| `## Story & Game` | `## 故事与博弈` |
+| `## Off-Template Factors` | `## 框架之外` |
+
+Enum glosses — the artifact stores the English VALUE; print ONE gloss in the report language:
+
+| values | `en` | `ch` |
+|---|---|---|
+| `certainty.tier`: `confirmed` / `high_probability` / `hazy_but_coming` / `pure_theme` | confirmed / high-probability / hazy-but-coming / pure theme | 确定 / 大概率 / 朦胧但必来 / 纯题材 |
+| `stage.tier`: `untold` / `starting` / `fermenting` / `consensus` / `realized` / `falsified` | untold / starting / fermenting / consensus / realized / falsified | 未讲 / 开始讲 / 发酵 / 共识 / 兑现 / 证伪 |
+
+**Exactly one language per run.** If `language` is `ch`, substitute the `ch` column verbatim. Never emit a heading containing both.
+
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
@@ -28,10 +45,19 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 - `{workspace}/quant/{date}/quant_summary.json` — technical indicators and flags
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read this when assessing **multi-day** risk signals (volume divergence, ATR trend, momentum divergence); the snapshot above only carries the latest row. **Moving averages (SMA20/50) are trend backdrop, not the case** — consume the single `shared_context.quant.trend_regime.label`; do not anchor your memo on price-vs-SMA or a golden/death cross. Lead with downside scenarios, ATR/volume, and support breaks; SMA only colors *how* you frame the trend.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` (index levels, regime) as the default read; `raw/*.csv` (VIX, TNX, USD, index series) when assessing macro/risk-regime trajectory.
-- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit). Context for risk framing — never by itself a reason to flip a stance.
+- `shared_context.macro_regime` — deterministic macro regime (rates, curve, inflation, policy, VIX percentile, USD, credit), with `summary` already resolved to the report language. Read it from the bundle, not from the raw shared artifact (a cross-workspace bilingual cache). Context for risk framing — never by itself a reason to flip a stance.
 - `{workspace}/profile/company_profile.json` — company profile (undated)
 - `{workspace}/profile/peer_set.json` — peer context (undated)
 - `{workspace}/raw/{date}/calendar/catalysts.json` — upcoming events
+
+- `{workspace}/quant/{date}/chip_structure.json` — volume & chip structure (量比, VPVR cost distribution, profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/融资/龙虎榜/股东户数/解禁). **DIRECTIONAL** — unlike macro/intraday/trend_regime, chip evidence may carry a stance on its own; cite `ev_{date}_chip_*` card ids. Also available as `shared_context.chips`.
+
+- `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
+  `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
+  land your conclusion on their horizon (no 3-year DCF answer to a swing
+  question, no day-trade framing for a long-horizon holder), and if this stock
+  does not fit their stated edge hypothesis, SAY SO explicitly instead of
+  forcing it into the frame. Absent file → assume swing horizon, no stated edge.
 
 **Performance optimization:** Read `{workspace}/shared_context/{date}.json` (contains quant, profile, peers, catalysts in one file) instead of reading each file separately. Read `{workspace}/normalized/{date}/evidence_digest.json` (all evidence cards in one file) instead of individual card files.
 
@@ -92,6 +118,11 @@ The memo MUST contain:
 
 ## Time Horizon Judgment
 <Over what timeframe are these risks most acute?>
+## Story & Game
+<From YOUR lens, answer the four game questions in 3-6 sentences: (1) What story is this stock telling? (2) Is the story big enough for this company's size? (3) How certain is it — confirmed / high-probability / hazy-but-coming / pure theme? (4) Where is the telling — untold / starting / fermenting / consensus / realized / falsified? If your lens has nothing to add on one question, skip it rather than pad.>
+
+## Off-Template Factors
+<Where does this stock NOT fit your framework? What edge factor — an ownership situation, a pending deal, a regulatory wildcard, a mania theme — could drive a violent move your structured analysis would miss? Answer honestly; "none visible" is acceptable, an invented anomaly is not. The moderator carries this verbatim into thesis_map.unconventional_factors.>
 ```
 
 ## Quality Rules

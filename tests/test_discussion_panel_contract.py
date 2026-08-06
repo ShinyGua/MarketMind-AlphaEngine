@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / ".claude" / "skills"
 
 ANALYST_SKILLS = ("mm-market-analyst", "mm-company-analyst", "mm-risk-analyst",
-                  "mm-valuation-analyst", "mm-technical-analyst", "mm-catalyst-analyst")
+                  "mm-valuation-analyst", "mm-chips-analyst", "mm-catalyst-analyst")
 BANNED_IN_ANALYSTS = ("Cross-Critique", "debate round_N", "### Mode B",
                       "selective debate", "_on_{target}")
 

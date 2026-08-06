@@ -261,6 +261,20 @@ def grade(workspace: str, date: str) -> dict:
     # 7. Intraday timing-only contract (warning-only — no cap, no fail).
     result["warnings"].extend(_intraday_cited_as_reason(ws, date, decision))
 
+    # 8. Reference-role valuation (CN/HK game-driven markets): valuation must
+    # not appear in top_reasons — story/chips/fundamentals carry the label
+    # there. Warning-only, mirroring the intraday timing-only pattern.
+    val_role = valuation.get("role")
+    result["inputs"]["valuation_role"] = val_role
+    if val_role == "reference":
+        top = decision.get("top_reasons")
+        top_blob = " ".join(map(str, top)).lower() if isinstance(top, list) else ""
+        if any(kw in top_blob for kw in _VAL_KEYWORDS):
+            result["warnings"].append(
+                "final_decision.top_reasons cites valuation while valuation role is "
+                "'reference' (CN/HK): fair value may shape confidence and risk framing "
+                "only, never the stated reason for the label")
+
     llm_conf = decision.get("confidence")
     result["llm_confidence"] = llm_conf
     result["confidence_ceiling"] = round(ceiling, 2)

@@ -57,7 +57,9 @@ STRINGS = {
             "SEC EDGAR, FRED, web search."),
         "verdict": {"cheap": "Cheap", "fair": "Fair", "expensive": "Expensive",
                     "unknown": "—"},
+        "fair_value_ref": "Fair Value (ref, non-anchor)",
         "m_1d": "1D", "m_5d": "5D", "m_1m": "1M", "m_3m": "3M", "m_rsi": "RSI(14)",
+        "m_volr": "Vol Ratio", "m_profit": "Chips in Profit",
     },
     "ch": {
         "rating": "评级", "confidence": "置信度", "horizon": "时间维度",
@@ -73,15 +75,19 @@ STRINGS = {
             "SEC EDGAR、FRED、网络搜索。"),
         "verdict": {"cheap": "低估", "fair": "合理", "expensive": "高估",
                     "unknown": "—"},
+        "fair_value_ref": "估值参考（非锚）",
         "m_1d": "1日", "m_5d": "5日", "m_1m": "1月", "m_3m": "3月", "m_rsi": "RSI(14)",
+        "m_volr": "量比", "m_profit": "获利盘",
     },
 }
 
 CHART_LABELS = {
     "en": {"price_chart": "Price action & technicals",
-           "relative_chart": "Relative strength", "peer_chart": "Peer 5-day returns"},
+           "relative_chart": "Relative strength", "peer_chart": "Peer 5-day returns",
+           "peer_grid": "Peer cohort — 120-day paths"},
     "ch": {"price_chart": "股价走势与技术指标",
-           "relative_chart": "相对强弱", "peer_chart": "同业5日涨跌幅"},
+           "relative_chart": "相对强弱", "peer_chart": "同业5日涨跌幅",
+           "peer_grid": "同类股走势 — 120日路径"},
 }
 
 
@@ -161,6 +167,9 @@ def main():
     decision = load_json(workspace / "decision" / date / "final_decision.json") or {}
     quant = load_json(workspace / "quant" / date / "quant_summary.json") or {}
     val = load_json(workspace / "valuation" / date / "valuation_summary.json") or {}
+    chips = load_json(workspace / "quant" / date / "chip_structure.json") or {}
+    if not chips.get("available"):
+        chips = {}
 
     # ---- markdown body -> HTML ----
     body_md = strip_md_header(report_md.read_text(encoding="utf-8"))
@@ -173,7 +182,7 @@ def main():
     # charts ALWAYS appear (the old pipeline dropped them entirely).
     if "charts/" not in body_html and chart_dir.is_dir():
         figs = []
-        for stem in ("relative_chart", "price_chart", "peer_chart"):
+        for stem in ("relative_chart", "price_chart", "peer_grid", "peer_chart"):
             if (chart_dir / f"{stem}.svg").exists():
                 cap = CHART_LABELS[lang][stem]
                 figs.append(f'<figure><img src="charts/{stem}.svg">'
@@ -208,6 +217,10 @@ def main():
 
     verdict_key = (val.get("verdict") or "unknown") if val.get("applicable") else "unknown"
     verdict = S["verdict"].get(verdict_key, "—")
+    # reference-role valuation (CN/HK): label the fair value as a non-anchor
+    # reference so page 1 stops presenting it as the thesis spine
+    fair_value_label = (S["fair_value_ref"] if val.get("role") == "reference"
+                        else S["fair_value"])
 
     returns = quant.get("returns") or {}
     tech = quant.get("technical") or {}
@@ -219,6 +232,15 @@ def main():
         {"k": S["m_rsi"], "v": (f"{tech.get('rsi_14'):.1f}"
                                 if isinstance(tech.get("rsi_14"), (int, float)) else "—"), "cls": ""},
     ]
+    # chip tiles (rendered faithfully from chip_structure.json when available)
+    vol_ratio = (chips.get("volume") or {}).get("volume_ratio")
+    profit_ratio = (chips.get("chip_distribution") or {}).get("profit_ratio")
+    if isinstance(vol_ratio, (int, float)):
+        metrics.append({"k": S["m_volr"], "v": f"{vol_ratio:.2f}",
+                        "cls": "pos" if vol_ratio >= 1.5 else ""})
+    if isinstance(profit_ratio, (int, float)):
+        metrics.append({"k": S["m_profit"], "v": f"{profit_ratio*100:.0f}%",
+                        "cls": sign_class(profit_ratio - 0.5)})
 
     ctx = {
         "lang": lang, "S": S,
@@ -235,6 +257,7 @@ def main():
         "horizon": decision.get("horizon") or "—",
         "price": fmt_price(price),
         "fair_value": fair_value,
+        "fair_value_label": fair_value_label,
         "margin_of_safety": (f"{mos*100:+.0f}%" if isinstance(mos, (int, float)) else "—"),
         "mos_class": sign_class(mos),
         "market_cap": fmt_big(profile.get("market_cap")),

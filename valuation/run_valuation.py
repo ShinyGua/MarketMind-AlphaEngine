@@ -66,6 +66,11 @@ _DEFAULTS = {
         "UK": {"risk_free_rate": 0.040, "country_risk_premium": 0.010, "cost_of_debt": 0.05},
         "EU": {"risk_free_rate": 0.025, "country_risk_premium": 0.015, "cost_of_debt": 0.04},
     },
+    # role of valuation in the decision, per market: "anchor" (US — full weight
+    # in the thesis) vs "reference" (CN/HK — a value floor / sanity read; the
+    # story+chips game layer leads and valuation must not appear in top_reasons).
+    "role_by_market": {"US": "anchor", "CN": "reference", "HK": "reference",
+                       "JP": "anchor", "UK": "anchor", "EU": "anchor"},
     # optional DCF-vs-comps sanity net: when the DCF base intrinsic value exceeds
     # cap × comps blended, cap the DCF weight and downgrade its confidence. None = off.
     "dcf_comps_divergence_cap": None,
@@ -111,12 +116,13 @@ _RF_BAND = (0.001, 0.10)  # sanity band for a live 10Y read (decimal)
 
 
 def _rf_source_label(src):
-    """macro_sources provenance → summary label: fred→DGS10, yfinance:^TNX→^TNX."""
+    """macro_sources provenance → summary label: fred/fred_csv→DGS10, yfinance:^TNX→^TNX."""
     if not src or src == "missing":
         return None
     if src.startswith("yfinance:"):
         return src.split(":", 1)[1]
-    return "DGS10" if src == "fred" else src
+    # fred_csv is the keyless public-CSV route to the same DGS10 series.
+    return "DGS10" if src in ("fred", "fred_csv") else src
 
 
 def _resolve_risk_free(workspace, date, cfg, market_profile="US"):
@@ -834,7 +840,10 @@ def main():
         inputs_missing.append("shares_outstanding")
 
     tax_rate = dcf_mod.effective_tax_rate(income)
-    base = dcf_mod.base_fcff(income, cash_flow, tax_rate)
+    # TTM base year when the collector supplied one (see dcf.base_fcff); the
+    # effective tax rate stays fiscal-year based, being a ratio rather than a level.
+    ttm = fund.get("ttm") or None
+    base = dcf_mod.base_fcff(income, cash_flow, tax_rate, ttm=ttm)
     if base is None or base <= 0:
         inputs_missing.append("positive_free_cash_flow")
 
@@ -987,10 +996,13 @@ def main():
                         f"({valuation_method}), margin of safety {mos_txt}, "
                         f"verdict {verdict} (confidence {confidence}).")
 
+    role_map = cfg.get("role_by_market") or {}
+    valuation_role = role_map.get(market_profile, "anchor")
     summary = {
         "ticker": ticker,
         "applicable": True,
         "meta": {"market_profile": market_profile, "currency": currency},
+        "role": valuation_role,
         "confidence": confidence,
         "current_price": _round(price) if price else None,
         "fair_value": fair_value,

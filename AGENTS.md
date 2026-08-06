@@ -109,17 +109,41 @@ If MCP is not attached, fall back to the local Python servers/modules
   that boundary. Cite evidence IDs + source dates; keep unsupported valuation
   output low-confidence rather than forcing a DCF.
 - `macro_regime.json` is shared across same-day workspaces with possibly
-  different `language` configs: its `summary` is emitted in BOTH en and ch
-  (consumers pick); its thresholds live in the ROOT config's `macro_regime`
-  block only. Macro is **context, not trigger**; the intraday block is
+  different `language` configs, so it caches BOTH languages under
+  `summary_i18n` — deliberately, since a single-language file would take the
+  language of whichever workspace ran last. **It is not an analyst-facing
+  surface.** `build_shared_context.py` resolves the workspace's language into
+  `shared_context.macro_regime.summary` (+ `summary_lang`); read it from the
+  bundle. Its thresholds live in the ROOT config's `macro_regime` block only.
+- **One language per run.** Every artifact carrying user-facing prose selects a
+  single language at write time from `resolved_config.language`
+  (`contracts.resolve_language`); `chip_structure.note` and
+  `intraday_timing.note` are plain strings with a `note_lang` sibling. Never
+  emit both and expect the consumer to pick — nothing picked, and Chinese
+  reached an English report. `eval/graders/language_purity_grader.py` guards it. Macro is **context, not trigger**; the intraday block is
   **timing-only** (entry/exit zone framing, never a vote reason).
 - `quant_summary.json` carries a deterministic **`trend_regime`** block
   (`label` uptrend/downtrend/transition/range from the SMA20/50 stack + SMA50
   slope, `usage: "context_only"`) that propagates to
   `shared_context.quant.trend_regime`. SMA/trend is **backdrop**: analysts and
   both panels consume the single `trend_regime.label` and never set or flip a
-  stance/vote on a price-vs-SMA position or a golden/death cross (prompt-level
-  de-weighting; no grader).
+  stance/vote on a price-vs-SMA position or a moving-average cross (prompt-level
+  de-weighting; no grader). Golden/death-cross flags are NOT emitted and the
+  chart annotates chip support/resistance instead of crossovers.
+- `chip_structure.json` (`scripts/compute_chip_structure.py`, embedded akshare
+  `cn_flows` from `scripts/collect_cn_chips.py`, cards from
+  `scripts/chip_evidence_cards.py`) is **DIRECTIONAL** (`usage: "directional"`)
+  — the deliberate asymmetry with macro/intraday/trend_regime: volume and chip
+  exchange are the reproducible trace of buying/selling force, so chip evidence
+  may carry a stance/vote on its own. Respect per-block `data_quality`.
+- `valuation_summary.role` is `anchor` (US/JP/UK/EU) or `reference` (CN/HK,
+  via `valuation.role_by_market`): a reference valuation never appears in
+  `final_decision.top_reasons` (decision_risk_grader warns); CN/HK reports lead
+  with Story & Game + chips and the PDF labels fair value 估值参考（非锚）.
+- The discussion synthesis writes `story_map.json` (story/size/certainty/stage/
+  falsifier) alongside `thesis_map.json`, whose `unconventional_factors[]`
+  carries every role's `anomaly_watch` **verbatim** (anti-templating channel;
+  `story_grader.py` warns when dropped).
 - Do not rewrite unrelated user changes in this repository.
 
 ## Claude → Codex translation
@@ -174,15 +198,21 @@ Skill files use Claude conventions; map them as follows:
   it never rewrites `final_decision.json`; an over-ceiling result makes the
   release gate a *warning*, never *failed*. Both drivers run it (`st_reflect` /
   the orchestrator reflect stage).
-- **The macro layer and intraday block are deterministic driver stages.** Both
-  drivers run them as committed Python, not LLM passes: in `st_collect`,
-  `scripts/collect_macro_series.py` (FRED-first, yfinance-proxy fallback) →
-  `scripts/compute_macro_regime.py` (regime classification) →
-  `scripts/macro_evidence_cards.py` (per-ticker `ev_{date}_macro_*` cards); in
-  `st_quant`, `scripts/intraday_timing.py` (1h/4h RSI/MACD + swing levels,
-  `usage: "timing_only"`); in `st_valuation`, after `run_valuation.py`,
-  `scripts/build_shared_context.py` bundles `shared_context/{date}.json`
-  including `macro_regime` + `intraday`. All non-critical — they degrade, never
+- **The macro, chips, intraday and peer-divergence layers are deterministic
+  driver stages.** Both drivers run them as committed Python, not LLM passes: in
+  `st_collect`, `scripts/collect_macro_series.py` (FRED-first, yfinance-proxy
+  fallback) → `scripts/compute_macro_regime.py` (regime classification) →
+  `scripts/macro_evidence_cards.py` (per-ticker `ev_{date}_macro_*` cards) →
+  `scripts/collect_cn_chips.py` (akshare A-share flows, CN only, per-block
+  degradation); in `st_normalize`, BEFORE `dedup_evidence.py`,
+  `scripts/compute_chip_structure.py` (volume/VPVR/S-R/platform + embedded
+  cn_flows, `usage: "directional"`) → `scripts/chip_evidence_cards.py`
+  (`ev_{date}_chip_*`); in `st_quant`, `scripts/intraday_timing.py` (1h/4h
+  RSI/MACD + swing levels, `usage: "timing_only"`) and
+  `scripts/peer_divergence.py` (per-peer path classes); in `st_valuation`,
+  after `run_valuation.py`, `scripts/build_shared_context.py` bundles
+  `shared_context/{date}.json` including `macro_regime` + `intraday` + `chips`
+  + `peer_divergence` + `investor`. All non-critical — they degrade, never
   abort. CAPM inputs are **market-aware** (routed by `profile.market_profile` via
   `valuation.market_capm`): Ke = risk_free + β·ERP(mature) + country_risk_premium.
   US uses the live 10Y (`macro_inputs.risk_free_source`: `DGS10` | `^TNX` |

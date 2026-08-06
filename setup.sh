@@ -35,7 +35,12 @@ fi
 # Activate and install
 source .venv/bin/activate
 pip install -q --upgrade pip
-pip install -q pyyaml yfinance pandas ta fpdf2 markdown flask mcp pydantic pytest weasyprint jinja2 exchange_calendars requests
+# matplotlib: templates/charts.py renders the PDF's annotated SVG charts.
+# mcp<2: mcp/*_server.py target the 1.x low-level Server API (2.0 removed @server.list_tools()).
+pip install -q pyyaml yfinance pandas ta fpdf2 markdown flask "mcp<2" pydantic pytest weasyprint jinja2 exchange_calendars requests matplotlib
+# akshare: A-share chip/flow signals (换手率/主力资金/龙虎榜/北向/融资/股东户数/解禁).
+# Optional — collect_cn_chips.py degrades to a stub if it is missing.
+pip install -q akshare || echo "warn: akshare install failed — CN chip flows will degrade"
 
 echo ""
 echo "MarketMind environment ready."

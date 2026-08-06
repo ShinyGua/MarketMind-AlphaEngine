@@ -94,12 +94,11 @@ From the company profile and any available data, identify upcoming events:
 - Recent insider transactions (from EDGAR Form 4)
 - Any known product launches, conferences, or regulatory dates from news
 
-```python
-import yfinance as yf
-t = yf.Ticker("<ticker>")
-calendar = t.calendar
-earnings_dates = t.earnings_dates
-```
+Yahoo/yfinance is not available. Derive the catalyst calendar from sources that
+are: the filing cadence in EDGAR (`raw/{date}/filings/`), dates named in company
+news and press releases, and WebSearch for the next confirmed earnings date.
+Record how each date was established, and mark any that is an estimate rather
+than a company-confirmed date — do not present an inferred date as confirmed.
 
 Save to `{workspace}/raw/{date}/calendar/catalysts.json`.
 
@@ -107,28 +106,45 @@ Save to `{workspace}/raw/{date}/calendar/catalysts.json`.
 
 **Indicator warm-up (MANDATORY)**: Always fetch **6 months** (`period='6mo'`) of daily data, even though the config says 3mo. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up; for the chart's full SMA50 across a ~65-day display window you need at least **114 daily rows**. The quant analyst and chart renderer compute on the full 6mo data but only output/display the last 3 months. **This file is the permanent fix for indicator warm-up** — if it is short, the SMA50/MACD lines render only partially.
 
-```python
-import yfinance as yf
-t = yf.Ticker("<ticker>")
-hist_6mo = t.history(period="6mo", interval="1d")  # 6mo for indicator warm-up
-# Sanity check: must hold enough rows for SMA50 warm-up across the display window.
-assert len(hist_6mo) >= 114, f"{len(hist_6mo)} rows < 114; refetch period='6mo' (or '1y')"
-hist_5d = t.history(period="5d", interval="1h")
+**Yahoo/yfinance is NOT used anywhere in this pipeline.** Daily OHLCV comes from
+the public NASDAQ API via the deterministic collector:
+
+```bash
+.venv/bin/python3 scripts/fetch_prices_nasdaq.py {TICKER} \
+    --out {workspace}/raw/{date}/prices/{TICKER}_3mo.csv \
+    --schema history --months 12 --end {date}
 ```
 
-Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (contains 6mo of data for warm-up) and `{workspace}/raw/{date}/prices/{TICKER}_5d.csv`. **Verify the row count of `{TICKER}_3mo.csv` is ≥ 114** before finishing; if a name has limited history (recent IPO), keep whatever 6mo returns and note it.
+Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (12 months of data, well
+past the warm-up need). **Verify the row count is ≥ 114** before finishing; if a
+name has limited history (recent IPO), keep whatever it returns and note it.
+
+There is **no `{TICKER}_5d.csv`** any more: intraday bars had no keyless source
+once Yahoo was dropped, so `intraday_timing.json` self-degrades to
+`available: false` and entry/exit zones fall back to chip S/R + daily ATR. That
+is a supported state — do not try to synthesise intraday bars from daily data.
 
 ### 4b. Fetch Fundamentals (company + peers)
 
 Fetch valuation ratios and financial statements for the company **and every peer** — these feed the Stage 5b valuation engine (DCF + comps). Use the MCP tool:
 
-```
-Call mcp__market-data__get_fundamentals with: ticker: {TICKER}
+Fundamentals come from **SEC EDGAR XBRL** (not yfinance). One command collects
+the company and every peer in `peer_set.json`:
+
+```bash
+.venv/bin/python3 scripts/fetch_fundamentals_edgar.py \
+    --workspace {workspace} --date {date}
 ```
 
-Save the response verbatim to `{workspace}/raw/{date}/fundamentals/{TICKER}.json`.
+This writes `{workspace}/raw/{date}/fundamentals/{TICKER}.json` and
+`.../fundamentals/peers/{PEER}.json` in the normalized shape the valuation
+engine consumes. Headline metrics are **TTM** (last four quarters, with the
+unfiled Q4 derived from the annual), not the last 10-K — a fiscal-year figure
+can be almost a year stale and would misstate every multiple.
 
-Then read `{workspace}/profile/peer_set.json` and, for each entry in its `peers[]` list, call `get_fundamentals` with that peer's `ticker` and save to `{workspace}/raw/{date}/fundamentals/peers/{PEER_TICKER}.json`. Peers power the comps quartile benchmarking, so fetch all of them (typically 4–6).
+Note `metadata.inputs_missing`: `forward_pe` is always there (sell-side
+estimates have no free keyless source) and the engine degrades on it. Non-US
+filers have no EDGAR presence and will fail — that is expected, not an error.
 
 This is best-effort: if a fundamentals fetch fails or returns an `error` for a given ticker, skip that ticker and continue — the valuation engine degrades gracefully on missing peers or statements. Do **not** let a fundamentals failure abort the desk; price data remains the critical output.
 

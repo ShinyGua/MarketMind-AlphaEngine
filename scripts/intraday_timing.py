@@ -22,9 +22,12 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "mcp"))
+from shared import contracts  # noqa: E402
 
 DEFAULTS = {
     "enabled": True,
@@ -40,21 +43,19 @@ _EXTENDED_PROXIMITY = 0.02  # close within 2% of a swing extreme counts as "near
 
 
 def fetch_hourly(ticker: str, period: str = "90d", interval: str = "1h"):
-    """1h OHLCV DataFrame or None — yfinance raises a zoo of types, never abort."""
-    try:
-        import yfinance as yf
+    """1h OHLCV DataFrame, or None when no intraday source is available.
 
-        hist = yf.Ticker(ticker).history(period=period, interval=interval)
-    except Exception:
-        return None
-    if hist is None or getattr(hist, "empty", True) or "Close" not in hist:
-        return None
-    # yfinance 1h data contains NaN closes (halts, partial bars); they would
-    # serialize as invalid JSON (`NaN`) and silently corrupt the RSI/state.
-    hist = hist.dropna(subset=["Close"])
-    if hist.empty:
-        return None
-    return hist
+    Yahoo/yfinance was the only free keyless source of 1h bars and is no longer
+    used in this pipeline; no substitute exists on the free tier (the NASDAQ
+    endpoint that replaced it for daily bars serves daily only). So this now
+    always returns None and the artifact self-degrades to
+    ``available: false`` — the documented, already-supported state in which
+    entry/exit zones fall back to chip S/R plus daily ATR.
+
+    This is a *timing-only* input by contract, so losing it cannot change any
+    BUY/HOLD/SELL vote or conviction — only the price-zone framing.
+    """
+    return None
 
 
 def resample_4h(df, rule: str = "4h"):
@@ -167,17 +168,17 @@ _NOTES = {
 }
 
 
-def _unavailable(ticker: str, reason: str) -> dict:
+def _unavailable(ticker: str, reason: str, lang: str = "en") -> dict:
     return {"schema_version": 1, "ticker": ticker, "available": False,
-            "reason": reason, "usage": "timing_only"}
+            "reason": reason, "usage": "timing_only", "note_lang": lang}
 
 
-def build(ticker: str, cfg: dict) -> dict:
+def build(ticker: str, cfg: dict, lang: str = "en") -> dict:
     if not cfg.get("enabled", True):
-        return _unavailable(ticker, "disabled")
+        return _unavailable(ticker, "disabled", lang)
     df1h = fetch_hourly(ticker, cfg["period"], cfg["interval"])
     if df1h is None:
-        return _unavailable(ticker, "no_intraday_data")
+        return _unavailable(ticker, "no_intraday_data", lang)
 
     df4h = resample_4h(df1h, cfg["resample"])
     n = cfg["rsi_window"]
@@ -206,18 +207,18 @@ def build(ticker: str, cfg: dict) -> dict:
         "timeframes": tf,
         "levels": levels,
         "timing_state": state,
-        "note": {lang: _NOTES[state][lang].format(**note_fmt) for lang in ("en", "ch")},
+        # ONE language, selected at write time. _NOTES keeps both — rendering
+        # both into the artifact put Chinese in front of an English report.
+        "note": _NOTES[state][lang].format(**note_fmt),
+        "note_lang": lang,
     }
 
 
 def run(workspace: Path, date: str) -> dict:
-    ticker = os.path.basename(os.path.normpath(str(workspace)))
-    try:
-        profile = json.loads(
-            (workspace / "profile" / "company_profile.json").read_text(encoding="utf-8"))
-        ticker = profile.get("yfinance_symbol") or ticker
-    except (OSError, ValueError):
-        pass
+    # Canonical symbol resolution (yf_ticker → yf_symbol → … → dir name);
+    # the old lookup read a key nobody wrote, so CN/HK names lost their
+    # exchange suffix and always came back available:false.
+    ticker = contracts.resolve_yf_symbol(workspace)
     cfg = dict(DEFAULTS)
     try:
         rc = json.loads((workspace / "resolved_config.json").read_text(encoding="utf-8"))
@@ -225,7 +226,7 @@ def run(workspace: Path, date: str) -> dict:
     except (OSError, ValueError):
         pass
 
-    artifact = build(ticker, cfg)
+    artifact = build(ticker, cfg, contracts.resolve_language(workspace))
     out = workspace / "quant" / date / "intraday_timing.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(artifact, indent=2, ensure_ascii=False), encoding="utf-8")

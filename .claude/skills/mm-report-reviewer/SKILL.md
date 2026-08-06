@@ -88,6 +88,7 @@ Score the report on a 1-10 scale for each dimension:
 - Does the Executive Summary use the Page-1 format — 3-4 bullets, each a **bold lead clause** + supporting sentences (the "top call" first)?
 - Are the three chart anchors present and exact — `![...](charts/relative_chart.svg)`, `charts/price_chart.svg`, `charts/peer_chart.svg` — in Market Context, Price Action, and Sector & Peers respectively?
 - Does each table end with an italic source line?
+- **Is the draft in exactly ONE language, matching `resolved_config.json` → `language`?** Mixed-language headings (`## Story & Game (故事与博弈)`), Chinese-first table cells (`独立走强 independent_up`), or Chinese words used as English sentence elements are a defect. On an `en` run for a US/JP/UK/EU name the draft must contain **zero Chinese characters**; for a CN/HK name a Chinese source term is allowed only parenthetically on first mention as data provenance. On a `ch` run, English prose sentences are the mirror defect (English JSON keys, enum values and BUY/HOLD/SELL stay English and are fine).
 If any are missing, add a specific fix to the revision brief (it's a low-weight deduction, not a blocker).
 
 #### Depth & Coverage (weight: high)

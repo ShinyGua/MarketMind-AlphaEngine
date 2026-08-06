@@ -207,7 +207,7 @@ def resolve_run_date(ctx: Ctx) -> str:
 
 def _analyst_roles(ctx: Ctx) -> list[str]:
     roles = (ctx.cfg.get("discussion", {}) or {}).get("analyst_roles")
-    return roles or ["company_analyst", "risk_analyst", "market_analyst"]
+    return roles or ["company_analyst", "chips_analyst", "risk_analyst", "market_analyst"]
 
 
 def _read_json(path: Path):
@@ -241,11 +241,17 @@ def st_collect(ctx):
     det(ctx, "scripts/collect_macro_series.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "scripts/compute_macro_regime.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "scripts/macro_evidence_cards.py", ctx.ws, ctx.date, critical=False)
+    # A-share chip/flow signals (akshare; CN-only, per-block degradation)
+    det(ctx, "scripts/collect_cn_chips.py", ctx.ws, ctx.date, critical=False)
     desks = ["mm-market-desk", "mm-company-desk", "mm-sector-desk", "mm-web-research"]
     parallel(ctx, [lambda d=d: codex_skill(ctx, d, critical=False) for d in desks])
 
 
 def st_normalize(ctx):
+    # Chip structure needs the desks' raw price CSVs, and its evidence cards
+    # must exist before dedup — hence computed here, not in st_quant.
+    det(ctx, "scripts/compute_chip_structure.py", ctx.ws, ctx.date, critical=False)
+    det(ctx, "scripts/chip_evidence_cards.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "normalize/dedup_evidence.py", ctx.ws, ctx.date)
 
 
@@ -253,6 +259,8 @@ def st_quant(ctx):
     # Deterministic 1h/4h timing block (timing-only contract: frames entry/exit
     # zones, never a vote reason). Runs before the quant LLM so it can report status.
     det(ctx, "scripts/intraday_timing.py", ctx.ws, ctx.date, critical=False)
+    # Peer-cohort path divergence (which names follow the sector, which walk alone)
+    det(ctx, "scripts/peer_divergence.py", ctx.ws, ctx.date, critical=False)
     codex_skill(ctx, "mm-quant-analyst")
 
 
@@ -402,7 +410,8 @@ def st_user_review(ctx):
 def st_reflect(ctx):
     # non-critical: never abort the run
     for g in ("factuality_grader", "evidence_grader", "consistency_grader",
-              "valuation_grader", "depth_grader", "decision_risk_grader", "cost_tracker"):
+              "valuation_grader", "depth_grader", "decision_risk_grader",
+              "story_grader", "language_purity_grader", "cost_tracker"):
         det(ctx, f"eval/graders/{g}.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/release_gate.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)

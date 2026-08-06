@@ -16,7 +16,8 @@ _spec.loader.exec_module(gate_mod)
 
 DATE = "2026-06-09"
 
-GATE_GRADERS = ["factuality", "evidence", "consistency", "valuation", "depth", "decision_risk"]
+GATE_GRADERS = ["factuality", "evidence", "consistency", "valuation", "depth",
+                "decision_risk", "language_purity"]
 
 
 def _ws(tmp_path: Path, present: list[str]) -> Path:

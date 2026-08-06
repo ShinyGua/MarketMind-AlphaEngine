@@ -201,11 +201,16 @@ Verify `{workspace}/profile/company_profile.json` exists.
 .venv/bin/python3 scripts/collect_macro_series.py {workspace} {date}
 .venv/bin/python3 scripts/compute_macro_regime.py {workspace} {date}
 .venv/bin/python3 scripts/macro_evidence_cards.py {workspace} {date}
+.venv/bin/python3 scripts/collect_cn_chips.py {workspace} {date}
 ```
 This fetches the FRED macro series (CPI, Fed funds, Treasury curve, USD, HY spread, VIX;
 yfinance proxies when keyless), classifies the regime into
 `workspaces/shared/market_context/{date}/indicators/macro_regime.json`, and projects
 material macro observations into per-ticker evidence cards (`ev_{date}_macro_*`).
+The chips collector pulls A-share flow signals via akshare (换手率, 主力资金,
+龙虎榜, 北向持股, 融资余额, 股东户数, 解禁) into `raw/{date}/chips/cn_flows.json`
+with per-block `data_quality`; non-CN names skip it, blocked endpoints degrade
+block-by-block — never fails the run.
 
 Then dispatch 4 collection skills **in parallel** via Agent tool:
 - **mm-market-desk** with args: `{workspace} {date}`
@@ -219,6 +224,19 @@ Wait for all 4. Log successes/failures. Web-research is best-effort — if it fa
 ### 4. normalize
 Verify evidence cards exist in `{workspace}/normalized/{date}/evidence_cards/`. If empty, log warning.
 
+**First run the deterministic chip layer** (non-critical — needs the desks' raw
+price CSVs, and its cards must exist before dedup):
+```bash
+.venv/bin/python3 scripts/compute_chip_structure.py {workspace} {date}
+.venv/bin/python3 scripts/chip_evidence_cards.py {workspace} {date}
+```
+This writes `{workspace}/quant/{date}/chip_structure.json` (volume regime, VPVR
+chip distribution, support/resistance, platform/breakout, CN flows) and projects
+material chip observations into evidence cards (`ev_{date}_chip_*`).
+**DIRECTIONAL contract** (`usage: "directional"`): unlike macro (context),
+intraday (timing-only) and trend_regime (context-only), chip/volume structure is
+first-class stance evidence — analysts may ground a stance or vote in it.
+
 **Then create evidence_digest.json** — deduplicate cards across the desks + web-research (the 4 collectors run in parallel and can't see each other, so the same article can appear as several cards) and write the digest:
 ```bash
 .venv/bin/python3 normalize/dedup_evidence.py {workspace} {date}
@@ -228,10 +246,16 @@ This clusters by canonical URL + near-identical title, keeps the richest/highest
 **Then immediately proceed to stage 5.**
 
 ### 5. quant
-**First run the deterministic intraday timing block** (non-critical):
+**First run the deterministic intraday timing block and the peer divergence
+classifier** (both non-critical):
 ```bash
 .venv/bin/python3 scripts/intraday_timing.py {workspace} {date}
+.venv/bin/python3 scripts/peer_divergence.py {workspace} {date}
 ```
+Peer divergence writes `{workspace}/quant/{date}/peer_divergence.json` — per-peer
+20/60/120/250d returns, benchmark/target correlations, and a path class
+(`follows_sector` / `independent_up` / `independent_down` / `basing` /
+`launched`) plus cohort dispersion and the current leader.
 This writes `{workspace}/quant/{date}/intraday_timing.json` (1h/4h RSI/MACD + swing
 levels). **Timing-only contract**: it frames staged entry/exit price zones and the
 risk overlay downstream — never a reason to flip a vote or change conviction.
@@ -246,7 +270,7 @@ Verify `{workspace}/quant/{date}/quant_summary.json` exists.
 Dispatch **mm-valuation-engine** with args: `{workspace} {date}`. Wait.
 Verify `{workspace}/valuation/{date}/valuation_summary.json` exists. This stage is **non-critical** — if the engine reports `applicable: false` (ETF/fund) or `confidence: "low"` (sparse data), that is expected; continue regardless. Only a missing summary file warrants a retry.
 
-**Then create shared_context.json** — bundle shared data that ALL downstream agents need (quant + valuation + profile + peers + catalysts + `macro_regime` + `intraday`):
+**Then create shared_context.json** — bundle shared data that ALL downstream agents need (quant + valuation + profile + peers + catalysts + `macro_regime` + `intraday` + `chips` + `peer_divergence` + `investor`):
 ```bash
 .venv/bin/python3 scripts/build_shared_context.py {workspace} {date}
 ```
@@ -267,7 +291,7 @@ Dispatch ALL listed analyst skills **in parallel** via Agent tool. For each role
 - **mm-{role}** with args: `{workspace} {date} memo`
 
 Example with default 3: mm-company-analyst, mm-risk-analyst, mm-market-analyst
-Example with 6: adds mm-valuation-analyst, mm-technical-analyst, mm-catalyst-analyst
+Example with 6: adds mm-valuation-analyst, mm-chips-analyst, mm-catalyst-analyst
 
 **Depth mandate:** each memo is a full analytical argument — core thesis + 3–5
 distinct supporting points (each its own paragraph with specific numbers and an
@@ -324,7 +348,9 @@ stage 8 — all rounds' `discussion/{date}/panel/round_*/*_view.json`, the lates
 them into `thesis_map.json` / `debate_summary.md`. When the panel was disabled
 (stage 8 skipped, so `discussion/{date}/panel/` is absent), it falls back to
 memo-only synthesis.
-Verify `{workspace}/discussion/{date}/thesis_map.json` exists.
+Verify `{workspace}/discussion/{date}/thesis_map.json` exists. The synthesis
+also writes `story_map.json` (story/size/certainty/stage + falsifier) — its
+absence is non-critical (the story grader warns) but log it.
 **Then immediately proceed to stage 10.**
 
 ### 10. draft
@@ -477,6 +503,8 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/valuation_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/depth_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/decision_risk_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/story_grader.py {workspace} {date}
+.venv/bin/python3 eval/graders/language_purity_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
 ```

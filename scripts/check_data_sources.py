@@ -27,18 +27,22 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "mcp"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from shared.dotenv import load_dotenv  # noqa: E402
-from collect_macro_series import MACRO_SERIES, YF_PROXY_MAP  # noqa: E402
+from collect_macro_series import MACRO_SERIES  # noqa: E402
 
 KEYS = ("NEWSAPI_KEY", "FRED_API_KEY")
 
-# logical source -> hostname to resolve
+# logical source -> hostname to resolve.
+# Yahoo (query1.finance.yahoo.com) is deliberately absent: yfinance is no longer
+# used anywhere in this pipeline. Prices come from api.nasdaq.com, fundamentals
+# from data.sec.gov XBRL, macro from FRED (keyed API or the keyless CSV host).
 HOSTS = {
     "newsapi": "newsapi.org",
-    "yahoo": "query1.finance.yahoo.com",
     "nasdaq": "api.nasdaq.com",
     "sec": "www.sec.gov",
+    "sec_data": "data.sec.gov",
     "sec_efts": "efts.sec.gov",
     "fred": "api.stlouisfed.org",
+    "fred_csv": "fred.stlouisfed.org",
 }
 
 _DNS_MARKERS = (
@@ -112,15 +116,20 @@ def probe_fred(present: bool, dns_ok: bool) -> str:
 
 
 def macro_plan(fred_probe: str, series=None, proxies=None) -> dict:
-    """How the macro collector will source each series given the FRED probe result."""
+    """How the macro collector will source each series given the FRED probe result.
+
+    Keyless runs no longer degrade to yfinance proxies (Yahoo is not used anywhere
+    in this pipeline). They fall back to the public fredgraph CSV endpoint, which
+    serves the *same* FRED series in FRED units — so a keyless run is now
+    full-coverage rather than missing CPI / Fed funds / HY spread, and nothing is
+    reported unavailable purely for lack of a key.
+    """
     series = list(series if series is not None else MACRO_SERIES)
-    proxies = dict(proxies if proxies is not None else YF_PROXY_MAP)
     if fred_probe == "auth_ok":
         return {"mode": "fred", "series_via_fred": series,
-                "series_via_proxy": [], "series_unavailable": []}
-    return {"mode": "yfinance_proxy", "series_via_fred": [],
-            "series_via_proxy": [s for s in series if s in proxies],
-            "series_unavailable": [s for s in series if s not in proxies]}
+                "series_via_fred_csv": [], "series_unavailable": []}
+    return {"mode": "fred_csv", "series_via_fred": [],
+            "series_via_fred_csv": series, "series_unavailable": []}
 
 
 def run(show_lengths: bool = True) -> dict:

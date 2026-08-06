@@ -168,6 +168,14 @@ def ticker_quant(ticker: str, date: str):
     return jsonify(_read_json(path))
 
 
+@app.route("/api/tickers/<ticker>/<date>/chips")
+def ticker_chips(ticker: str, date: str):
+    path = _safe_path(WORKSPACES, ticker, "quant", date, "chip_structure.json")
+    if not path.exists():
+        abort(404)
+    return jsonify(_read_json(path))
+
+
 @app.route("/api/tickers/<ticker>/<date>/pdf")
 def ticker_pdf(ticker: str, date: str):
     path = _safe_path(WORKSPACES, ticker, "exports", date, "pdf", "report.pdf")

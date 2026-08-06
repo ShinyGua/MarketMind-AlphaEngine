@@ -196,7 +196,7 @@ codex
 |       |
 |       v
 |  Quant 快照
-|       | RSI、MACD、SMA、ATR、相对强弱
+|       | RSI、MACD、量价与筹码结构、相对强弱
 |       v
 |  Valuation 估值（情景 DCF + 可比公司）
 |       | 内在价值区间、安全边际、估值判断
@@ -237,7 +237,7 @@ codex
 | 阶段 | 发生了什么 | 负责角色 |
 |------|------------|----------|
 | **Collect** | 先运行确定性宏观层（FRED/代理序列 → 环境分类 → 宏观证据卡），再从 yfinance、NewsAPI、EDGAR 收集宏观、公司与行业数据，并采集带来源溯源的网络/NASDAQ 新闻 | 宏观脚本 + 4 个采集器并行 |
-| **Quant** | 用 Python 计算 RSI、MACD、SMA、ATR、相对强弱等指标，外加确定性的 1小时/4小时盘中时点模块（仅用于择时） | `mm-quant-analyst` |
+| **Quant** | 用 Python 计算 RSI、MACD、SMA、ATR、相对强弱等指标，外加确定性的筹码结构引擎（量价/成本分布/支撑压力，方向性证据）、同类股分化分类与 1小时/4小时盘中时点模块（仅用于择时） | `mm-quant-analyst` |
 | **Valuation** | 基于 yfinance 基本面数据计算情景 DCF（实时 10 年期无风险利率）+ 可比公司 + 安全边际 | `mm-valuation-engine` |
 | **Debate** | 分析师独立写 memo，随后通过多轮评审团：分析师视角 → 主席汇总 → 收敛 | 3-6 位分析师 |
 | **Draft** | 生成带证据追踪的 JPM 风格叙事研究报告 | `mm-report-writer` |
@@ -252,10 +252,10 @@ codex
 | # | 角色 | 关注重点 | 默认启用 |
 |---|------|----------|:-------:|
 | 1 | `company_analyst` | 基本面、公司事件、关键催化剂 | ✓ |
-| 2 | `risk_analyst` | 空头逻辑、下行风险、失效条件 | ✓ |
-| 3 | `market_analyst` | 宏观环境、板块定位、alpha 与 beta | ✓ |
-| 4 | `valuation_analyst` | 解读估值引擎的 DCF 区间、可比公司与安全边际 | |
-| 5 | `technical_analyst` | 图形形态、动量指标、交易信号 | |
+| 2 | `chips_analyst` | 筹码博弈：量价/资金流向证据、主力视角推演 | ✓ |
+| 3 | `risk_analyst` | 空头逻辑、下行风险、失效条件 | ✓ |
+| 4 | `market_analyst` | 宏观环境、板块定位、alpha 与 beta | ✓ |
+| 5 | `valuation_analyst` | 解读估值引擎的 DCF 区间、可比公司与安全边际 | |
 | 6 | `catalyst_analyst` | 事件时点、财报日历、短期催化 | |
 
 如需启用更多分析师，可在 `config.yaml` 中取消对应注释。
@@ -281,7 +281,7 @@ MarketMind-AlphaEngine/
 │       ├── mm-company-analyst/    # 公司基本面分析
 │       ├── mm-risk-analyst/       # 风险识别与反方论证
 │       ├── mm-valuation-analyst/  # 估值框架与目标价
-│       ├── mm-technical-analyst/  # 图表解读与信号分析
+│       ├── mm-chips-analyst/      # 筹码结构与博弈分析
 │       ├── mm-catalyst-analyst/   # 催化剂与事件时间轴
 │       ├── mm-discussion-panelist/ # 各角色评审团视角（立场 + 置信度 + 质询）
 │       ├── mm-discussion-moderator/ # 评审团主席：逐轮汇总 + 综合判断
@@ -438,7 +438,7 @@ review:
 - [ ] **历史对比分析**：对比最新报告与历史报告，追踪投资论点演变
 - [ ] **情绪分析**：社交媒体情绪、期权资金流、机构持仓倾向
 - [ ] **实时仪表盘**：支持自动刷新和实时监控
-- [ ] **中国市场支持**：接入 Tushare、AKShare 等本地数据源，覆盖 A 股
+- [x] **中国市场支持 (v1)**：AKShare 筹码/资金流信号（换手率/主力资金/龙虎榜/北向/融资/股东户数/解禁）、筹码结构引擎、故事与博弈层、CN 估值降级为参考
 - [ ] **自动调度**：基于 Cron 的每日自动生成
 - [ ] **自定义分析师人格**：可配置风险偏好、方向倾向和投资期限视角
 

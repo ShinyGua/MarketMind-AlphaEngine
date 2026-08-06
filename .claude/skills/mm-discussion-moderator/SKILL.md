@@ -96,7 +96,7 @@ the thesis map and debate summary.
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** validating an analyst's trajectory claim (divergence, cross timing, support/resistance) that the snapshot in `shared_context` can't confirm.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` plus `raw/*.csv` (index + macro asset series). Read **only when** validating an analyst's macro/index claim against the underlying series.
-- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime; use it to validate analysts' macro claims and to ground the thesis-map macro context. Context, not trigger.
+- `shared_context.macro_regime` — deterministic macro regime, `summary` already resolved to the report language; use it to validate analysts' macro claims and to ground the thesis-map macro context. Read it from the bundle, not from the raw shared artifact (a cross-workspace bilingual cache). Context, not trigger.
 
 **Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/shared_context/{date}.json` instead of individual evidence card, quant, profile, and catalyst files.
 
@@ -181,12 +181,61 @@ Write to: `{workspace}/discussion/{date}/thesis_map.json`
   "writer_guidance": [
     "<specific instruction for the report writer based on debate conclusions>"
   ],
+  "unconventional_factors": [
+    {"role": "chips_analyst", "factor": "<the analyst's off-template observation, VERBATIM>"}
+  ],
   "debate_quality_score": 8.0,
   "dominant_time_horizon": "short_term|swing|long_term",
   "net_directional_lean": "bullish|bearish|neutral",
   "net_lean_rationale": "<one sentence: which side carried more evidence-weighted argument, and why>"
 }
 ```
+
+**`unconventional_factors` — the anti-templating rule.** Every memo ends with an
+off-template section (框架之外 / Off-Template Factors) and every panel view carries
+`anomaly_watch`. Collect them **verbatim, attributed to their role** — do NOT
+merge them into consensus, do NOT smooth their language, do NOT drop one because
+it contradicts the lean. These entries exist precisely because the factors that
+drive violent repricings are the ones a standardized framework normalizes away;
+the moderator's synthesis instinct is the failure mode here, so this field is
+explicitly exempt from synthesis. Only entries that literally say "none visible"
+may be omitted. The report writer reproduces this list in its
+"Outside the Framework" section.
+
+### 6b. Produce story_map.json
+
+Write to: `{workspace}/discussion/{date}/story_map.json`
+
+Distill from the memos + panel views the four questions that decide how
+game-driven capital prices a stock. Ground every field in what the analysts
+actually argued (with the evidence ids they cited) — this is synthesis, not
+fresh analysis. String values follow the report language; enum values stay
+English.
+
+```json
+{
+  "story": "<ONE sentence: what story is this stock telling right now>",
+  "size": {
+    "tier": "large|medium|small",
+    "reasoning": "<is the story big enough to move THIS company at ITS cap tier — reference cap_tier and the cap-tier playbook>"
+  },
+  "certainty": {
+    "tier": "confirmed|high_probability|hazy_but_coming|pure_theme",
+    "reasoning": "<why this tier — in the report language; the tier VALUE above stays the English enum>"
+  },
+  "stage": {
+    "tier": "untold|starting|fermenting|consensus|realized|falsified",
+    "reasoning": "<where is the telling and who is telling it — in the report language; the tier VALUE stays the English enum>"
+  },
+  "teller": ["company|institutions|media|hot_money"],
+  "verification_date": "<YYYY-MM-DD or null — when the story gets proven or killed>",
+  "falsifier": "<the single event that kills the story>",
+  "market_disagreement": "<what the market currently disagrees about — the bet inside the story>"
+}
+```
+
+If the debate genuinely surfaced no story (rare — even 'stable dividend payer,
+nothing new' is a story), write the fields honestly rather than inventing drama.
 
 ### 7. Produce debate_summary.md
 
@@ -229,3 +278,5 @@ Write to: `{workspace}/discussion/{date}/debate_summary.md`
 - The writer_guidance must be actionable — "be balanced" is too vague; "address the valuation concern raised by risk analyst with specific P/E data" is useful
 - Validate quantitative claims against quant_summary.json — flag any that don't match
 - Do not introduce new analysis — your job is to synthesize what the analysts produced
+- `unconventional_factors` entries are quoted verbatim and attributed — merging, smoothing, or dropping them defeats their purpose (they are the anti-templating channel)
+- Synthesis mode writes THREE artifacts: `thesis_map.json`, `story_map.json`, `debate_summary.md`

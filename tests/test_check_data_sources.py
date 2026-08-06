@@ -85,19 +85,24 @@ def test_macro_plan_keyed_routes_all_via_fred(keyed_env, monkeypatch):
     plan = cds.run(show_lengths=True)["macro"]
     assert plan["mode"] == "fred"
     assert "CPIAUCSL" in plan["series_via_fred"]
-    assert plan["series_via_proxy"] == [] and plan["series_unavailable"] == []
+    assert plan["series_via_fred_csv"] == [] and plan["series_unavailable"] == []
 
 
-def test_macro_plan_keyless_splits_proxy_vs_unavailable(monkeypatch):
+def test_macro_plan_keyless_routes_all_via_fred_csv(monkeypatch):
+    # Yahoo is not used anywhere in this pipeline, so a keyless run no longer
+    # degrades to yfinance proxies — it falls back to the public fredgraph CSV
+    # endpoint, which serves every series. Nothing is unavailable for lack of a
+    # key, including CPI / Fed funds / HY spread, which had no proxy at all.
     monkeypatch.delenv("NEWSAPI_KEY", raising=False)
     monkeypatch.delenv("FRED_API_KEY", raising=False)
     monkeypatch.setattr(cds, "load_dotenv", lambda *a, **k: {})
     monkeypatch.setattr(socket, "gethostbyname", lambda h: "127.0.0.1")
     plan = cds.run(show_lengths=True)["macro"]
-    assert plan["mode"] == "yfinance_proxy"
-    assert "DGS10" in plan["series_via_proxy"]
+    assert plan["mode"] == "fred_csv"
+    assert "DGS10" in plan["series_via_fred_csv"]
     for sid in ("CPIAUCSL", "CPILFESL", "FEDFUNDS", "BAMLH0A0HYM2"):
-        assert sid in plan["series_unavailable"]
+        assert sid in plan["series_via_fred_csv"]
+    assert plan["series_unavailable"] == []
 
 
 def test_writes_sanitized_json(tmp_path, keyed_env, monkeypatch):

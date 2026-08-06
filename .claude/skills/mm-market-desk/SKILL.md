@@ -48,12 +48,17 @@ hardcode US tickers. Fetch `primary_index` + all `secondary_indices` (e.g. HK �
 Call `mcp__market-data__get_price_history` with `tickers: [primary_index, *secondary_indices]` (from market_context_link.json), `period: "6mo"`, `interval: "1d"`.
 
 **Fallback (inline Python):**
-```python
-import yfinance as yf, json
-mc = json.load(open(f"{workspace}/profile/market_context_link.json"))
-tickers = [mc["primary_index"], *mc.get("secondary_indices", [])]
-data = yf.download(tickers, period="6mo", interval="1d", group_by="ticker")
-# Save each ticker's OHLCV to CSV
+**Yahoo/yfinance is NOT used anywhere in this pipeline.** Index levels come from
+the public NASDAQ API. Index *symbols* (`^GSPC`, `^IXIC`, ...) have no history
+endpoint there, so the collector routes them to the liquid tracking ETF (SPY,
+QQQ, DIA, IWM, SOXX) and records the substitution in its provenance — good
+enough for relative strength, which is all this file feeds.
+
+```bash
+# one call per symbol in market_context_link.json
+.venv/bin/python3 scripts/fetch_prices_nasdaq.py '{SYMBOL}' \
+    --out workspaces/shared/market_context/{date}/raw/{SAFE_SYMBOL}_prices.csv \
+    --months 12 --end {date}
 ```
 
 Save to `workspaces/shared/market_context/{date}/raw/{symbol}_prices.csv`. Sanitize the
@@ -67,10 +72,13 @@ this rule consistent so the primary index is always found.
 **Via MCP (preferred):**
 Call `mcp__market-data__get_price_history` with `tickers: ["GLD", "USO", "BTC-USD", "^VIX"]`, `period: "3mo"`, `interval: "1d"`.
 
-**Fallback:**
-```python
-macro_assets = ["GLD", "USO", "BTC-USD", "^VIX"]  # from market_context_link.json
-data = yf.download(macro_assets, period="3mo", interval="1d", group_by="ticker")
+```bash
+# GLD / USO and similar ETFs resolve directly; BTC-USD has no NASDAQ endpoint
+# and is expected to fail — skip it. VIX comes from the FRED macro layer
+# (VIXCLS), not from a price file.
+.venv/bin/python3 scripts/fetch_prices_nasdaq.py {ASSET} --assetclass etf \
+    --out workspaces/shared/market_context/{date}/raw/{ASSET}_prices.csv \
+    --months 6 --end {date}
 ```
 
 Save to `workspaces/shared/market_context/{date}/raw/{asset}_prices.csv`.
@@ -79,13 +87,16 @@ Save to `workspaces/shared/market_context/{date}/raw/{asset}_prices.csv`.
 
 The FRED macro series (CPI, Fed funds, Treasury curve, USD index, HY spread, VIX)
 are collected **deterministically by the pipeline driver** via
-`scripts/collect_macro_series.py` before the desks run — FRED-first, with yfinance
-proxy fallback when keyless. Do not re-fetch them.
+`scripts/collect_macro_series.py` before the desks run — the keyed FRED API when
+a key is present, otherwise the **keyless FRED CSV endpoint** (same series, same
+units). Do not re-fetch them.
 
 Instead, **read** `workspaces/shared/market_context/{date}/raw/macro/macro_sources.json`
 and note in your fetch summary:
-- the collection `mode` (`fred` | `yfinance_proxy` | `mixed` | `unavailable`)
-- any series in `inputs_missing` (keyless runs lack CPI / Fed funds / HY spread)
+- the collection `mode` (`fred` | `mixed` | `unavailable`); per-series `source`
+  is `fred` (keyed API) or `fred_csv` (keyless CSV) — both are full FRED quality
+- any series in `inputs_missing` (keyless runs no longer lack CPI / Fed funds /
+  HY spread; those now arrive over the CSV endpoint)
 
 The classified regime is at
 `workspaces/shared/market_context/{date}/indicators/macro_regime.json`. If the

@@ -33,7 +33,7 @@ executed trade**. State it plainly; never imply it is a guaranteed outcome.
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
-Role: $ARGUMENTS[2] (e.g. `company_analyst`, `risk_analyst`, `market_analyst`, `valuation_analyst`, `technical_analyst`, `catalyst_analyst`)
+Role: $ARGUMENTS[2] (e.g. `company_analyst`, `risk_analyst`, `market_analyst`, `valuation_analyst`, `chips_analyst`, `catalyst_analyst`)
 Round: $ARGUMENTS[3] (1-based integer)
 
 **All paths below use `{date}` = $ARGUMENTS[1], `{role}` = $ARGUMENTS[2], `{N}` = $ARGUMENTS[3].**
@@ -57,6 +57,17 @@ Round: $ARGUMENTS[3] (1-based integer)
   consume `label`; do not set or flip a vote on price-vs-SMA or a golden/death
   cross. Momentum (MACD/RS), news/catalysts, fundamentals, valuation, and risk
   carry the vote — SMA only colors how you frame the trend.
+- `shared_context.chips` — volume & chip structure (量比, VPVR cost distribution,
+  profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/
+  融资/龙虎榜/股东户数/解禁). **DIRECTIONAL**: unlike trend_regime (backdrop),
+  macro (context) and intraday (timing-only), chip evidence may carry a stance/
+  vote on its own — cite the `ev_…_chip_*` cards. Respect per-block `data_quality`.
+- `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
+  `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
+  land your conclusion on their horizon (no 3-year DCF answer to a swing
+  question, no day-trade framing for a long-horizon holder), and if this stock
+  does not fit their stated edge hypothesis, SAY SO explicitly instead of
+  forcing it into the frame. Absent file → assume swing horizon, no stated edge.
 - `workspaces/shared/market_context/{date}/` — shared macro data:
   `normalized/market_context_snapshot.json` (index levels, regime) plus
   `raw/*.csv` (index + macro asset series). Read **only when** your vote hinges on
@@ -100,6 +111,8 @@ rhetorical confidence. The conviction rubric is unchanged.
 
 1. **Adopt your role's lens.** A `risk_analyst` weighs the bear case and failure
    conditions; a `company_analyst` weighs fundamentals and catalysts; a
+   `chips_analyst` weighs the volume/chip structure and the operator's game (a
+   DIRECTIONAL lens — chip evidence may carry the vote on its own); a
    `valuation_analyst` weighs the valuation reference (DCF + comps + blended fair
    value), leading with its confidence; etc. Your memo already states this
    position — start there.
@@ -159,7 +172,12 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
   "rationale": "<2-4 sentences, evidence-referenced (ev_… ids where possible), from your role's lens>",
   "top_risk": "<the single thing most likely to flip this vote>",
   "changed_from_prev": "none|SELL->HOLD|BUY->SELL|...",
-  "responds_to_dissent": "<round 1: \"\" ; round >1: how you answer the chair's flagged dissent>"
+  "responds_to_dissent": "<round 1: \"\" ; round >1: how you answer the chair's flagged dissent>",
+  "main_force_view": {
+    "stance": "accumulate|absorb|mark_up|distribute|avoid",
+    "reasoning": "<one or two sentences: if you controlled serious size in this name today, which play would you run (`accumulate` / `absorb` / `mark_up` / `distribute` / `avoid` — the same enum as `stance`) and why — derived from the observable tape, not narrative>"
+  },
+  "anomaly_watch": "<REQUIRED: where does this stock NOT fit your framework — the off-template factor that could drive a violent move your lens would miss. Honest 'none visible' is acceptable; an invented anomaly is not.>"
 }
 ```
 
@@ -171,9 +189,21 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
   reason** for a BUY or SELL vote — pair it with role-lens evidence
   (fundamentals, catalysts, risk, technicals, news); on its own it is a caveat,
   not a vote driver.
+- **Reference-role valuation (CN/HK)**: when `valuation_summary.role` is
+  `"reference"`, the fair-value read may only corroborate or add a caveat — it
+  must not be the stated reason for your vote. In game-driven markets the
+  story, chips, and fundamentals lead; valuation is a floor/sanity check.
 - A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
   for a BUY or SELL vote — pair it with role-lens evidence (fundamentals,
   catalysts, risk, news, MACD/RS); on its own it is trend color, not a vote driver.
+- **Chip/volume structure IS valid sole grounds for a vote** (`shared_context.chips`,
+  `ev_…_chip_*` cards) — this asymmetry with the SMA and valuation rules is
+  deliberate: chip exchange is the reproducible trace of buying/selling force.
+  Respect `data_quality` — an `unavailable` block supports nothing.
+- `main_force_view.stance` must be one of `accumulate`, `absorb`, `mark_up`,
+  `distribute`, `avoid` — it is a first-principles read of the game, not your
+  vote restated (a SELL vote with `main_force_view: absorb` is a coherent
+  "operator accumulating but I won't front-run them" position).
 - `vote` must be exactly `BUY`, `HOLD`, or `SELL`. `risk_overlay` must be one of
   `none`, `hedge`, `trim`, `stop`. `conviction` is a float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.

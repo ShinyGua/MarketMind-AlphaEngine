@@ -140,29 +140,42 @@ def fetch_fred_series(series_id: str, api_key: str, lookback_months: int) -> tup
     return rows, None
 
 
-def fetch_yf_proxy(symbol: str, lookback_months: int) -> tuple[list, str | None]:
-    """Daily closes for a yfinance proxy ticker, scaled to FRED units."""
+def fetch_fred_csv(series_id: str, lookback_months: int) -> tuple[list, str | None]:
+    """Keyless FRED fallback via the public fredgraph CSV endpoint.
+
+    Replaces the former yfinance proxy path (Yahoo is no longer used anywhere in
+    this pipeline). This is strictly better than the proxies it replaces: it is
+    the *real* FRED series in FRED units, so CPI, Fed funds and the HY OAS —
+    which had no Yahoo proxy at all and were always reported missing on keyless
+    runs — are now available without an API key.
+    """
+    import requests
+
+    start = (datetime.now(timezone.utc) - timedelta(days=lookback_months * 30)).strftime("%Y-%m-%d")
     try:
-        import yfinance as yf
+        resp = requests.get(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv",
+            params={"id": series_id, "cosd": start},
+            timeout=20,
+        )
+        if resp.status_code >= 400:
+            return [], _classify(resp=resp)
+        body = resp.text
+    except (requests.exceptions.RequestException, OSError) as exc:
+        return [], _classify(exc=exc)
 
-        period = f"{max(lookback_months, 1)}mo"
-        hist = yf.Ticker(symbol).history(period=period, interval="1d")
-    except Exception as exc:  # yfinance raises a zoo of types; never abort
-        return [], f"network_failed ({type(exc).__name__})"
-    if hist is None or hist.empty or "Close" not in hist:
-        return [], "no_data"
-
-    closes = [(ts, c) for ts, c in hist["Close"].items() if c == c]  # drop NaN
-    # Scale per-row, not per-window: Yahoo has historically flipped treasury
-    # tickers between the x10 and percent forms, so a single window-wide factor
-    # would corrupt half of a mixed-convention series.
-    is_treasury = symbol in _TREASURY_PROXIES
     rows = []
-    for ts, close in closes:
-        v = float(close)
-        if is_treasury and v > _YIELD_X10_THRESHOLD:
-            v *= 0.1
-        rows.append((ts.strftime("%Y-%m-%d"), round(v, 4)))
+    for line in body.splitlines()[1:]:  # skip the "observation_date,SERIES" header
+        parts = line.split(",")
+        if len(parts) < 2:
+            continue
+        raw = parts[1].strip()
+        if raw in ("", "."):  # FRED gap marker
+            continue
+        try:
+            rows.append((parts[0].strip(), round(float(raw), 4)))
+        except ValueError:
+            continue
     if not rows:
         return [], "no_data"
     return rows, None
@@ -225,15 +238,14 @@ def collect(workspace: Path, date: str, force: bool = False) -> dict:
                 write_series_csv(out_dir / f"{sid}.csv", rows)
                 series_status[sid] = {"source": "fred", "rows": len(rows), "reason": None}
                 continue
-        proxy = cfg["proxies"].get(sid)
-        if proxy:
-            prows, preason = fetch_yf_proxy(proxy, cfg["lookback_months"])
-            if prows:
-                write_series_csv(out_dir / f"{sid}.csv", prows)
-                series_status[sid] = {"source": f"yfinance:{proxy}", "rows": len(prows),
-                                      "reason": None if not api_key else f"fred_{reason}"}
-                continue
-            reason = preason if not api_key else f"fred_{reason}; proxy_{preason}"
+        # Keyless fallback: the same FRED series over the public CSV endpoint.
+        crows, creason = fetch_fred_csv(sid, cfg["lookback_months"])
+        if crows:
+            write_series_csv(out_dir / f"{sid}.csv", crows)
+            series_status[sid] = {"source": "fred_csv", "rows": len(crows),
+                                  "reason": None if not api_key else f"fred_{reason}"}
+            continue
+        reason = creason if not api_key else f"fred_{reason}; csv_{creason}"
         series_status[sid] = {"source": "missing", "rows": 0, "reason": reason}
         inputs_missing.append(sid)
 
@@ -241,8 +253,9 @@ def collect(workspace: Path, date: str, force: bool = False) -> dict:
     result = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "date": date,
-        "mode": "fred" if modes == {"fred"} else ("yfinance_proxy" if modes == {"yfinance"} else
-                                                  ("mixed" if modes else "unavailable")),
+        # fred_csv is FRED data in FRED units — same quality tier as the keyed API.
+        "mode": "fred" if modes and modes <= {"fred", "fred_csv"} else (
+            "mixed" if modes else "unavailable"),
         "series": series_status,
         "inputs_missing": inputs_missing,
     }

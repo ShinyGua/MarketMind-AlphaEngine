@@ -422,6 +422,10 @@ async def list_prompts() -> list[mcp.types.Prompt]:
                 mcp.types.PromptArgument(name="ticker", description="Company ticker", required=True),
                 mcp.types.PromptArgument(name="date", description="Run date YYYY-MM-DD", required=True),
                 mcp.types.PromptArgument(name="mode", description="initial or revision", required=True),
+                mcp.types.PromptArgument(
+                    name="language",
+                    description="en or ch (default: read from the workspace's resolved_config.json)",
+                    required=False),
             ],
         ),
         mcp.types.Prompt(
@@ -443,7 +447,8 @@ async def get_prompt(name: str, arguments: dict | None = None) -> mcp.types.GetP
         elif name == "workspace_overview":
             text = _prompt_workspace_overview(arguments.get("ticker"))
         elif name == "report_writer":
-            text = _prompt_report_writer(arguments.get("ticker", ""), arguments.get("date", ""), arguments.get("mode", "initial"))
+            text = _prompt_report_writer(arguments.get("ticker", ""), arguments.get("date", ""),
+                                         arguments.get("mode", "initial"), arguments.get("language"))
         elif name == "report_reviewer":
             text = _prompt_report_reviewer(arguments.get("ticker", ""), arguments.get("date", ""))
         else:
@@ -515,7 +520,45 @@ def _prompt_workspace_overview(ticker: str | None) -> str:
         lines.append("")
     return "\n".join(lines)
 
-def _prompt_report_writer(ticker: str, date: str, mode: str) -> str:
+# Section list, one entry per language. This is code, not a prompt, so paired
+# dicts are safe here — the "nearest literal wins" failure that produced
+# bilingual headings applies to SKILL.md templates, not to a lookup table.
+# Canonical list: .claude/skills/mm-report-writer/SKILL.md § Language Map.
+_REPORT_SECTIONS = {
+    "en": (
+        "1. **Executive Summary** — 3-5 bullets, lead with most material event\n"
+        "2. **Story & Game** — the story, its size vs cap tier, certainty, stage, falsifier\n"
+        "3. **Money Flow & Chip Structure** — price/returns, volume regime, chip distribution,\n"
+        "   support/resistance, CN flows (large-order / Northbound / margin / exchange top-buyer\n"
+        "   list / shareholder count) — no MA crossovers\n"
+        "4. **Peer Cohort Divergence** — per-peer path classes, leader, product-niche differences\n"
+        "5. **Market Context** — Macro, index performance, relative strength\n"
+        "6. **Company Events & News** — Ranked by materiality, reference evidence card IDs\n"
+        "7. **Valuation** — anchor treatment (US) or brief reference treatment (CN/HK, role=reference)\n"
+        "8. **Catalysts & Risks** — Upcoming events with dates, bull/bear from thesis_map\n"
+        "9. **Investment View** — Synthesized thesis, confidence, the investor's horizon\n"
+        "10. **Outside the Framework** — verbatim unconventional_factors from thesis_map\n"
+        "11. **Sources & Evidence** — Key evidence card IDs with source names\n"
+    ),
+    "ch": (
+        "1. **摘要** — 3-5 条要点，以最重要事件领起\n"
+        "2. **故事与博弈** — 故事本身、相对市值层级的量级、确定性、阶段、证伪条件\n"
+        "3. **资金与筹码** — 价格/收益、量能、筹码分布、支撑与压力、\n"
+        "   北向资金流（主力/北向/融资/龙虎榜/股东户数）——不写均线交叉\n"
+        "4. **同类股分化** — 各同类股路径分类、领涨股、细分赛道差异\n"
+        "5. **市场环境** — 宏观、指数表现、相对强弱\n"
+        "6. **公司事件与新闻** — 按重要性排序，引用证据卡 ID\n"
+        "7. **估值** — 锚定处理（美股）或简要参考处理（A股/港股，role=reference）\n"
+        "8. **催化剂与风险** — 带日期的未来事件、来自 thesis_map 的多空观点\n"
+        "9. **投资观点** — 综合论点、置信度、投资者的持有周期\n"
+        "10. **框架之外** — 逐字引用 thesis_map 的 unconventional_factors\n"
+        "11. **来源与证据** — 关键证据卡 ID 及来源名称\n"
+    ),
+}
+
+
+def _prompt_report_writer(ticker: str, date: str, mode: str,
+                          language: str | None = None) -> str:
     if mode == "revision":
         return (
             f"# Report Revision Instructions — {ticker} {date}\n\n"
@@ -527,18 +570,23 @@ def _prompt_report_writer(ticker: str, date: str, mode: str) -> str:
             "- Increment version number (e.g., daily_v1.md → daily_v2.md)\n"
             f"- Write to `drafts/{date}/`\n"
         )
+    # Config is authoritative; the argument is an override for callers that
+    # already know. Matches resolved_config.json's own default.
+    lang = language
+    if lang not in ("en", "ch"):
+        cfg = _read_json(WORKSPACES_DIR / ticker / "resolved_config.json") or {}
+        lang = cfg.get("language")
+        lang = "ch" if lang == "ch" else "en"
     return (
         f"# Daily Report Template — {ticker} {date}\n\n"
         f"Read `workspace://{ticker}/{date}/draft_packet` for all input context.\n\n"
+        f"Report language: **{lang}** (from resolved_config.json). Write the ENTIRE report in\n"
+        "that one language — headings, narrative and tables. Never emit a heading carrying\n"
+        "both languages. JSON keys, enum values, evidence-card ids and tickers stay English.\n\n"
         "## Section Structure\n\n"
-        "1. **Executive Summary** — 3-5 bullets, lead with most material event\n"
-        "2. **Market Context** — Macro, index performance, relative strength\n"
-        "3. **Company Events & News** — Ranked by materiality, reference evidence card IDs\n"
-        "4. **Price Action & Technical Snapshot** — Price, returns, RSI, MACD, SMA, key levels\n"
-        "5. **Sector & Peers** — Relative performance, notable peer developments\n"
-        "6. **Catalysts & Risks** — Upcoming events with dates, bull/bear from thesis_map\n"
-        "7. **Investment View** — Synthesized thesis, confidence, time horizon\n"
-        "8. **Sources & Evidence** — Key evidence card IDs with source names\n\n"
+        "(CN/HK order leads with Story & Game + chips; US order leads with Market Context —\n"
+        "see mm-report-writer/SKILL.md for the full per-market ordering.)\n\n"
+        f"{_REPORT_SECTIONS[lang]}\n"
         "## Writing Rules\n"
         "- Every material claim must reference a specific evidence card ID or quant data point\n"
         "- Separate facts from interpretation\n"

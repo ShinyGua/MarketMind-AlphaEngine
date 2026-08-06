@@ -34,7 +34,8 @@ def evaluate(workspace: Path, date: str) -> dict:
     """Run release gate logic. Returns the gate result dict."""
 
     # Gate graders participate in pass/fail logic
-    gate_graders = ["factuality", "evidence", "consistency", "valuation", "depth", "decision_risk"]
+    gate_graders = ["factuality", "evidence", "consistency", "valuation", "depth",
+                    "decision_risk", "language_purity"]
     # Metric-only graders provide info but don't affect release status
     metric_graders = ["cost"]
 
@@ -62,7 +63,10 @@ def evaluate(workspace: Path, date: str) -> dict:
 
     # Determine release status
     critical_graders = ["factuality", "evidence"]
-    advisory_graders = ["consistency", "valuation", "depth", "decision_risk"]
+    # language_purity is advisory: a mixed-language report is a presentation
+    # defect, not a factual regression, so it must not write regression_flag.json.
+    advisory_graders = ["consistency", "valuation", "depth", "decision_risk",
+                        "language_purity"]
 
     critical_fail = any(summary.get(g) == "fail" for g in critical_graders)
     advisory_fail = any(summary.get(g) == "fail" for g in advisory_graders)
@@ -162,6 +166,9 @@ def _extract_key_metric(name: str, result: dict):
         llm = result.get("llm_confidence", "?")
         ceiling = result.get("confidence_ceiling", "?")
         return f"conf={llm}/ceiling={ceiling}, {'over' if result.get('exceeded') else 'within'}"
+    if name == "language_purity":
+        return (f"{result.get('language', '?')}, "
+                f"{len(result.get('violations', []))} violation(s)")
     if name == "cost":
         tokens = result.get("estimated_total_tokens", "?")
         cost = result.get("estimated_cost_usd", "?")
