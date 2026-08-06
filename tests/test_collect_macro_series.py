@@ -1,11 +1,17 @@
-"""Tests for scripts/collect_macro_series.py — FRED-first collection with
-per-series yfinance proxy fallback. requests/yfinance are monkeypatched;
-no real network, no live-artifact numbers.
+"""Tests for scripts/collect_macro_series.py — FRED-first collection with a
+per-series *keyless FRED CSV* fallback.
+
+Yahoo/yfinance is no longer used anywhere in this pipeline, so the former
+yfinance-proxy fallback (and its treasury x10-vs-percent rescaling) is gone:
+the keyless path now fetches the same FRED series over the public fredgraph
+CSV endpoint, in FRED units. That also recovers CPI / Fed funds / HY spread,
+which had no proxy at all and were always reported missing on keyless runs.
+
+requests is monkeypatched; no real network, no live-artifact numbers.
 """
 import importlib.util
 import json
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -20,56 +26,24 @@ DATE = "2026-01-15"
 
 
 class _FakeResp:
-    def __init__(self, status_code, observations=None):
+    """Serves both FRED shapes: .json() for the keyed API, .text for the CSV."""
+
+    def __init__(self, status_code, observations=None, text=None):
         self.status_code = status_code
         self._obs = observations or []
+        self.text = text if text is not None else ""
 
     def json(self):
         return {"observations": self._obs}
 
 
-class _FakeSeries(dict):
-    """Mimics a pandas Close series: .items() yields (ts, value)."""
+CSV_BODY = "observation_date,VALUE\n2026-01-02,4.54\n2026-01-03,.\n2026-01-06,4.61\n"
 
 
-class _FakeTs:
-    def __init__(self, s):
-        self._s = s
-
-    def strftime(self, fmt):
-        return self._s
-
-
-class _FakeHist:
-    def __init__(self, closes):
-        self._closes = closes
-
-    @property
-    def empty(self):
-        return not self._closes
-
-    def __contains__(self, key):
-        return key == "Close"
-
-    def __getitem__(self, key):
-        s = _FakeSeries()
-        for i, v in enumerate(self._closes):
-            s[_FakeTs(f"2026-01-{i + 1:02d}")] = v
-        return s
-
-
-def _fake_yfinance(closes_by_symbol):
-    mod = types.ModuleType("yfinance")
-
-    class Ticker:
-        def __init__(self, symbol):
-            self.symbol = symbol
-
-        def history(self, period=None, interval=None):
-            return _FakeHist(closes_by_symbol.get(self.symbol, []))
-
-    mod.Ticker = Ticker
-    return mod
+def _csv_get(url, params=None, timeout=None):
+    """Every series resolves over the keyless CSV endpoint."""
+    assert "fredgraph.csv" in url
+    return _FakeResp(200, text=CSV_BODY)
 
 
 @pytest.fixture
@@ -77,82 +51,66 @@ def no_dotenv(monkeypatch):
     monkeypatch.setattr(cms, "load_dotenv", lambda *a, **k: {})
 
 
-def test_keyless_uses_proxies_and_marks_missing(tmp_path, monkeypatch, no_dotenv):
+def test_keyless_uses_fred_csv_and_recovers_every_series(tmp_path, monkeypatch, no_dotenv):
     monkeypatch.delenv("FRED_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "yfinance",
-                        _fake_yfinance({"^TNX": [45.4, 45.0], "^VIX": [18.0, 19.0]}))
+    import requests
+    monkeypatch.setattr(requests, "get", _csv_get)
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
 
     result = cms.collect(ws, DATE)
 
-    assert result["series"]["DGS10"]["source"] == "yfinance:^TNX"
-    # ^TNX quotes yield x 10 -> divided to FRED percent units
+    assert result["series"]["DGS10"]["source"] == "fred_csv"
+    # Values arrive in FRED units already — no rescaling, and the '.' gap row is
+    # dropped rather than written as a bogus observation.
     csv = (cms.shared_macro_dir(ws, DATE) / "DGS10.csv").read_text(encoding="utf-8")
-    assert "4.54" in csv and "45.4" not in csv
-    # no proxy exists for CPI / FedFunds / HY spread
+    assert "4.54" in csv and "4.61" in csv
+    assert result["series"]["DGS10"]["rows"] == 2
+
+    # These four have no Yahoo proxy and were permanently missing on keyless
+    # runs; the CSV endpoint serves them like any other series.
     for sid in ("CPIAUCSL", "CPILFESL", "FEDFUNDS", "BAMLH0A0HYM2"):
-        assert sid in result["inputs_missing"]
-        assert result["series"][sid]["source"] == "missing"
-        assert result["series"][sid]["reason"] == "no_key"
-    assert result["mode"] == "yfinance_proxy"
+        assert sid not in result["inputs_missing"]
+        assert result["series"][sid]["source"] == "fred_csv"
+
+    # fred_csv is real FRED data in FRED units, so it carries full fred quality.
+    assert result["mode"] == "fred"
 
 
-def test_percent_form_treasury_proxy_not_rescaled(tmp_path, monkeypatch, no_dotenv):
-    # current yfinance returns ^TNX already in percent (4.54) — must NOT divide again
-    monkeypatch.delenv("FRED_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "yfinance", _fake_yfinance({"^TNX": [4.53, 4.54]}))
-    ws = tmp_path / "workspaces" / "TEST"
-    ws.mkdir(parents=True)
-    cms.collect(ws, DATE)
-    csv = (cms.shared_macro_dir(ws, DATE) / "DGS10.csv").read_text(encoding="utf-8")
-    assert "4.54" in csv and "0.454" not in csv
-
-
-def test_per_series_fred_failure_falls_back_to_proxy(tmp_path, monkeypatch, no_dotenv):
+def test_per_series_fred_failure_falls_back_to_csv(tmp_path, monkeypatch, no_dotenv):
     monkeypatch.setenv("FRED_API_KEY", "k")
     import requests
 
-    def fred_get(url, params=None, timeout=None):
-        if params["series_id"] == "DGS10":
+    def mixed_get(url, params=None, timeout=None):
+        if "fredgraph.csv" in url:
+            return _FakeResp(200, text=CSV_BODY)
+        if (params or {}).get("series_id") == "DGS10":
             return _FakeResp(429)  # rate-limited on this series only
         return _FakeResp(200, [{"date": "2026-01-02", "value": "3.1"},
                                {"date": "2026-01-03", "value": "."}])  # '.' gap skipped
 
-    monkeypatch.setattr(requests, "get", fred_get)
-    monkeypatch.setitem(sys.modules, "yfinance", _fake_yfinance({"^TNX": [45.4]}))
+    monkeypatch.setattr(requests, "get", mixed_get)
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
 
     result = cms.collect(ws, DATE)
 
-    assert result["series"]["DGS10"]["source"] == "yfinance:^TNX"
+    assert result["series"]["DGS10"]["source"] == "fred_csv"
     assert "rate_limited" in result["series"]["DGS10"]["reason"]
     assert result["series"]["DGS2"]["source"] == "fred"
     assert result["series"]["DGS2"]["rows"] == 1  # '.' observation dropped
-    assert result["mode"] == "mixed"
     assert "DGS10" not in result["inputs_missing"]
-
-
-def test_mixed_convention_treasury_window_scaled_per_row(tmp_path, monkeypatch, no_dotenv):
-    # Yahoo has flipped ^TNX between x10 (45.4) and percent (4.54) forms; each
-    # row must be scaled independently, not by one window-wide factor.
-    monkeypatch.delenv("FRED_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "yfinance",
-                        _fake_yfinance({"^TNX": [45.4, 45.2, 4.51, 4.54]}))
-    ws = tmp_path / "workspaces" / "TEST"
-    ws.mkdir(parents=True)
-    cms.collect(ws, DATE)
-    csv = (cms.shared_macro_dir(ws, DATE) / "DGS10.csv").read_text(encoding="utf-8")
-    values = [float(line.split(",")[1]) for line in csv.strip().splitlines()[1:]]
-    assert values == [4.54, 4.52, 4.51, 4.54]
+    # Keyed API + keyless CSV are the same source family, so the run is not
+    # downgraded to "mixed" quality just because one series took the CSV route.
+    assert result["mode"] == "fred"
 
 
 def test_unavailable_cache_is_refetched(tmp_path, monkeypatch, no_dotenv):
     # A transient total failure recorded by an earlier same-day run must not be
     # honored as a cache — the next ticker retries.
     monkeypatch.delenv("FRED_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "yfinance", _fake_yfinance({"^TNX": [4.5]}))
+    import requests
+    monkeypatch.setattr(requests, "get", _csv_get)
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
     out = cms.shared_macro_dir(ws, DATE)
@@ -162,8 +120,8 @@ def test_unavailable_cache_is_refetched(tmp_path, monkeypatch, no_dotenv):
         encoding="utf-8")
 
     result = cms.collect(ws, DATE)  # no --force needed
-    assert result["mode"] == "yfinance_proxy"
-    assert result["series"]["DGS10"]["source"] == "yfinance:^TNX"
+    assert result["mode"] == "fred"
+    assert result["series"]["DGS10"]["source"] == "fred_csv"
 
 
 def test_existing_sources_json_skips_unless_force(tmp_path, monkeypatch, no_dotenv):
@@ -180,10 +138,35 @@ def test_existing_sources_json_skips_unless_force(tmp_path, monkeypatch, no_dote
 
 def test_collect_never_raises_on_total_failure(tmp_path, monkeypatch, no_dotenv):
     monkeypatch.delenv("FRED_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "yfinance", _fake_yfinance({}))  # every proxy empty
+    import requests
+
+    def dead(url, params=None, timeout=None):
+        raise requests.exceptions.ConnectionError("no network")
+
+    monkeypatch.setattr(requests, "get", dead)
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
 
     result = cms.collect(ws, DATE)
     assert result["mode"] == "unavailable"
     assert set(result["inputs_missing"]) == set(result["series"].keys())
+
+
+def test_no_yfinance_fallback_remains(tmp_path, monkeypatch, no_dotenv):
+    """Yahoo must not be reachable even if yfinance is importable."""
+    assert not hasattr(cms, "fetch_yf_proxy")
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    import requests
+
+    def dead(url, params=None, timeout=None):
+        raise requests.exceptions.ConnectionError("no network")
+
+    monkeypatch.setattr(requests, "get", dead)
+
+    def _boom(*a, **k):  # any yfinance import attempt fails the test loudly
+        raise AssertionError("pipeline attempted a yfinance import")
+
+    monkeypatch.setitem(sys.modules, "yfinance", property(_boom))
+    ws = tmp_path / "workspaces" / "TEST"
+    ws.mkdir(parents=True)
+    assert cms.collect(ws, DATE)["mode"] == "unavailable"

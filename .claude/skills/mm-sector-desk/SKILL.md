@@ -65,21 +65,24 @@ Save to `{workspace}/raw/{date}/news/sector_news.json`.
 
 **Indicator warm-up**: Fetch **6 months** (`period='6mo'`) of daily data for peers and sector ETF, to provide warm-up for technical indicator computation.
 
-```python
-import yfinance as yf
-peers = ["PEER1", "PEER2", ...]  # from peer_set.json
-data = yf.download(peers, period="6mo", interval="1d", group_by="ticker")
+**Yahoo/yfinance is NOT used anywhere in this pipeline** — peer prices come from
+the public NASDAQ API via the deterministic collector. For each entry in
+`peer_set.json`:
+
+```bash
+.venv/bin/python3 scripts/fetch_prices_nasdaq.py {PEER} \
+    --out {workspace}/raw/{date}/prices/peer_{PEER}.csv --months 12 --end {date}
 ```
 
-Save each peer to `{workspace}/raw/{date}/prices/peer_{ticker}.csv`.
+Save each peer to `{workspace}/raw/{date}/prices/peer_{ticker}.csv`. If one peer
+fails, skip it and continue — the comps and peer-divergence layers degrade per
+peer rather than aborting.
 
 ### 3. Fetch Sector ETF Data
 
-Download sector ETF price data (determined by company-resolver):
-
-```python
-sector_etf = "SOXX"  # from market_context_link.json secondary_indices
-data = yf.download(sector_etf, period="3mo", interval="1d")
+```bash
+.venv/bin/python3 scripts/fetch_prices_nasdaq.py {SECTOR_ETF} --assetclass etf \
+    --out {workspace}/raw/{date}/prices/sector_etf.csv --months 12 --end {date}
 ```
 
 Save to `{workspace}/raw/{date}/prices/sector_etf.csv`.

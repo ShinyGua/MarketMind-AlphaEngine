@@ -300,6 +300,11 @@ review:
     min_evidence_cards: 12      # total evidence cards collected
     min_exec_bullets: 3         # Executive Summary bullet count
 
+  language_purity:              # one language per report (eval/graders/language_purity_grader.py)
+    min_cjk_run: 2              # ideographs before an `en` run is flagged (kills single-char noise)
+    min_latin_words: 6          # lowercase Latin words before a `ch` run is flagged (a sentence, not a metric name)
+    excerpt_chars: 90           # violation excerpt length in the grader result
+
 # --- Decision ---
 decision:
   enabled: true

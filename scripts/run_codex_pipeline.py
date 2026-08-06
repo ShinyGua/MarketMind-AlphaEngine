@@ -411,7 +411,7 @@ def st_reflect(ctx):
     # non-critical: never abort the run
     for g in ("factuality_grader", "evidence_grader", "consistency_grader",
               "valuation_grader", "depth_grader", "decision_risk_grader",
-              "story_grader", "cost_tracker"):
+              "story_grader", "language_purity_grader", "cost_tracker"):
         det(ctx, f"eval/graders/{g}.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/release_gate.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)

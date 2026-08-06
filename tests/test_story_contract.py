@@ -124,7 +124,12 @@ def test_memo_skills_carry_story_and_offtemplate_sections():
     for name in ("mm-market-analyst", "mm-company-analyst", "mm-risk-analyst",
                  "mm-valuation-analyst", "mm-catalyst-analyst", "mm-chips-analyst"):
         text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-        assert "框架之外" in text, f"{name} missing off-template section"
+        # Language-agnostic: the contract is that the anti-templating section
+        # EXISTS, not that it is labelled in Chinese. Asserting the CJK literal
+        # forced every memo skill to carry a bilingual heading, which is exactly
+        # what leaked into the English MU report.
+        assert "框架之外" in text or "Off-Template Factors" in text, \
+            f"{name} missing off-template section"
         if name != "mm-chips-analyst":  # the chips memo IS the game lens end-to-end
             assert "故事与博弈" in text or "Story & Game" in text, \
                 f"{name} missing story section"

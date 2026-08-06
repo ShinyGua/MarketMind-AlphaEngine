@@ -109,9 +109,18 @@ If MCP is not attached, fall back to the local Python servers/modules
   that boundary. Cite evidence IDs + source dates; keep unsupported valuation
   output low-confidence rather than forcing a DCF.
 - `macro_regime.json` is shared across same-day workspaces with possibly
-  different `language` configs: its `summary` is emitted in BOTH en and ch
-  (consumers pick); its thresholds live in the ROOT config's `macro_regime`
-  block only. Macro is **context, not trigger**; the intraday block is
+  different `language` configs, so it caches BOTH languages under
+  `summary_i18n` — deliberately, since a single-language file would take the
+  language of whichever workspace ran last. **It is not an analyst-facing
+  surface.** `build_shared_context.py` resolves the workspace's language into
+  `shared_context.macro_regime.summary` (+ `summary_lang`); read it from the
+  bundle. Its thresholds live in the ROOT config's `macro_regime` block only.
+- **One language per run.** Every artifact carrying user-facing prose selects a
+  single language at write time from `resolved_config.language`
+  (`contracts.resolve_language`); `chip_structure.note` and
+  `intraday_timing.note` are plain strings with a `note_lang` sibling. Never
+  emit both and expect the consumer to pick — nothing picked, and Chinese
+  reached an English report. `eval/graders/language_purity_grader.py` guards it. Macro is **context, not trigger**; the intraday block is
   **timing-only** (entry/exit zone framing, never a vote reason).
 - `quant_summary.json` carries a deterministic **`trend_regime`** block
   (`label` uptrend/downtrend/transition/range from the SMA20/50 stack + SMA50

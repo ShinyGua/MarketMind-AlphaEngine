@@ -132,7 +132,8 @@ def test_run_unavailable_writes_artifact_and_continues(tmp_path, monkeypatch):
     ws.mkdir(parents=True)
     artifact = it.run(ws, DATE)
     assert artifact == {"schema_version": 1, "ticker": "0941.HK", "available": False,
-                        "reason": "no_intraday_data", "usage": "timing_only"}
+                        "reason": "no_intraday_data", "usage": "timing_only",
+                        "note_lang": "en"}
     out = json.loads((ws / "quant" / DATE / "intraday_timing.json").read_text(encoding="utf-8"))
     assert out["available"] is False
 
@@ -148,7 +149,9 @@ def test_run_with_synthetic_bars(tmp_path, monkeypatch):
     assert artifact["timeframes"]["1h"]["rsi_14"] == 100.0  # monotone up
     assert artifact["timeframes"]["4h"]["macd"] > 0
     assert artifact["timing_state"] in ("overbought", "extended_overbought")
-    assert "en" in artifact["note"] and "ch" in artifact["note"]
+    # ONE language per artifact — rendering both put Chinese in an en report.
+    assert isinstance(artifact["note"], str) and artifact["note"]
+    assert artifact["note_lang"] == "en"
 
 
 def _fake_yfinance(df):
@@ -168,18 +171,21 @@ def _fake_yfinance(df):
     return mod
 
 
-def test_nan_closes_dropped_and_json_strict(tmp_path, monkeypatch):
-    # yfinance 1h data contains NaN closes; the REAL fetch_hourly must drop them
-    # so they never reach the artifact (json NaN literals are invalid) nor drive
-    # timing_state off a NaN comparison.
+def test_no_intraday_source_degrades_and_json_strict(tmp_path, monkeypatch):
+    # Yahoo was the only free keyless source of 1h bars and is no longer used
+    # anywhere in this pipeline, so fetch_hourly has no source to call: the
+    # artifact must self-degrade to available=false rather than half-populate.
+    # Even a yfinance module sitting importable in the environment must not be
+    # reached. The JSON must still be strictly valid (no NaN literals).
     import sys
-    closes = [100.0 + 0.2 * i for i in range(120)] + [float("nan")] * 3
+    closes = [100.0 + 0.2 * i for i in range(120)]
     monkeypatch.setitem(sys.modules, "yfinance", _fake_yfinance(_ohlcv(closes)))
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
     artifact = it.run(ws, DATE)
-    assert artifact["available"] is True
-    assert artifact["last_close"] == round(100.0 + 0.2 * 119, 2)  # last REAL close
+    assert artifact["available"] is False
+    assert artifact["reason"] == "no_intraday_data"
+    assert it.fetch_hourly("TEST") is None
     raw = (ws / "quant" / DATE / "intraday_timing.json").read_text(encoding="utf-8")
     json.loads(raw, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
 

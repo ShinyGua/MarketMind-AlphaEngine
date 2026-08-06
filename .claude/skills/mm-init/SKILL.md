@@ -93,26 +93,18 @@ These answers change what the analysts weigh (a swing question is not answered
 with a 3-year DCF argument) — never skip the questions themselves, only the
 user may skip answering.
 
-### Step 5: Enrich via yfinance (Optional)
+### Step 5: Enrich Company Details (Optional)
 
-Try to get additional details:
+**Yahoo/yfinance is NOT used anywhere in this pipeline.** For a US name, get the
+live quote and exchange from the NASDAQ API:
 
 ```bash
-python3 -c "
-import yfinance as yf, json
-t = yf.Ticker('TICKER')
-info = t.info
-print(json.dumps({
-    'name': info.get('longName', ''),
-    'exchange': info.get('exchange', ''),
-    'sector': info.get('sector', ''),
-    'industry': info.get('industry', ''),
-    'market_cap': info.get('marketCap', 0),
-    'currency': info.get('currency', 'USD'),
-    'country': info.get('country', ''),
-}))
-"
+.venv/bin/python3 scripts/nasdaq_fetch.py TICKER
 ```
+
+Sector, industry, currency and country come from the Step 2 WebSearch results,
+which are sufficient on their own. If neither source resolves a field, leave it
+empty rather than guessing — the resolver stage fills the profile properly.
 
 If yfinance fails, use the web search results — they are sufficient.
 

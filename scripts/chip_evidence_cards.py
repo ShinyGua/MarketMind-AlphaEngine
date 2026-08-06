@@ -34,6 +34,51 @@ _PROFIT_EXTREME_LO = 0.10     # ≤10% of chips in profit → deep-trap card
 _PROFIT_EXTREME_HI = 0.90     # ≥90% in profit → escape-velocity card
 _INFLOW_STREAK = 3            # main-force consecutive inflow days → card
 
+# ── LHB Chinese → English ────────────────────────────────────────────
+# The exchange's 上榜原因 is a CLOSED rule vocabulary, not free text, so it is
+# genuinely translatable. 解读 is freer, but its information content collapses
+# to a seat type. Without this the `en` LHB card spliced raw scraped Chinese
+# straight into an English title.
+
+# Order matters: the 3-day cumulative forms contain the same 偏离值 stem as the
+# daily ones, so they must be tested first.
+_LHB_REASON_EN = (
+    ("涨幅偏离值累计达20%", "3-day cumulative +20% deviation"),
+    ("跌幅偏离值累计达20%", "3-day cumulative -20% deviation"),
+    ("涨幅偏离值达7%", "+7% daily price deviation"),
+    ("跌幅偏离值达7%", "-7% daily price deviation"),
+    ("振幅值达15%", "15% intraday range"),
+    ("换手率达20%", "20% turnover"),
+    ("退市整理", "delisting-consolidation board"),
+    ("严重异常波动", "severe abnormal volatility"),
+    ("异常波动", "abnormal volatility"),
+)
+
+_LHB_SEAT_EN = (
+    (("机构专用", "机构"), "institutional seat"),
+    (("沪股通", "深股通", "北向"), "northbound seat"),
+    (("游资", "营业部", "证券营业部"), "hot-money seat"),
+)
+
+
+def _lhb_reason_en(text: str) -> str:
+    """Closed exchange-rule vocabulary → English. Falls back to a generic label."""
+    t = str(text or "")
+    for cn, en in _LHB_REASON_EN:
+        if cn in t:
+            return en
+    return "exchange top-mover rule"
+
+
+def _lhb_seat_en(text: str) -> str:
+    """akshare 解读 free text → seat classification (the part that carries signal)."""
+    t = str(text or "")
+    for keys, en in _LHB_SEAT_EN:
+        if any(k in t for k in keys):
+            return en
+    return "unclassified seat"
+
+
 _T = {
     "holder_concentrating": {
         "materiality": 0.7, "sentiment": "positive", "tag": "holders",
@@ -77,7 +122,8 @@ _T = {
     },
     "lhb_appearance": {
         "materiality": 0.65, "sentiment": "neutral", "tag": "lhb",
-        "en": ("On the dragon-tiger list {n}x in 90d; latest {date}: {interp} (net {net_yi:+.2f}00M)",
+        "en": ("On the exchange top-buyer/seller list {n}x in 90d; latest {date}: "
+               "{reason_en} ({seat_en}, net {net_yi:+.2f}00M)",
                "The name printed on the exchange's daily top-movers list.",
                "LHB seats reveal WHO is trading — hot money vs institutional seats — "
                "the most direct public read on the nature of the chips."),
@@ -206,9 +252,14 @@ def material_observations(chip: dict) -> list[dict]:
         events = cn["lhb"].get("events") or []
         last = events[-1] if events else {}
         obs.append({"key": "lhb_appearance",
+                    # `interp` stays raw for the ch template; the en template
+                    # consumes the translated pair. str.format ignores unused
+                    # kwargs, so both tolerate the superset.
                     "fmt": {"n": cn["lhb"]["appearances_90d"],
                             "date": last.get("date", "?"),
                             "interp": last.get("interpretation") or last.get("reason") or "—",
+                            "reason_en": _lhb_reason_en(last.get("reason")),
+                            "seat_en": _lhb_seat_en(last.get("interpretation")),
                             "net_yi": (last.get("net_buy") or 0) / 1e8}})
 
     # 4. northbound

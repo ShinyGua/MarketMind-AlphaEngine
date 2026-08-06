@@ -63,12 +63,24 @@ _MIN_ROWS_HARD = 30  # below this, even the volume block is meaningless
 # ── data loading ─────────────────────────────────────────────────────
 
 def fetch_daily(symbol: str, period: str, run_date: str):
-    """Daily OHLCV via yfinance, trimmed to run_date. None on any failure."""
+    """Daily OHLCV via the NASDAQ API, trimmed to run_date. None on any failure.
+
+    Yahoo/yfinance is no longer used anywhere in this pipeline; this is the
+    network fallback for when the desk's raw CSV is missing or too short.
+    """
     try:
         import pandas as pd
-        import yfinance as yf
 
-        hist = yf.Ticker(symbol).history(period=period, interval="1d")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from fetch_prices_nasdaq import fetch_daily as _nasdaq_daily
+
+        months = max(3, int(str(period).rstrip("d") or 400) // 21) if period.endswith("d") else 12
+        rows, _prov = _nasdaq_daily(symbol, months=months, end=run_date)
+        hist = pd.DataFrame(rows)
+        if hist.empty:
+            return None
+        hist["Date"] = pd.to_datetime(hist["Date"])
+        hist = hist.set_index("Date")
     except Exception:
         return None
     if hist is None or getattr(hist, "empty", True) or "Close" not in hist:
@@ -360,14 +372,20 @@ def compute_platform(df, cfg):
     }
 
 
-# ── bilingual note ───────────────────────────────────────────────────
+# ── note (single language, selected at write time) ────────────────────
+#
+# Both language tables are kept — that IS the bilingual capability. What
+# changed is that only ONE of them is written to the artifact. Emitting both
+# and expecting the consumer to pick was a fiction: nothing picked, and the
+# whole blob reached the LLM through shared_context, which is how Chinese
+# ended up in an English report.
 
 _REGIME_CH = {"expanding": "放量", "contracting": "缩量", "normal": "量能平稳", "unknown": "量能不明"}
 _REGIME_EN = {"expanding": "expanding volume", "contracting": "contracting volume",
               "normal": "normal volume", "unknown": "volume unknown"}
 
 
-def build_note(volume, chip, sr):
+def build_note(volume, chip, sr, lang="en"):
     vr = volume.get("volume_ratio")
     regime = volume.get("volume_regime", "unknown")
     parts_en, parts_ch = [], []
@@ -396,12 +414,14 @@ def build_note(volume, chip, sr):
     if ress:
         parts_en.append(f"resistance {ress[0]['price']}")
         parts_ch.append(f"压力{ress[0]['price']}")
-    return {"en": "; ".join(parts_en) + ".", "ch": "；".join(parts_ch) + "。"}
+    if lang == "ch":
+        return "；".join(parts_ch) + "。"
+    return "; ".join(parts_en) + "."
 
 
 # ── assembly ─────────────────────────────────────────────────────────
 
-def build(workspace: Path, date: str, cfg: dict) -> dict:
+def build(workspace: Path, date: str, cfg: dict, lang: str = "en") -> dict:
     symbol = contracts.resolve_yf_symbol(workspace)
     base = {
         "ticker": symbol,
@@ -413,15 +433,15 @@ def build(workspace: Path, date: str, cfg: dict) -> dict:
     }
 
     # Prefer the run-day raw CSV: it is the exact price series the rest of the
-    # report was written from (a live re-fetch months later returns
-    # dividend-adjusted history and would shift every chip level). Fetch from
-    # yfinance only when the CSV is missing or too short for the chip window.
+    # report was written from (a live re-fetch months later returns a different
+    # adjustment basis and would shift every chip level). Hit the network only
+    # when the CSV is missing or too short for the chip window.
     df = load_raw_csv(workspace, date, Path(str(workspace)).name)
     source = "raw_csv"
     if df is None or len(df) < cfg["min_rows"]:
         fetched = fetch_daily(symbol, cfg["history_period"], date)
         if fetched is not None and (df is None or len(fetched) > len(df)):
-            df, source = fetched, "yfinance"
+            df, source = fetched, "nasdaq_api"
     if df is None or len(df) < _MIN_ROWS_HARD or "Volume" not in df.columns:
         return {**base, "available": False,
                 "reason": "no_daily_data" if df is None else "insufficient_history",
@@ -484,7 +504,8 @@ def build(workspace: Path, date: str, cfg: dict) -> dict:
         "platform": platform,
         "cn_flows": cn_flows,
         "inputs_missing": inputs_missing,
-        "note": build_note(volume, chip, sr),
+        "note": build_note(volume, chip, sr, lang),
+        "note_lang": lang,
     }
     return artifact
 
@@ -497,10 +518,12 @@ def run(workspace: Path, date: str) -> dict:
     except (OSError, ValueError):
         pass
 
+    lang = contracts.resolve_language(Path(workspace))
     if not cfg.get("enabled", True):
-        artifact = {"available": False, "reason": "disabled", "usage": "directional"}
+        artifact = {"available": False, "reason": "disabled", "usage": "directional",
+                    "note_lang": lang}
     else:
-        artifact = build(Path(workspace), date, cfg)
+        artifact = build(Path(workspace), date, cfg, lang)
     out = contracts.chip_structure_path(Path(workspace), date)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(artifact, indent=2, ensure_ascii=False), encoding="utf-8")

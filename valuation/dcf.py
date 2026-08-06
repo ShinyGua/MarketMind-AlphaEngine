@@ -40,13 +40,24 @@ def effective_tax_rate(income_statement: list[dict]) -> float:
 
 
 def base_fcff(income_statement: list[dict], cash_flow: list[dict],
-              tax_rate: float) -> float | None:
-    """Latest-year unlevered FCF. Prefers EBIT-based FCFF; falls back to OCF+capex.
+              tax_rate: float, ttm: dict | None = None) -> float | None:
+    """Unlevered FCF for the base year. Prefers EBIT-based FCFF; falls back to OCF+capex.
+
+    Uses the **trailing-twelve-month** window when the collector supplies one,
+    because the newest 10-K can be almost a year stale: for a filer whose
+    run-rate is moving fast this is not a rounding difference. MU's FY2025 gave
+    FCFF ~$1.1bn against a TTM ~$26bn, which discounted to ~$21/share against an
+    ~$830 price. Falls back to the latest fiscal year when no TTM is available,
+    which is the historical behaviour.
+
+    Caveat for cyclicals: a TTM taken at a cycle peak anchors the DCF on peak
+    cash flow. That is what the bull/base/bear growth scenarios and the comps
+    cross-check exist to bound — it is still far better than an obsolete year.
 
     Returns None when neither path has enough data.
     """
-    inc = income_statement[0] if income_statement else {}
-    cf = cash_flow[0] if cash_flow else {}
+    inc = ttm if ttm else (income_statement[0] if income_statement else {})
+    cf = ttm if ttm else (cash_flow[0] if cash_flow else {})
     ebit = inc.get("ebit")
     dep = cf.get("dep_amort")
     capex = cf.get("capex")  # negative in yfinance convention

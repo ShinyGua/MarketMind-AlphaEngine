@@ -5,6 +5,7 @@ through its pure builders plus a raw-CSV-backed end-to-end run.
 """
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -104,7 +105,11 @@ def test_build_from_raw_csv(tmp_path, monkeypatch):
     assert artifact["source"] == "raw_csv"
     assert artifact["usage"] == "directional"
     assert artifact["volume"]["turnover"]["source"] == "float_shares"
-    assert artifact["note"]["ch"]
+    # ONE language per artifact, selected at write time. The fixture workspace
+    # has no resolved_config.json, so it defaults to en.
+    assert isinstance(artifact["note"], str) and artifact["note"]
+    assert artifact["note_lang"] == "en"
+    assert not re.search(r"[一-鿿]", artifact["note"])
 
 
 def test_build_unavailable_when_no_data(tmp_path, monkeypatch):

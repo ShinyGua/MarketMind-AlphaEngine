@@ -96,7 +96,7 @@ the thesis map and debate summary.
 - `{workspace}/shared_context/{date}.json` — quant, profile, peers, catalysts (one file)
 - `{workspace}/quant/{date}/technical_indicators.csv` — full daily indicator series (RSI/MACD/SMA/EMA/ATR). Read **only when** validating an analyst's trajectory claim (divergence, cross timing, support/resistance) that the snapshot in `shared_context` can't confirm.
 - `workspaces/shared/market_context/{date}/` — shared macro data: `normalized/market_context_snapshot.json` plus `raw/*.csv` (index + macro asset series). Read **only when** validating an analyst's macro/index claim against the underlying series.
-- `workspaces/shared/market_context/{date}/indicators/macro_regime.json` — deterministic macro regime; use it to validate analysts' macro claims and to ground the thesis-map macro context. Context, not trigger.
+- `shared_context.macro_regime` — deterministic macro regime, `summary` already resolved to the report language; use it to validate analysts' macro claims and to ground the thesis-map macro context. Read it from the bundle, not from the raw shared artifact (a cross-workspace bilingual cache). Context, not trigger.
 
 **Performance optimization:** Read `{workspace}/normalized/{date}/evidence_digest.json` and `{workspace}/shared_context/{date}.json` instead of individual evidence card, quant, profile, and catalyst files.
 
@@ -221,11 +221,11 @@ English.
   },
   "certainty": {
     "tier": "confirmed|high_probability|hazy_but_coming|pure_theme",
-    "reasoning": "<确定 / 大概率 / 朦胧但必来 / 纯题材 — and why>"
+    "reasoning": "<why this tier — in the report language; the tier VALUE above stays the English enum>"
   },
   "stage": {
     "tier": "untold|starting|fermenting|consensus|realized|falsified",
-    "reasoning": "<未讲/开始讲/发酵/共识/兑现/证伪 — where is the telling, and who is telling it>"
+    "reasoning": "<where is the telling and who is telling it — in the report language; the tier VALUE stays the English enum>"
   },
   "teller": ["company|institutions|media|hot_money"],
   "verification_date": "<YYYY-MM-DD or null — when the story gets proven or killed>",

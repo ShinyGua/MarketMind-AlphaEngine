@@ -15,6 +15,14 @@ You are MarketMind-AlphaEngine, a multi-agent research pipeline that:
 
 Output language is determined by the `language` field in config (`en` or `ch`). When `ch`, all user-facing text (analyst memos, reports, PDF, chart labels, `/mm:init` prompts) must be in Chinese. Internal schemas, JSON keys, file names, directory paths, and code are always in English. BUY/HOLD/SELL labels remain English regardless of language setting.
 
+**Three language rules — they apply to every skill and every artifact:**
+
+1. **One language per run.** A report, memo or artifact that mixes English and Chinese narrative is a defect, not a style choice.
+2. **Never emit a bilingual literal.** Headings, enum glosses and table labels carry exactly one language. Do not write `## Story & Game (故事与博弈)` — that single atomic string is how Chinese reached an English report: a model copies the nearest literal, and a directive twenty lines above never outranks it. Each skill carries a **Language Map** table with copy-ready single-language cells; substitute from it.
+3. **Always English in both languages:** JSON keys, enum VALUES (`hazy_but_coming`, `independent_up`, `accumulate`), evidence-card ids, file paths, tickers, indicator names, and BUY/HOLD/SELL.
+
+A-share jargon (量比 / 龙虎榜 / 北向 …) is gated on **`market_profile`, not `language`** — on an `en` run for a CN/HK name the Chinese source term may appear parenthetically as data provenance on first mention; on an `en` run for a US/JP/UK/EU name the report contains **zero Chinese characters**. `eval/graders/language_purity_grader.py` enforces this.
+
 ## Python Environment (Mandatory)
 
 **All Python calls MUST use `.venv/bin/python3`** (relative to project root). Never use bare `python3`.
@@ -85,7 +93,7 @@ Both drivers first run `scripts/check_data_sources.py`, a non-critical preflight
 
 **Then the deterministic macro layer runs** (non-critical, before the desks):
 - `scripts/collect_macro_series.py` — FRED-first collection of CPI (CPIAUCSL/CPILFESL), FEDFUNDS, the Treasury curve (DGS2/5/10/30), DTWEXBGS, HY OAS (BAMLH0A0HYM2), VIXCLS into `workspaces/shared/market_context/{date}/raw/macro/`; keyless runs self-degrade to yfinance proxies (^IRX/^FVX/^TNX/^TYX/DX-Y.NYB/^VIX, treasury quotes ÷10 to FRED percent units) and record CPI/FedFunds/HY in `inputs_missing` (provenance: `macro_sources.json`)
-- `scripts/compute_macro_regime.py` — deterministic classification → `indicators/macro_regime.json`: rate trend, 2s10s curve slope, inflation trend, Fed policy stance, VIX 1y percentile, USD trend, credit regime — every block with `data_quality` (fred/proxy/missing), plus a bilingual `summary` (en+ch; the artifact is shared across same-day workspaces)
+- `scripts/compute_macro_regime.py` — deterministic classification → `indicators/macro_regime.json`: rate trend, 2s10s curve slope, inflation trend, Fed policy stance, VIX 1y percentile, USD trend, credit regime — every block with `data_quality` (fred/proxy/missing), plus `summary_i18n` (en+ch cache — the artifact is shared across same-day workspaces that may disagree on language, so `build_shared_context.py` resolves it into `shared_context.macro_regime.summary` per workspace; read it from the bundle, not from here)
 - `scripts/macro_evidence_cards.py` — projects material observations (inverted curve, VIX ≥80th pct, wide/stressed spreads, ≥25bp 10Y moves, easing/tightening, ≥2% USD moves) into per-ticker evidence cards `ev_{date}_macro_*` so macro enters the citable audit trail (benign regime → zero cards)
 
 **Project rule — macro is context, not trigger**: the regime feeds the WACC input, analyst framing, and the risk overlay; it never deterministically flips a vote or caps conviction (same precedent as valuation-as-reference).
@@ -145,7 +153,7 @@ All 3 analysts run in parallel. Each reads evidence cards, quant summary, and co
 - **mm-risk-analyst** → `discussion/analyst_memos/risk_analyst.md`
 - **mm-market-analyst** → `discussion/analyst_memos/market_analyst.md`
 
-Each memo must contain: core thesis, 3–5 supporting points, biggest uncertainty, time horizon judgment, a **Story & Game (故事与博弈)** read (what story, big enough for this cap tier?, how certain, where is the telling), and an **Off-Template Factors (框架之外)** answer — where this stock does NOT fit the framework and what edge factor could drive a violent move (honest "none visible" allowed; invention not). All memos land the conclusion on the investor's declared horizon (`shared_context.investor`).
+Each memo must contain: core thesis, 3–5 supporting points, biggest uncertainty, time horizon judgment, a **Story & Game** read (what story, big enough for this cap tier?, how certain, where is the telling), and an **Off-Template Factors** answer — where this stock does NOT fit the framework and what edge factor could drive a violent move (honest "none visible" allowed; invention not). All memos land the conclusion on the investor's declared horizon (`shared_context.investor`).
 
 **Phase 2 — Discussion Panel Loop**
 A multi-round panel, modeled on the decision panel (Stage 9). Each round:

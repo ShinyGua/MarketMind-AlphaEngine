@@ -90,6 +90,18 @@ def dedupe(cards: list[dict]) -> list[dict]:
             did = dropped.get("id")
             if did and did != kept.get("id") and did not in merged:
                 merged.append(did)
+                # One article often yields several cards making DIFFERENT claims
+                # (e.g. one Fortune piece gave both "SOX -21% in July" and
+                # "realized vol at a post-COVID high, record $12bn ETF inflows").
+                # Clustering by URL is right, but keeping only the richest card
+                # silently deletes the other claims — and the digest is what the
+                # writer and the factuality grader read. So carry the dropped
+                # card's distinct content forward instead of discarding it.
+                dt = (dropped.get("title") or "").strip()
+                ds = (dropped.get("summary") or "").strip()
+                if dt and title_key(dt) != title_key(kept.get("title", "")):
+                    kept.setdefault("merged_claims", []).append(
+                        {"id": did, "title": dt, "summary": ds})
             by_key[key] = kept
         else:
             by_key[key] = card

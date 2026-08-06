@@ -175,7 +175,7 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
   "responds_to_dissent": "<round 1: \"\" ; round >1: how you answer the chair's flagged dissent>",
   "main_force_view": {
     "stance": "accumulate|absorb|mark_up|distribute|avoid",
-    "reasoning": "<one or two sentences: if you controlled serious size in this name today, which play would you run (建仓/吸筹/拉升/出货/不碰) and why — derived from the observable tape, not narrative>"
+    "reasoning": "<one or two sentences: if you controlled serious size in this name today, which play would you run (`accumulate` / `absorb` / `mark_up` / `distribute` / `avoid` — the same enum as `stance`) and why — derived from the observable tape, not narrative>"
   },
   "anomaly_watch": "<REQUIRED: where does this stock NOT fit your framework — the off-template factor that could drive a violent move your lens would miss. Honest 'none visible' is acceptable; an invented anomaly is not.>"
 }

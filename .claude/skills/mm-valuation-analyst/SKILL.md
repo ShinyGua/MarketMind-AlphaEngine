@@ -17,6 +17,23 @@ Assess whether the stock is cheap, fairly valued, or expensive at the current pr
 ## Language
 Write your memo in the language specified by `resolved_config.json` → `language` field (`en` = English, `ch` = Chinese). JSON keys stay English.
 
+### Language Map
+
+| `en` (as written below) | `ch` |
+|---|---|
+| `## Story & Game` | `## 故事与博弈` |
+| `## Off-Template Factors` | `## 框架之外` |
+
+Enum glosses — the artifact stores the English VALUE; print ONE gloss in the report language:
+
+| values | `en` | `ch` |
+|---|---|---|
+| `certainty.tier`: `confirmed` / `high_probability` / `hazy_but_coming` / `pure_theme` | confirmed / high-probability / hazy-but-coming / pure theme | 确定 / 大概率 / 朦胧但必来 / 纯题材 |
+| `stage.tier`: `untold` / `starting` / `fermenting` / `consensus` / `realized` / `falsified` | untold / starting / fermenting / consensus / realized / falsified | 未讲 / 开始讲 / 发酵 / 共识 / 兑现 / 证伪 |
+
+**Exactly one language per run.** If `language` is `ch`, substitute the `ch` column verbatim. Never emit a heading containing both.
+
+
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
@@ -101,10 +118,10 @@ The memo MUST contain:
 
 ## Time Horizon Judgment
 <Does the valuation thesis favor short-term trading or long-term holding?>
-## Story & Game (故事与博弈)
+## Story & Game
 <From YOUR lens, answer the four game questions in 3-6 sentences: (1) What story is this stock telling? (2) Is the story big enough for this company's size? (3) How certain is it — confirmed / high-probability / hazy-but-coming / pure theme? (4) Where is the telling — untold / starting / fermenting / consensus / realized / falsified? If your lens has nothing to add on one question, skip it rather than pad.>
 
-## Off-Template Factors (框架之外)
+## Off-Template Factors
 <Where does this stock NOT fit your framework? What edge factor — an ownership situation, a pending deal, a regulatory wildcard, a mania theme — could drive a violent move your structured analysis would miss? Answer honestly; "none visible" is acceptable, an invented anomaly is not. The moderator carries this verbatim into thesis_map.unconventional_factors.>
 ```
 

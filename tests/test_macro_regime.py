@@ -170,7 +170,11 @@ def test_compute_all_missing_writes_skeleton(tmp_path):
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["rates"]["us10y"]["value"] is None
     assert data["rates"]["us10y"]["data_quality"] == "missing"
-    assert "en" in data["summary"] and "ch" in data["summary"]
+    # macro_regime.json is SHARED across workspaces that disagree on language,
+    # so it deliberately stores the bilingual cache; build_shared_context.py
+    # collapses it to one language per workspace.
+    assert "en" in data["summary_i18n"] and "ch" in data["summary_i18n"]
+    assert "summary" not in data
     assert regime["schema_version"] == 1
 
 
@@ -194,8 +198,8 @@ def test_compute_with_synthetic_fred_data(tmp_path):
     assert regime["curve"]["data_quality"] == "proxy"  # ^IRX leg taints the pair
     assert regime["inflation"]["data_quality"] == "missing"
     assert regime["inputs_missing"] == ["CPIAUCSL", "FEDFUNDS"]
-    assert "10Y" in regime["summary"]["en"]
-    assert "美债" in regime["summary"]["ch"]
+    assert "10Y" in regime["summary_i18n"]["en"]
+    assert "美债" in regime["summary_i18n"]["ch"]
 
 
 def test_malformed_threshold_override_keeps_defaults(tmp_path):

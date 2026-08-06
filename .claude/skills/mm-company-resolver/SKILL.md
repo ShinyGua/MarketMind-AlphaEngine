@@ -30,30 +30,23 @@ Workspace path: $ARGUMENTS[0]
 
 ### 1. Resolve Company Info
 
-Read ticker from config. Use Bash to query yfinance:
+Read ticker from config. **Yahoo/yfinance is NOT used anywhere in this
+pipeline** — assemble the profile from the sources that are available:
 
-```bash
-python3 -c "
-import yfinance as yf, json
-t = yf.Ticker('YF_SYMBOL')   # exchange-suffixed: '300685.SZ', '0941.HK', 'MU'
-info = t.info
-print(json.dumps({
-    'ticker': 'TICKER',
-    'yf_ticker': 'YF_SYMBOL',
-    'name': info.get('longName', ''),
-    'exchange': info.get('exchange', ''),
-    'sector': info.get('sector', ''),
-    'industry': info.get('industry', ''),
-    'market_cap': info.get('marketCap', 0),
-    'shares_outstanding': info.get('sharesOutstanding', 0),
-    'float_shares': info.get('floatShares', 0),
-    'currency': info.get('currency', 'USD'),
-    'country': info.get('country', ''),
-    'website': info.get('website', ''),
-    'description': (info.get('longBusinessSummary', '') or '')[:500]
-}, indent=2))
-"
-```
+- **US filers** — `scripts/fetch_fundamentals_edgar.py {TICKER}` yields
+  `shares_outstanding` and the financial profile from SEC EDGAR XBRL;
+  `scripts/nasdaq_fetch.py {TICKER}` yields the live quote and exchange.
+- **Sector / industry / country / website / description** — WebSearch, and the
+  business description in the company's own latest 10-K.
+- **market_cap** — current price x shares outstanding (do not copy a stale
+  figure from a web page).
+- **float_shares** — often unavailable free; emit `0` and let the chip layer
+  record `float_shares (turnover unavailable)` in `inputs_missing` rather than
+  guessing. A wrong float silently corrupts every turnover reading.
+
+Emit the same JSON shape as before (`ticker`, `yf_ticker`, `name`, `exchange`,
+`sector`, `industry`, `market_cap`, `shares_outstanding`, `float_shares`,
+`currency`, `country`, `website`, `description`).
 
 **`yf_ticker` is the canonical yfinance-symbol key** — always emit it, always
 exchange-suffixed for non-US names (CN → `.SS`/`.SZ`, HK → `.HK`). Deterministic

@@ -246,6 +246,31 @@ def resolve_yf_symbol(ws: Path) -> str:
     return ticker
 
 
+# ── Report language ──────────────────────────────────────────────────
+
+LANGUAGES = ("en", "ch")
+
+
+def resolve_language(ws: Path, default: str = "en") -> str:
+    """The report language for a workspace, from resolved_config.json.
+
+    ONE language per run. Every artifact carrying user-facing prose must select
+    a single language at write time rather than emitting both and hoping the
+    consumer picks — nothing ever picked, which is how Chinese reached an
+    English report. Never raises: a missing/corrupt config or an unrecognised
+    value yields `default`.
+    """
+    try:
+        cfg = json.loads(
+            (Path(ws) / "resolved_config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    if not isinstance(cfg, dict):
+        return default
+    lang = cfg.get("language")
+    return lang if lang in LANGUAGES else default
+
+
 # ── Grader result paths ──────────────────────────────────────────────
 
 def grader_result_path(ws: Path, date: str, grader: str) -> Path:

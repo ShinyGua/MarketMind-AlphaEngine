@@ -112,7 +112,7 @@ def build_turnover(ak, code: str, date: str):
         "avg_5d_pct": _num(turn.tail(5).mean()),
         "avg_20d_pct": _num(turn.tail(20).mean()) if len(turn) >= 20 else None,
         "series_tail": [_num(v) for v in turn.tail(10)],
-        "source": "stock_zh_a_hist.换手率",
+        "source": "stock_zh_a_hist.turnover_rate", "source_field_cn": "换手率",
     }
 
 
@@ -144,7 +144,7 @@ def build_fund_flow(ak, code: str, market: str, date: str):
         "net_20d": _num(net.tail(20).sum()) if len(net) >= 20 else None,
         "consecutive_inflow_days": _consecutive(True),
         "consecutive_outflow_days": _consecutive(False),
-        "source": "stock_individual_fund_flow.主力净流入",
+        "source": "stock_individual_fund_flow.main_net_inflow", "source_field_cn": "主力净流入",
     }
 
 

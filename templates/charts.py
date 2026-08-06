@@ -278,14 +278,17 @@ def _fetch_warmup_history(ticker, run_date=None):
     bar/price matches the rest of the report), or None on ANY failure. It never
     raises and never writes to disk."""
     try:
-        import yfinance as yf
-        raw = yf.Ticker(ticker).history(period='6mo', interval='1d')
-        if raw is None or raw.empty:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / 'scripts'))
+        from fetch_prices_nasdaq import fetch_daily as _nasdaq_daily  # Yahoo-free
+
+        rows, _prov = _nasdaq_daily(ticker, months=6, end=run_date or None)
+        if not rows:
             return None
+        raw = pd.DataFrame(rows).set_index('Date')
         cols = [c for c in ['Open', 'High', 'Low', 'Close', 'Volume'] if c in raw.columns]
         df = raw[cols].copy()
-        if hasattr(df.index, 'tz') and df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
         df.index = pd.to_datetime(df.index).normalize()
         if run_date:
             df = df[df.index <= pd.Timestamp(run_date).normalize()]
@@ -551,8 +554,8 @@ def generate_relative_chart(ticker, ticker_path, spy_path, output_path, index_na
 
 
 _PATH_CLASS_LABELS = {
-    'en': {'follows_sector': 'follows sector', 'independent_up': 'independent ↑',
-           'independent_down': 'independent ↓', 'basing': 'basing', 'launched': 'launched'},
+    'en': {'follows_sector': 'follows sector', 'independent_up': 'independent up',
+           'independent_down': 'independent down', 'basing': 'basing', 'launched': 'launched'},
     'ch': {'follows_sector': '跟随板块', 'independent_up': '独立走强',
            'independent_down': '独立走弱', 'basing': '横盘蓄势', 'launched': '已启动'},
 }

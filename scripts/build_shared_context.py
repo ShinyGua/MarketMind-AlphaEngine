@@ -55,6 +55,21 @@ def build(workspace: Path, date: str) -> dict:
     # the VPVR histogram is chart fodder — too token-heavy for analyst context
     if isinstance(ctx.get("chips"), dict):
         (ctx["chips"].get("chip_distribution") or {}).pop("histogram", None)
+
+    # ── language boundary ────────────────────────────────────────────
+    # This bundle is what the analysts actually read, so it is where the
+    # shared bilingual macro cache collapses to ONE language. macro_regime.json
+    # itself must stay bilingual: it is shared across workspaces that do not
+    # agree on a language (see compute_macro_regime.build_summary).
+    lang = contracts.resolve_language(ws)
+    mr = ctx.get("macro_regime")
+    if isinstance(mr, dict):
+        i18n = mr.pop("summary_i18n", None)
+        if i18n is None and isinstance(mr.get("summary"), dict):
+            i18n = mr.pop("summary")  # pre-fix artifact on disk
+        if isinstance(i18n, dict):
+            mr["summary"] = i18n.get(lang) or i18n.get("en")
+            mr["summary_lang"] = lang
     for cp in (ws / "raw" / date / "calendar" / "catalysts.json",
                ws / "raw" / "calendar" / "catalysts.json"):
         try:
