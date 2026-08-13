@@ -340,7 +340,7 @@ def build_cards(chip: dict, ticker: str, date: str, lang: str) -> list[dict]:
             "source_name": "akshare" if ob["key"] in (
                 "holder_concentrating", "holder_dispersing", "main_force_inflow",
                 "main_force_outflow", "lhb_appearance", "northbound_add",
-                "northbound_trim", "unlock_overhang") else "yfinance",
+                "northbound_trim", "unlock_overhang") else chip.get("source", "price_history"),
             "url": None,
             "published_at": date,
             "ticker": ticker,

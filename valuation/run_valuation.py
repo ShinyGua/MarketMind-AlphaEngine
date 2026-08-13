@@ -1028,7 +1028,7 @@ def main():
         "comps_implied_value": implied,
         "inputs_missing": inputs_missing,
         "summary": summary_text,
-        "metadata": {"date": date, "source": "yfinance", "peers_used": len(peers),
+        "metadata": {"date": date, "source": "edgar+nasdaq", "peers_used": len(peers),
                      "peer_fx_normalization": fx_notes},
     }
     _write_summary(out_dir, summary)
