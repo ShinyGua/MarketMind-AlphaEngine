@@ -412,7 +412,9 @@ def generate_price_chart(ticker, price_path, output_path, catalysts=None, run_da
         for cat in catalysts:
             try:
                 cat_date = pd.Timestamp(cat['date']).tz_localize(None).normalize()
-            except (ValueError, KeyError, TypeError):
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if pd.isna(cat_date):
                 continue
             event = (cat.get('event') or '')[:18]
             if dates[0] <= cat_date <= dates[-1]:

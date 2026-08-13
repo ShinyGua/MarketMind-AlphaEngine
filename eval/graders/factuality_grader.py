@@ -28,6 +28,8 @@ def extract_quant_values(quant: dict) -> list[dict]:
         entries.append({"field": "latest_close", "value": quant["latest_close"], "category": "price"})
 
     for period, val in (quant.get("returns") or {}).items():
+        if not isinstance(val, (int, float)):
+            continue  # null return (e.g. insufficient history for a recent IPO) — not checkable
         entries.append({"field": f"return_{period}", "value": val, "category": "percentage"})
 
     tech = quant.get("technical") or {}
@@ -36,7 +38,7 @@ def extract_quant_values(quant: dict) -> list[dict]:
         "sma_20", "sma_50", "ema_12", "ema_26", "atr_14",
     ]
     for field in indicator_fields:
-        if field in tech:
+        if field in tech and isinstance(tech[field], (int, float)):
             cat = "price" if field.startswith(("sma_", "ema_", "atr_")) else "indicator"
             entries.append({"field": field, "value": tech[field], "category": cat})
 
