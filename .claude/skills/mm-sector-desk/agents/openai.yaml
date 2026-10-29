@@ -8,4 +8,4 @@ dependencies:
   tools:
     - type: mcp
       value: market-data
-      description: MarketMind market-data MCP server (yfinance, NewsAPI, FRED, SEC EDGAR)
+      description: MarketMind market-data MCP server (NASDAQ/akshare-Sina/FRED prices, NewsAPI, FRED, SEC EDGAR)

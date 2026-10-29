@@ -1,6 +1,6 @@
 ---
 name: mm-sector-desk
-description: Collects sector news, peer stock data, and industry context via NewsAPI/web search and yfinance
+description: Collects sector news, peer stock data, and industry context via NewsAPI/web search and the approved price router (NASDAQ, akshare Sina)
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -25,7 +25,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 This skill uses the **market-data** MCP server for all external data fetching. Prefer MCP tools when available; fall back to inline Python if not.
 
-- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_price_history` — daily OHLCV from approved sources (NASDAQ / akshare Sina / FRED); never Yahoo
 - `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
 
 ## Inputs
@@ -65,12 +65,12 @@ Save to `{workspace}/raw/{date}/news/sector_news.json`.
 
 **Indicator warm-up**: Fetch **6 months** (`period='6mo'`) of daily data for peers and sector ETF, to provide warm-up for technical indicator computation.
 
-**Yahoo/yfinance is NOT used anywhere in this pipeline** — peer prices come from
-the public NASDAQ API via the deterministic collector. For each entry in
-`peer_set.json`:
+**Yahoo is NOT used anywhere in this pipeline** — peer prices come from the
+deterministic price router (NASDAQ API for US peers, akshare Sina for CN/HK
+peers such as `000651.SZ` or `0700.HK`). For each entry in `peer_set.json`:
 
 ```bash
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {PEER} \
+.venv/bin/python3 scripts/price_router.py '{PEER}' \
     --out {workspace}/raw/{date}/prices/peer_{PEER}.csv --months 12 --end {date}
 ```
 
@@ -81,7 +81,7 @@ peer rather than aborting.
 ### 3. Fetch Sector ETF Data
 
 ```bash
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {SECTOR_ETF} --assetclass etf \
+.venv/bin/python3 scripts/price_router.py '{SECTOR_ETF}' \
     --out {workspace}/raw/{date}/prices/sector_etf.csv --months 12 --end {date}
 ```
 

@@ -2,15 +2,14 @@
 """Deterministic macro series collector for MarketMind-AlphaEngine.
 
 Fetches the configured FRED series (CPI, Fed funds, Treasury curve, USD index,
-HY credit spread, VIX) into the shared market context, FRED-first with a
-per-series yfinance proxy fallback when FRED_API_KEY is absent or a request
-fails. Self-degrading: series with no proxy are recorded in `inputs_missing`
+HY credit spread, VIX) into the shared market context: the keyed FRED API when
+FRED_API_KEY is set, else (or per series on failure) the keyless public
+fredgraph CSV — the same series in the same units. Yahoo is not used.
+Self-degrading: a series neither route serves is recorded in `inputs_missing`
 with a reason; the script never raises and always exits 0.
 
 Units note: CSVs store values in native FRED units (rates/spreads in percent,
-CPI/USD as index levels, VIX as a level). yfinance treasury tickers quote
-yield x 10 (^TNX 45.4 == 4.54%), so proxy values are divided by 10 to match
-the FRED percent convention before being saved under the FRED series name.
+CPI/USD as index levels, VIX as a level).
 
 Usage:
     .venv/bin/python3 scripts/collect_macro_series.py <workspace> <date> [--force]
@@ -46,25 +45,6 @@ MACRO_SERIES = [
     "BAMLH0A0HYM2",  # ICE BofA HY OAS (daily, percent)
     "VIXCLS",        # VIX (daily, level)
 ]
-
-# Keyless self-degrade map: FRED series -> yfinance ticker.
-# ^IRX is a 13-week bill, an approximate stand-in for DGS2 (flagged as proxy).
-YF_PROXY_MAP = {
-    "DGS2": "^IRX",
-    "DGS5": "^FVX",
-    "DGS10": "^TNX",
-    "DGS30": "^TYX",
-    "DTWEXBGS": "DX-Y.NYB",
-    "VIXCLS": "^VIX",
-}
-
-# yfinance treasury tickers (^IRX/^FVX/^TNX/^TYX) historically quote yield x 10
-# (CBOE convention: 45.4 == 4.54%), but current yfinance returns the display
-# value already in percent (4.54). Scale adaptively: values above this threshold
-# are the x10 form and get divided to FRED percent units. (A true US Treasury
-# yield above 12% is implausible; the x10 form sits above 12 for any yield >1.2%.)
-_TREASURY_PROXIES = {"^IRX", "^FVX", "^TNX", "^TYX"}
-_YIELD_X10_THRESHOLD = 12.0
 
 # CPI releases lag ~6 weeks (month M publishes mid M+1), so 14 months can leave
 # fewer than the 13 monthly obs the YoY needs during the pre-release window of
@@ -143,11 +123,8 @@ def fetch_fred_series(series_id: str, api_key: str, lookback_months: int) -> tup
 def fetch_fred_csv(series_id: str, lookback_months: int) -> tuple[list, str | None]:
     """Keyless FRED fallback via the public fredgraph CSV endpoint.
 
-    Replaces the former yfinance proxy path (Yahoo is no longer used anywhere in
-    this pipeline). This is strictly better than the proxies it replaces: it is
-    the *real* FRED series in FRED units, so CPI, Fed funds and the HY OAS —
-    which had no Yahoo proxy at all and were always reported missing on keyless
-    runs — are now available without an API key.
+    The *real* FRED series in FRED units, so CPI, Fed funds and the HY OAS are
+    available without an API key. Yahoo is not used anywhere in this pipeline.
     """
     import requests
 
@@ -206,7 +183,6 @@ def _load_macro_config(workspace: Path) -> dict:
         series = MACRO_SERIES
     return {
         "series": list(series),
-        "proxies": macro.get("yf_proxies") or YF_PROXY_MAP,
         "lookback_months": int(macro.get("lookback_months") or DEFAULT_LOOKBACK_MONTHS),
     }
 

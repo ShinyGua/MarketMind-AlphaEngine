@@ -98,7 +98,7 @@ def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int
         f"artifact path(s) you wrote."
     )
     # workspace-write disables network egress by DEFAULT; the collection desks
-    # (and any shell yfinance/requests fallback when an MCP tool isn't attached)
+    # (and any shell requests fallback when an MCP tool isn't attached)
     # need outbound DNS/HTTP. Grant it per-invocation so the fix doesn't depend on
     # the user's global ~/.codex/config.toml.
     cmd = [CODEX, "exec", "-C", str(ROOT),
@@ -236,7 +236,7 @@ def st_collect(ctx):
     # Preflight: record which data sources are reachable + which keys are present
     # (sanitized) so a fallback-heavy run self-explains (dns vs auth vs key).
     det(ctx, "scripts/check_data_sources.py", ctx.ws, ctx.date, critical=False)
-    # Deterministic macro layer: FRED-first series collection (yfinance proxy
+    # Deterministic macro layer: FRED series collection (keyless fredgraph CSV
     # fallback), regime classification, and per-ticker macro evidence cards.
     det(ctx, "scripts/collect_macro_series.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "scripts/compute_macro_regime.py", ctx.ws, ctx.date, critical=False)

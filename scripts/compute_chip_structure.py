@@ -45,7 +45,7 @@ from shared import contracts  # noqa: E402
 
 DEFAULTS = {
     "enabled": True,
-    "history_period": "400d",     # yfinance fetch window (need 250d + buffer)
+    "history_period": "400d",     # network fetch window (need 250d + buffer)
     "chip_window_days": 120,      # VPVR window
     "histogram_bins": 40,
     "swing_pivot_window": 5,
@@ -63,19 +63,21 @@ _MIN_ROWS_HARD = 30  # below this, even the volume block is meaningless
 # ── data loading ─────────────────────────────────────────────────────
 
 def fetch_daily(symbol: str, period: str, run_date: str):
-    """Daily OHLCV via the NASDAQ API, trimmed to run_date. None on any failure.
+    """Daily OHLCV via scripts/price_router.py, trimmed to run_date. None on any failure.
 
-    Yahoo/yfinance is no longer used anywhere in this pipeline; this is the
-    network fallback for when the desk's raw CSV is missing or too short.
+    Yahoo/yfinance is not used anywhere in this pipeline; this is the network
+    fallback for when the desk's raw CSV is missing or too short. The router
+    covers US (NASDAQ) and CN/HK (akshare Sina) and drops an unfinished
+    run-date session itself.
     """
     try:
         import pandas as pd
 
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from fetch_prices_nasdaq import fetch_daily as _nasdaq_daily
+        from price_router import fetch_any
 
         months = max(3, int(str(period).rstrip("d") or 400) // 21) if period.endswith("d") else 12
-        rows, _prov = _nasdaq_daily(symbol, months=months, end=run_date)
+        rows, _prov = fetch_any(symbol, months=months, end=run_date)
         hist = pd.DataFrame(rows)
         if hist.empty:
             return None
@@ -95,8 +97,31 @@ def fetch_daily(symbol: str, period: str, run_date: str):
     return hist if not hist.empty else None
 
 
-def load_raw_csv(workspace: Path, date: str, ticker_dir: str):
-    """Fallback: the company desk's raw price CSV (no network needed)."""
+def _drop_unfinished_run_date_bar(df, path: Path, symbol: str, run_date: str):
+    """A desk CSV written while the session was still open ends in a partial
+    run-date bar. Judge by the file's write time in the market's timezone."""
+    if df is None or df.empty or df.index[-1].strftime("%Y-%m-%d") != run_date:
+        return df, False
+    try:
+        from datetime import datetime
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from price_router import SESSION, classify
+
+        tz, cutoff = SESSION[classify(symbol)[2]]
+        written = datetime.fromtimestamp(path.stat().st_mtime, tz)
+    except Exception:
+        return df, False
+    if written.date().isoformat() == run_date and written.time() < cutoff:
+        return df.iloc[:-1], True
+    return df, False
+
+
+def load_raw_csv(workspace: Path, date: str, ticker_dir: str, symbol: str | None = None):
+    """Fallback: the company desk's raw price CSV (no network needed).
+
+    Bars after ``date`` are cut, and an unfinished run-date bar is dropped
+    (``df.attrs["dropped_partial_row"]``)."""
     import pandas as pd
 
     prices = workspace / "raw" / date / "prices"
@@ -125,7 +150,10 @@ def load_raw_csv(workspace: Path, date: str, ticker_dir: str):
         # every volume statistic, so drop them here once.
         if "Volume" in df.columns:
             df = df[df["Volume"] > 0]
+        df = df[df.index <= pd.Timestamp(date)]
+        df, dropped = _drop_unfinished_run_date_bar(df, path, symbol or ticker_dir, date)
         if not df.empty:
+            df.attrs["dropped_partial_row"] = dropped
             return df
     return None
 
@@ -436,12 +464,12 @@ def build(workspace: Path, date: str, cfg: dict, lang: str = "en") -> dict:
     # report was written from (a live re-fetch months later returns a different
     # adjustment basis and would shift every chip level). Hit the network only
     # when the CSV is missing or too short for the chip window.
-    df = load_raw_csv(workspace, date, Path(str(workspace)).name)
+    df = load_raw_csv(workspace, date, Path(str(workspace)).name, symbol)
     source = "raw_csv"
     if df is None or len(df) < cfg["min_rows"]:
         fetched = fetch_daily(symbol, cfg["history_period"], date)
         if fetched is not None and (df is None or len(fetched) > len(df)):
-            df, source = fetched, "nasdaq_api"
+            df, source = fetched, "price_router"
     if df is None or len(df) < _MIN_ROWS_HARD or "Volume" not in df.columns:
         return {**base, "available": False,
                 "reason": "no_daily_data" if df is None else "insufficient_history",
@@ -497,6 +525,8 @@ def build(workspace: Path, date: str, cfg: dict, lang: str = "en") -> dict:
         "available": True,
         "source": source,
         "rows": int(len(df)),
+        "last_bar_date": df.index[-1].strftime("%Y-%m-%d"),
+        "dropped_partial_row": bool(df.attrs.get("dropped_partial_row", False)),
         "last_close": _round(df["Close"].iloc[-1]),
         "volume": volume,
         "chip_distribution": chip,

@@ -14,7 +14,7 @@ allowed-tools: Read, Write, Bash, Glob, Grep, WebSearch, mcp__market-data__get_c
 
 This skill can use the **market-data** MCP server for company info fetching. Prefer MCP tools when available; fall back to inline Python if not.
 
-- `mcp__market-data__get_company_info` — fetch company profile from yfinance
+- `mcp__market-data__get_company_info` — returns an explicit `unavailable` (there is no approved company-profile source); build the profile as described below
 
 ## Mission
 
@@ -30,8 +30,8 @@ Workspace path: $ARGUMENTS[0]
 
 ### 1. Resolve Company Info
 
-Read ticker from config. **Yahoo/yfinance is NOT used anywhere in this
-pipeline** — assemble the profile from the sources that are available:
+Read ticker from config. **Yahoo is NOT used anywhere in this pipeline** —
+assemble the profile from the sources that are available:
 
 - **US filers** — `scripts/fetch_fundamentals_edgar.py {TICKER}` yields
   `shares_outstanding` and the financial profile from SEC EDGAR XBRL;
@@ -48,12 +48,13 @@ Emit the same JSON shape as before (`ticker`, `yf_ticker`, `name`, `exchange`,
 `sector`, `industry`, `market_cap`, `shares_outstanding`, `float_shares`,
 `currency`, `country`, `website`, `description`).
 
-**`yf_ticker` is the canonical yfinance-symbol key** — always emit it, always
-exchange-suffixed for non-US names (CN → `.SS`/`.SZ`, HK → `.HK`). Deterministic
-scripts resolve it via `contracts.resolve_yf_symbol()`; do not use the historical
-spellings `yf_symbol`/`yfinance_symbol` in new profiles.
+**`yf_ticker` is the canonical exchange-suffixed symbol key** (the name is
+historical; no Yahoo call uses it) — always emit it, always exchange-suffixed for
+non-US names (CN → `.SS`/`.SZ`, HK → `.HK`). `scripts/price_router.py` and the
+other deterministic scripts resolve it via `contracts.resolve_yf_symbol()`; do not
+use the historical spellings `yf_symbol`/`yfinance_symbol` in new profiles.
 
-`shares_outstanding` and `float_shares` are required when yfinance provides them —
+`shares_outstanding` and `float_shares` are required when a source provides them —
 the chip-structure layer needs float to compute turnover (换手率). If missing,
 emit the key with `null` so downstream can record it in `inputs_missing`.
 
@@ -70,7 +71,7 @@ Also emit **`cap_tier`** — market-cap tier in the company's own market, using
 cap-tier playbook downstream — how capital treats the stock's story differs
 fundamentally by size, so record the tier, don't leave it to be re-derived.
 
-If yfinance fails, use WebSearch: search `"{TICKER} company profile sector exchange"`.
+If a field has no source, use WebSearch: search `"{TICKER} company profile sector exchange"`.
 
 ### 2. Determine Indices
 
@@ -95,8 +96,9 @@ searches per product line) and select **5–10 peers** that together:
   sector — not ten copies of the closest competitor;
 - span at least two `cap_tier` levels when the sector has them (capital plays a
   large-cap story and a small-cap story very differently);
-- are tradeable tickers with yfinance price history (verify each with a quick
-  history call; drop dead tickers and say so in `notes`).
+- are tradeable tickers with daily price history from the approved router
+  (verify each with `.venv/bin/python3 scripts/price_router.py '{PEER}' --months 1`;
+  drop dead or unsupported tickers and say so in `notes`).
 
 Write `peer_set.json` with **exactly this schema** (fields required per peer):
 
@@ -150,7 +152,7 @@ and the product-level difference is usually where the divergence lives.
 ## Quality Rules
 
 - All output must be valid JSON
-- If yfinance fails, fall back to WebSearch — never leave profile empty
+- If a source fails, fall back to WebSearch — never leave profile empty
 - `company_profile.json` must include `yf_ticker` (canonical, exchange-suffixed), `shares_outstanding`, `float_shares`, and `cap_tier`
 - Peer set must not include the company itself
 - Target 5–10 peers; never fewer than 4 without an explanation in `notes`

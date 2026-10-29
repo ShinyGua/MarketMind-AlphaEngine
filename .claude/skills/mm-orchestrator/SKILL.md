@@ -204,7 +204,7 @@ Verify `{workspace}/profile/company_profile.json` exists.
 .venv/bin/python3 scripts/collect_cn_chips.py {workspace} {date}
 ```
 This fetches the FRED macro series (CPI, Fed funds, Treasury curve, USD, HY spread, VIX;
-yfinance proxies when keyless), classifies the regime into
+the keyless fredgraph CSV when there is no FRED key), classifies the regime into
 `workspaces/shared/market_context/{date}/indicators/macro_regime.json`, and projects
 material macro observations into per-ticker evidence cards (`ev_{date}_macro_*`).
 The chips collector pulls A-share flow signals via akshare (换手率, 主力资金,

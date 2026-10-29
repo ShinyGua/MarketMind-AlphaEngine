@@ -200,8 +200,8 @@ Skill files use Claude conventions; map them as follows:
   the orchestrator reflect stage).
 - **The macro, chips, intraday and peer-divergence layers are deterministic
   driver stages.** Both drivers run them as committed Python, not LLM passes: in
-  `st_collect`, `scripts/collect_macro_series.py` (FRED-first, yfinance-proxy
-  fallback) → `scripts/compute_macro_regime.py` (regime classification) →
+  `st_collect`, `scripts/collect_macro_series.py` (FRED API, keyless
+  fredgraph CSV fallback; no Yahoo) → `scripts/compute_macro_regime.py` (regime classification) →
   `scripts/macro_evidence_cards.py` (per-ticker `ev_{date}_macro_*` cards) →
   `scripts/collect_cn_chips.py` (akshare A-share flows, CN only, per-block
   degradation); in `st_normalize`, BEFORE `dedup_evidence.py`,

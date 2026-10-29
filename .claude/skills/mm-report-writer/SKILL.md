@@ -192,7 +192,7 @@ Write the revised draft to `{workspace}/drafts/{date}/` with an incremented vers
 7. **Traceability**: Every major claim should be traceable back to evidence cards
 8. **Concise but not thin**: Daily reports should be scannable in 5 minutes — but concise means tight, not stubbed. Develop every section with real substance (each major section is a few developed paragraphs, ≥300 chars); a one-line section is incomplete and fails the depth gate (`eval/graders/depth_grader.py --report-only`), triggering a revision.
 9. **Chart anchors**: Place the chart references exactly as markdown images at the points shown in the template — `![Relative strength](charts/relative_chart.svg)` in Market Context, `![Price action & technicals](charts/price_chart.svg)` in Money Flow & Chip Structure, `![Peer cohort paths](charts/peer_grid.svg)` and `![Peer 5-day returns](charts/peer_chart.svg)` in Peer Cohort Divergence. The PDF renderer embeds them in place; keep the paths exactly (relative, `.svg`). If a chart is not generated, the renderer skips it gracefully — still include the anchor.
-10. **Table sources**: Every markdown table ends with an italic source line, e.g. `*Source: quant_summary.json (yfinance), {date}*`.
+10. **Table sources**: Every markdown table ends with an italic source line, e.g. `*Source: quant_summary.json (NASDAQ daily bars), {date}*`.
 
 ## Quality Rules
 

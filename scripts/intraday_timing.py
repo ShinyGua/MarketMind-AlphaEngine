@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Deterministic 1h/4h intraday timing block for MarketMind-AlphaEngine.
 
-Pulls ~90 days of 1h bars via yfinance, resamples to 4h, and computes RSI(14),
+Given ~90 days of 1h bars, resamples to 4h and computes RSI(14),
 MACD(12,26,9), and recent swing levels. Writes
 {workspace}/quant/{date}/intraday_timing.json.
+
+**No approved hourly source exists today** (Yahoo is not used; NASDAQ and
+akshare Sina serve daily bars only), so every run writes the schema-valid
+``available: false`` artifact with reason ``no_approved_hourly_source`` and
+no fetch is attempted. The computation below is kept for a future adapter.
 
 TIMING-ONLY CONTRACT (`usage: "timing_only"`): this artifact frames staged
 entry/exit price zones and risk-overlay language in the decision/report stages.
 It must NEVER be cited as a reason to flip a BUY/HOLD/SELL vote or change
 conviction — intraday momentum is noise at the research horizon.
 
-Self-degrading: tickers without 1h coverage (common for .SS/.SZ names) or a
-network failure produce an `available: false` artifact and exit 0; downstream
-price zones fall back to daily ATR. The naive 4h resample splits US sessions
+Self-degrading: no hourly source produces an `available: false` artifact and
+exit 0; downstream price zones fall back to chip S/R plus daily ATR. The naive 4h resample splits US sessions
 at fixed clock boundaries (not the 9:30 open) — acceptable for timing color,
 not exchange-aligned bars.
 
@@ -41,16 +45,17 @@ DEFAULTS = {
 
 _EXTENDED_PROXIMITY = 0.02  # close within 2% of a swing extreme counts as "near"
 
+NO_SOURCE_REASON = "no_approved_hourly_source"
+HOURLY_SOURCE = None  # set alongside a real fetch_hourly adapter
+
 
 def fetch_hourly(ticker: str, period: str = "90d", interval: str = "1h"):
     """1h OHLCV DataFrame, or None when no intraday source is available.
 
-    Yahoo/yfinance was the only free keyless source of 1h bars and is no longer
-    used in this pipeline; no substitute exists on the free tier (the NASDAQ
-    endpoint that replaced it for daily bars serves daily only). So this now
-    always returns None and the artifact self-degrades to
-    ``available: false`` — the documented, already-supported state in which
-    entry/exit zones fall back to chip S/R plus daily ATR.
+    No approved source serves 1h bars (Yahoo is not used; the NASDAQ and akshare
+    Sina routes serve daily bars only), so this always returns None and the
+    artifact self-degrades to ``available: false`` — the documented state in
+    which entry/exit zones fall back to chip S/R plus daily ATR.
 
     This is a *timing-only* input by contract, so losing it cannot change any
     BUY/HOLD/SELL vote or conviction — only the price-zone framing.
@@ -59,7 +64,7 @@ def fetch_hourly(ticker: str, period: str = "90d", interval: str = "1h"):
 
 
 def resample_4h(df, rule: str = "4h"):
-    # closed="left": yfinance stamps bars at their OPEN, so a 12:00 bar covers
+    # closed="left": hourly bars are stamped at their OPEN, so a 12:00 bar covers
     # 12:00-13:00 and belongs to the bin starting at 12:00 (right-closed bins
     # would pull each bin's first bar into the previous bin).
     out = df.resample(rule, label="right", closed="left").agg(
@@ -178,7 +183,7 @@ def build(ticker: str, cfg: dict, lang: str = "en") -> dict:
         return _unavailable(ticker, "disabled", lang)
     df1h = fetch_hourly(ticker, cfg["period"], cfg["interval"])
     if df1h is None:
-        return _unavailable(ticker, "no_intraday_data", lang)
+        return _unavailable(ticker, NO_SOURCE_REASON, lang)
 
     df4h = resample_4h(df1h, cfg["resample"])
     n = cfg["rsi_window"]
@@ -201,7 +206,7 @@ def build(ticker: str, cfg: dict, lang: str = "en") -> dict:
         "reason": None,
         "as_of": str(df1h.index[-1]),
         "bars_1h": int(len(df1h)),
-        "source": "yfinance",
+        "source": HOURLY_SOURCE,
         "usage": "timing_only",
         "last_close": close,
         "timeframes": tf,

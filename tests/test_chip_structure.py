@@ -197,3 +197,28 @@ def test_cards_ignore_unavailable_blocks():
     chip = _chip_fixture(cn_flows={"holder_count": {
         "data_quality": "unavailable", "reason": "ConnectionError"}})
     assert cards.material_observations(chip) == []
+
+
+def test_build_records_last_bar_and_cuts_future_bars(tmp_path, monkeypatch):
+    monkeypatch.setattr(chips, "fetch_daily", lambda *a, **k: None)
+    ws = _mk_workspace(tmp_path, _df(n=130), date="2026-07-15")
+    # The fixture CSV runs to 07-16; a 07-15 run must not see the later bar.
+    artifact = chips.build(ws, "2026-07-15", dict(chips.DEFAULTS))
+    assert artifact["last_bar_date"] == "2026-07-15"
+    assert artifact["dropped_partial_row"] is False
+
+
+def test_unfinished_run_date_bar_is_dropped(tmp_path, monkeypatch):
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(chips, "fetch_daily", lambda *a, **k: None)
+    ws = _mk_workspace(tmp_path, _df(n=130))
+    csv = ws / "raw" / "2026-07-16" / "prices" / "600000_3mo.csv"
+    # Written at 11:00 Beijing on the run date: the 07-16 bar is a partial session.
+    t = datetime(2026, 7, 16, 11, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+    os.utime(csv, (t, t))
+    artifact = chips.build(ws, "2026-07-16", dict(chips.DEFAULTS))
+    assert artifact["dropped_partial_row"] is True
+    assert artifact["last_bar_date"] == "2026-07-15"

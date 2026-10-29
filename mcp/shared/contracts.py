@@ -216,16 +216,17 @@ def user_review_path(ws: Path, date: str) -> Path:
 
 # ── Company profile helpers ──────────────────────────────────────────
 
-# Canonical key is `yf_ticker`. The others are historical spellings found in
-# already-resolved workspaces (603072 wrote `yf_symbol`; nothing ever wrote
-# `yfinance_symbol`, yet intraday_timing.py read only that one — so every CN/HK
-# workspace silently fell back to the bare directory name, which yfinance
-# cannot resolve without an exchange suffix).
+# Canonical key is `yf_ticker` — the exchange-suffixed symbol (600519.SS,
+# 0700.HK, MU). The name is historical: Yahoo is not used anywhere, and
+# scripts/price_router.py consumes this symbol. The other keys are historical
+# spellings found in already-resolved workspaces (603072 wrote `yf_symbol`);
+# without a suffix a CN/HK name falls back to its bare directory name.
 _YF_SYMBOL_KEYS = ("yf_ticker", "yf_symbol", "yfinance_symbol", "yahoo_symbol")
 
 
 def resolve_yf_symbol(ws: Path) -> str:
-    """The yfinance-resolvable symbol for a workspace (e.g. '300685.SZ').
+    """The exchange-suffixed symbol for a workspace (e.g. '300685.SZ'), as
+    scripts/price_router.py expects it.
 
     Reads profile/company_profile.json and tries the canonical key first, then
     the historical spellings, then falls back to the workspace directory name.

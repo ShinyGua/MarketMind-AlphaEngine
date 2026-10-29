@@ -115,14 +115,12 @@ def probe_fred(present: bool, dns_ok: bool) -> str:
                    "file_type": "json", "limit": 1})
 
 
-def macro_plan(fred_probe: str, series=None, proxies=None) -> dict:
+def macro_plan(fred_probe: str, series=None) -> dict:
     """How the macro collector will source each series given the FRED probe result.
 
-    Keyless runs no longer degrade to yfinance proxies (Yahoo is not used anywhere
-    in this pipeline). They fall back to the public fredgraph CSV endpoint, which
-    serves the *same* FRED series in FRED units — so a keyless run is now
-    full-coverage rather than missing CPI / Fed funds / HY spread, and nothing is
-    reported unavailable purely for lack of a key.
+    Keyless runs use the public fredgraph CSV endpoint, which serves the *same*
+    FRED series in FRED units, so nothing is reported unavailable purely for lack
+    of a key. Yahoo is not used anywhere in this pipeline.
     """
     series = list(series if series is not None else MACRO_SERIES)
     if fred_probe == "auth_ok":

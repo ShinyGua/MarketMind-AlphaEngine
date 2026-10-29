@@ -139,7 +139,7 @@ def _setup_rcparams():
 
 
 def load_price_csv(path):
-    """Load a yfinance CSV, handling both single-header and MultiIndex columns."""
+    """Load a price CSV, handling single-header files and legacy Yahoo-era MultiIndex files."""
     # Sniff how many header rows there are
     with open(path) as _f:
         first_line = _f.readline().strip()
@@ -147,7 +147,7 @@ def load_price_csv(path):
 
     # If the second row starts with 'Ticker' or a ticker symbol repeated, it's MultiIndex
     second_cells = second_line.split(',')
-    # Heuristic: MultiIndex yfinance files have a 'Ticker' or non-date token in row 2 col 0
+    # Heuristic: legacy MultiIndex (Yahoo-era) files have a 'Ticker' or non-date token in row 2 col 0
     is_multi = second_cells[0].strip().lower() in ('ticker', 'price') or (
         len(second_cells) > 1 and not second_cells[0].strip().replace('-', '').replace('/', '').replace(' ', '').isdigit()
         and second_cells[0].strip() not in ('', 'Date')
@@ -157,7 +157,7 @@ def load_price_csv(path):
         df = pd.read_csv(path, header=[0, 1], index_col=0, parse_dates=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        # Drop the 'Ticker'/'Date' meta rows that yfinance injects
+        # Drop the Ticker/Date meta rows those legacy files carry
         df = df.loc[~df.index.astype(str).str.lower().isin(['ticker', 'date', 'price', ''])]
     else:
         df = pd.read_csv(path, index_col=0, parse_dates=False)
@@ -282,9 +282,9 @@ def _fetch_warmup_history(ticker, run_date=None):
         import sys as _sys
         from pathlib import Path as _Path
         _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / 'scripts'))
-        from fetch_prices_nasdaq import fetch_daily as _nasdaq_daily  # Yahoo-free
+        from price_router import fetch_any  # NASDAQ / akshare Sina / FRED, no Yahoo
 
-        rows, _prov = _nasdaq_daily(ticker, months=6, end=run_date or None)
+        rows, _prov = fetch_any(ticker, months=6, end=run_date or None)
         if not rows:
             return None
         raw = pd.DataFrame(rows).set_index('Date')
@@ -694,7 +694,7 @@ INDEX_DISPLAY_NAMES = {
     'SPY': 'S&P 500', 'QQQ': 'Nasdaq 100',
 }
 
-# yfinance-CSV suffixes, tried for every candidate base in every searched dir.
+# Price-CSV suffixes (incl. legacy Yahoo-era names), tried for every candidate base in every searched dir.
 _INDEX_SUFFIXES = ('_prices.csv', '_3mo.csv', '_medium.csv')
 
 

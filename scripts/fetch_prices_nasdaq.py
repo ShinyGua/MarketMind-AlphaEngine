@@ -22,6 +22,10 @@ dropped peer rather than a fabricated signal. Provenance is recorded in
 Index symbols have no NASDAQ historical endpoint; they route to liquid ETF
 proxies (see INDEX_PROXY) and the substitution is recorded in provenance.
 
+Workspace batch mode routes every symbol through ``scripts/price_router.py``,
+so CN/HK targets, peers and indices (akshare Sina) and close-only FRED series
+(^VIX, BTC-USD) land in the same CSV schemas as US names.
+
 Usage:
     # one symbol
     fetch_prices_nasdaq.py MU --out prices/MU_3mo.csv --months 12 --schema history
@@ -63,8 +67,7 @@ INDEX_PROXY = {
     "^DJI": "DIA",
     "^RUT": "IWM",
     "^SOX": "SOXX",
-    "^VIX": "VIXY",
-}
+}  # ^VIX is FRED VIXCLS in price_router — VIXY is a futures ETF, not the index
 
 # Broad-market trackers — never the "sector" ETF for a specific name.
 BROAD_INDEX_ETFS = {"SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "IVV"}
@@ -249,11 +252,13 @@ def run_workspace(workspace: Path, date: str, months: int = 12) -> dict:
     mc = _load(workspace / "profile" / "market_context_link.json") or {}
 
     report: dict = {"collected": [], "failed": [], "generated_at":
-                    datetime.now(timezone.utc).isoformat(), "source": "api.nasdaq.com"}
+                    datetime.now(timezone.utc).isoformat(), "source": "price_router"}
+
+    from price_router import fetch_any  # lazy: price_router imports this module
 
     def grab(sym: str, out: Path, schema: str, label: str, assetclass: str | None = None):
         try:
-            rows, prov = fetch_daily(sym, months=months, assetclass=assetclass, end=date)
+            rows, prov = fetch_any(sym, months=months, end=date, assetclass=assetclass)
             write_csv(rows, out, schema)
             prov["file"] = str(out.relative_to(workspace)) if out.is_relative_to(workspace) else str(out)
             prov["label"] = label
@@ -264,8 +269,11 @@ def run_workspace(workspace: Path, date: str, months: int = 12) -> dict:
             print(f"  FAIL {label:<16} {sym:<10} {exc}")
         time.sleep(REQUEST_DELAY_S)
 
-    # Target — the file the chip/quant layers look for first.
-    grab(ticker, prices / f"{ticker}_3mo.csv", "history", "target", "stocks")
+    # Target — the file the chip/quant layers look for first. Fetch by the
+    # exchange-suffixed symbol (0700 -> 0700.HK) but keep the bare file name.
+    target_sym = profile.get("yf_ticker") or ticker
+    target_class = "stocks" if "." not in str(target_sym) else None
+    grab(str(target_sym), prices / f"{ticker}_3mo.csv", "history", "target", target_class)
 
     for peer in _peer_tickers(workspace):
         grab(peer, prices / f"peer_{peer}.csv", "download", f"peer:{peer}")

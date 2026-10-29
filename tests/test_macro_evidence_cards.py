@@ -94,7 +94,7 @@ def test_source_name_is_per_signal_block():
     cards = mec.build_cards(STRESSED, DATE, "en")
     vix_card = next(c for c in cards if "volatility" in c["topic_tags"])
     credit_card = next(c for c in cards if "credit" in c["topic_tags"])
-    assert vix_card["source_name"] == "yfinance"   # volatility block is proxy
+    assert vix_card["source_name"] == "legacy proxy"  # proxy block (legacy artifact)
     assert credit_card["source_name"] == "FRED"    # credit block is fred
 
 

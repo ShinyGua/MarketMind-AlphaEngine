@@ -76,7 +76,7 @@ Deterministic chip layer first (non-critical — it needs the desks' raw price C
 Then: convert raw data → evidence cards, build time-series tables, deduplicate news across all four collectors (canonical URL + title) before building the evidence digest.
 
 ### 4. Quant Snapshot
-- `scripts/intraday_timing.py` (non-critical) → `quant/{date}/intraday_timing.json`: 1h/4h RSI(14) + MACD(12,26,9) over ~90d of hourly bars, last confirmed 4h swing high/low, 30d range, `timing_state` label. No 1h coverage → `available: false`. Symbol resolution via `contracts.resolve_yf_symbol()` (canonical key `yf_ticker`, exchange-suffixed)
+- `scripts/intraday_timing.py` (non-critical) → `quant/{date}/intraday_timing.json`: 1h/4h RSI(14) + MACD(12,26,9), 4h swing high/low, 30d range, `timing_state` — computed only when hourly bars exist. **No approved hourly source exists**, so today it always writes the schema-valid `available: false` (`reason: no_approved_hourly_source`) and zones fall back to chip S/R + daily ATR
 - `scripts/peer_divergence.py` (non-critical) → `quant/{date}/peer_divergence.json`: 20/60/120/250d returns for target + peers, benchmark/target correlations, deterministic **path class** (`follows_sector` / `independent_up` / `independent_down` / `basing` / `launched`; outcome-gap beats co-movement, a spliced benchmark file with a >30% daily "bar" is discarded), cohort dispersion, 60d leader/laggard
 - **mm-quant-analyst**: RSI(14), MACD(12,26,9), SMA(20,50), EMA(12,26), ATR(14); returns over 1d/5d/1m/3m; relative strength vs index, sector, peers
 - **No golden/death-cross flags** — MA crossovers carry no meaning for institutional readers. SMAs exist only to feed `trend_regime`; the PDF price chart annotates chip S/R + cost band instead
@@ -197,9 +197,9 @@ Merge order (later overrides earlier): `config.example.yaml` (defaults, always p
 
 | Source | Key | Used For |
 |---|---|---|
-| yfinance | none | Prices, index/peer/macro assets, 1h intraday bars, macro proxies (^TNX/^FVX/^TYX/^IRX/DX-Y.NYB/^VIX) when FRED is keyless |
+| Price router (`scripts/price_router.py`) | none | Daily OHLCV for every consumer: US via `api.nasdaq.com` (indices → tracking ETF), CN/HK stocks + indices via akshare Sina, ^VIX / BTC-USD / FX via FRED close-only series. As traded (unadjusted); an unfinished session bar is dropped. No intraday source. **Yahoo/yfinance is never used — not as a source, not as a fallback** |
 | NewsAPI | `NEWSAPI_KEY` | Market, sector, company news |
-| akshare | none | CN chip/flow signals (换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列); per-block degradation |
+| akshare | none | CN/HK daily prices (Sina, via the price router) and CN chip/flow signals (换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列); per-block degradation |
 | SEC EDGAR | none | Filings (10-K/10-Q/8-K), insider transactions |
 | FRED | key required | CPI, Fed funds, Treasury curve, USD index, HY spread, VIX → macro_regime + live DCF risk-free |
 | NASDAQ | none (`api.nasdaq.com`, unofficial) | US-name news + quote; falls back to nasdaq.com pages |
