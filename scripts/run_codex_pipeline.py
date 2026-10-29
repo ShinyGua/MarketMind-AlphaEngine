@@ -514,6 +514,10 @@ def st_reflect(ctx):
               "story_grader", "language_purity_grader", "cost_tracker"):
         det(ctx, f"eval/graders/{g}.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/release_gate.py", ctx.ws, ctx.date, critical=False)
+    # Ledger upkeep: upgrade pending OpenTimestamps receipts and score any
+    # sealed decision whose horizon has matured (all tickers, not just this one).
+    det(ctx, "ledger/cli.py", "stamps", critical=False)
+    det(ctx, "ledger/cli.py", "score", critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)
     codex_skill(ctx, "mm-memory-writer", critical=False)
     det(ctx, "eval/finalize_run.py", ctx.ws, ctx.date, critical=False)

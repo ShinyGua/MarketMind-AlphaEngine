@@ -6,6 +6,9 @@
     .venv/bin/python3 ledger/cli.py block <workspace> <date> # record a gate-blocked release
     .venv/bin/python3 ledger/cli.py verify                  # recompute every hash and link
     .venv/bin/python3 ledger/cli.py stamps                  # submit/upgrade OpenTimestamps receipts
+    .venv/bin/python3 ledger/cli.py score                   # append outcomes for matured horizons
+    .venv/bin/python3 ledger/cli.py report                  # preregistered read-out (markdown)
+    .venv/bin/python3 ledger/cli.py backfill                # descriptive CSV of pre-ledger decisions
 
 Data root: MM_DATA_ROOT (default ~/MarketMindData), never inside iCloud.
 Exit: 0 ok, 1 refused or failed.
@@ -20,7 +23,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ledger import seal, stamp, store  # noqa: E402
+from ledger import backfill, report, score, seal, stamp, store  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +38,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("date")
     sub.add_parser("verify")
     sub.add_parser("stamps")
+    sub.add_parser("score")
+    sub.add_parser("report")
+    sub.add_parser("backfill")
     args = ap.parse_args(argv)
     try:
         root = store.check_root(store.data_root())
@@ -56,6 +64,15 @@ def main(argv: list[str] | None = None) -> int:
             changed = stamp.upgrade_all(root)
             print(f"ledger: {len(changed)} stamp record(s) appended; "
                   f"now {stamp.stamp_summary(root)}")
+        elif args.cmd == "score":
+            added = score.score_all(root)
+            print(f"ledger: {len(added)} outcome record(s) appended")
+        elif args.cmd == "report":
+            print(report.render(report.build(root)))
+        elif args.cmd == "backfill":
+            result = backfill.run(REPO / "workspaces", root)
+            print(f"ledger: backfill wrote {result['rows']} rows to {result['dir']} "
+                  "(provenance unverified; not in the ledger)")
     except store.LedgerError as exc:
         print(f"ledger: REFUSED — {exc}", file=sys.stderr)
         return 1

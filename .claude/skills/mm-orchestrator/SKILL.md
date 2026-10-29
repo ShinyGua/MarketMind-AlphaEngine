@@ -553,6 +553,9 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/language_purity_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
+# ledger upkeep: upgrade pending timestamp receipts, score matured horizons (all tickers)
+.venv/bin/python3 ledger/cli.py stamps
+.venv/bin/python3 ledger/cli.py score
 ```
 
 The release gate script reads all grader results and deterministically produces:
