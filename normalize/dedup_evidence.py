@@ -11,6 +11,11 @@ records the merged ids, and writes the deduped digest.
 Usage:
     .venv/bin/python3 normalize/dedup_evidence.py {workspace} {date}
 
+Each digest entry also gets an ``evidence_class`` block from
+mcp/shared/evidence_meta.py (chip / suspected_chip / other, family, as_of,
+whether it may corroborate a chip-grounded call), so readers and the
+pre-release gate see the same classification.
+
 Self-degrading: on any error it falls back to a plain concatenation of all
 cards so the non-critical normalize stage never blocks the pipeline.
 """
@@ -20,6 +25,9 @@ import sys
 from glob import glob
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "mcp"))
+from shared import evidence_meta  # noqa: E402
 
 _TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|ref$|ref_)", re.I)
 
@@ -136,6 +144,12 @@ def main() -> int:
     except Exception as e:  # degrade to plain concat
         deduped, removed = cards, 0
         print(f"dedup_evidence: degraded to concat ({type(e).__name__})", file=sys.stderr)
+
+    for card in deduped:
+        try:
+            card["evidence_class"] = evidence_meta.classify(card, workspace.name)
+        except Exception:  # noqa: BLE001 - annotation never blocks the digest
+            pass
 
     digest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(digest_path, "w", encoding="utf-8") as out:

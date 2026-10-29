@@ -200,6 +200,6 @@ Write the revised draft to `{workspace}/drafts/{date}/` with an incremented vers
 - Do not ignore writer_guidance from thesis_map.json — it contains debate-tested instructions
 - Reference specific numbers from quant_summary.json, not approximations
 - Valuation figures (fair value, valuation method, margin of safety, intrinsic range, multiples) must come from valuation_summary.json — never fabricate or WebSearch them; if it is not applicable / low confidence, state that plainly
-- Chip/volume figures (volume ratio, concentration, profit ratio, large-order flows, registered shareholder count, S/R levels) must come from chip_structure.json / its evidence cards — never estimate them; when a `cn_flows` block carries `data_quality: "unavailable"`, say the signal is unavailable rather than approximating
+- Chip/volume figures (volume ratio, concentration, profit ratio, large-order flows, registered shareholder count, S/R levels) must come from chip_structure.json / its evidence cards — never estimate them; when a `cn_flows` block carries `data_quality: "unavailable"` or `"stale"`, say the signal is unavailable (or stale, with its `as_of`) rather than approximating; date every chip figure you quote
 - If the debate showed a fundamental disagreement, present both sides
 - Catalyst dates must be accurate as per catalysts.json

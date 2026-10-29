@@ -13,6 +13,12 @@ their materiality scores run to 0.75 and analysts may build a stance on them.
 Card titles embed concrete numbers: the dedup pass clusters URL-less cards by
 title, so a numberless template would collapse across days/desks.
 
+Every card carries a `meta` block — the observation date (`as_of`), cadence and
+lineage (source dataset + chip block) — and `published_at` is that observation
+date, not the run date. Only fresh `akshare` blocks reach here: stale blocks are
+stripped by collect_cn_chips.py. The pre-release gate uses `meta` to check that
+a cited chip card is current and to tell chip evidence from independent evidence.
+
 Usage:
     .venv/bin/python3 scripts/chip_evidence_cards.py <workspace> <date>
 """
@@ -327,22 +333,54 @@ def material_observations(chip: dict) -> list[dict]:
     return obs
 
 
-def build_cards(chip: dict, ticker: str, date: str, lang: str) -> list[dict]:
+GENERATOR = "chip_evidence_cards"
+
+# observation key -> cn_flows block it reads (None = derived from daily prices)
+_KEY_BLOCK = {
+    "holder_concentrating": "holder_count", "holder_dispersing": "holder_count",
+    "main_force_inflow": "main_force", "main_force_outflow": "main_force",
+    "lhb_appearance": "lhb",
+    "northbound_add": "northbound", "northbound_trim": "northbound",
+    "unlock_overhang": "restricted_release",
+}
+
+
+def _meta(chip: dict, key: str, date: str) -> dict:
+    """Observation date, cadence and lineage for one card."""
+    block = _KEY_BLOCK.get(key)
+    if block:
+        b = (chip.get("cn_flows") or {}).get(block) or {}
+        as_of = b.get("as_of")
+        if block == "restricted_release":  # a forward schedule, read today
+            as_of = (b.get("acquired_at") or date)[:10]
+        return {"as_of": as_of, "acquired_at": b.get("acquired_at"),
+                "cadence": b.get("cadence"),
+                "lineage": {"dataset": f"akshare:{b.get('source') or block}", "block": block},
+                "family": "chip", "generator": GENERATOR}
+    return {"as_of": chip.get("last_bar_date"), "acquired_at": None, "cadence": "daily",
+            "lineage": {"dataset": chip.get("source") or "price_history", "block": "price_structure"},
+            "family": "chip", "generator": GENERATOR}
+
+
+def build_cards(chip: dict, ticker: str, date: str, lang: str,
+                reserved_ids: frozenset = frozenset()) -> list[dict]:
     lang = lang if lang in ("en", "ch") else "en"
     cards = []
-    for n, ob in enumerate(material_observations(chip), start=1):
+    n = 0
+    for ob in material_observations(chip):
+        n += 1
+        while f"ev_{date}_chip_{n:03d}" in reserved_ids:  # never overwrite another author's card
+            n += 1
         t = _T[ob["key"]]
         title, summary, why = (s.format(**ob["fmt"]) for s in t[lang])
+        meta = _meta(chip, ob["key"], date)
         cards.append({
             "id": f"ev_{date}_chip_{n:03d}",
             "desk": "chips",
             "source_type": "chip_structure",
-            "source_name": "akshare" if ob["key"] in (
-                "holder_concentrating", "holder_dispersing", "main_force_inflow",
-                "main_force_outflow", "lhb_appearance", "northbound_add",
-                "northbound_trim", "unlock_overhang") else chip.get("source", "price_history"),
+            "source_name": "akshare" if ob["key"] in _KEY_BLOCK else chip.get("source", "price_history"),
             "url": None,
-            "published_at": date,
+            "published_at": meta["as_of"] or date,
             "ticker": ticker,
             "title": title,
             "summary": summary,
@@ -352,8 +390,23 @@ def build_cards(chip: dict, ticker: str, date: str, lang: str) -> list[dict]:
             "topic_tags": ["chips", t["tag"]],
             "time_horizon": "daily",
             "usage": "directional",
+            "meta": meta,
         })
     return cards
+
+
+_LEGACY_KEYS = frozenset({
+    "id", "desk", "source_type", "source_name", "url", "published_at", "ticker", "title",
+    "summary", "why_it_matters", "materiality_score", "sentiment", "topic_tags",
+    "time_horizon", "usage"})
+
+
+def _is_ours(card: dict) -> bool:
+    """Written by this generator (current, or a pre-meta legacy card)."""
+    if (card.get("meta") or {}).get("generator") == GENERATOR:
+        return True
+    return (card.get("meta") is None and card.get("source_type") == "chip_structure"
+            and set(card) <= _LEGACY_KEYS)
 
 
 def run(workspace: Path, date: str) -> list[dict]:
@@ -371,13 +424,22 @@ def run(workspace: Path, date: str) -> list[dict]:
         lang = "en"
 
     ticker = Path(str(workspace)).name
-    cards = build_cards(chip, ticker, date, lang)
     out_dir = workspace / "normalized" / date / "evidence_cards"
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Re-runs can produce fewer/reordered observations; delete our own stale
-    # prefix so the evidence grader never enforces citation of outdated claims.
-    for stale in out_dir.glob(f"ev_{date}_chip_*.json"):
-        stale.unlink()
+    # Re-runs can produce fewer/reordered observations; delete our own earlier
+    # cards so the evidence grader never enforces citation of outdated claims.
+    # A chip-prefixed card some other author wrote is kept, and its id reserved.
+    reserved = set()
+    for path in out_dir.glob(f"ev_{date}_chip_*.json"):
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
+        if _is_ours(existing):
+            path.unlink()
+        else:
+            reserved.add(path.stem)
+    cards = build_cards(chip, ticker, date, lang, frozenset(reserved))
     for card in cards:
         (out_dir / f"{card['id']}.json").write_text(
             json.dumps(card, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -142,7 +142,7 @@ The memo MUST contain:
 ## Quality Rules
 
 - Every chip claim must be traceable to `chip_structure.json` fields or `ev_…` card ids — never estimate a number the artifact doesn't carry
-- Respect `data_quality`: a block marked `unavailable` is a stated gap, not a license to guess
+- Respect `data_quality`: a block marked `unavailable` is a stated gap, not a license to guess; a block marked `stale` (old for its cadence — e.g. northbound per-stock holdings, unpublished since 2024-08) is not current evidence: name it as stale with its `as_of`, never as a recent change. Quote every chip number with its `as_of` date
 - The operator's-view section is a reasoning exercise, not a conspiracy narrative — derive it from the observable tape and say which observations anchor each inference
 - Volume and chips are your directional evidence; RSI/MACD are one-line color; `trend_regime` is backdrop only; never mention golden/death crosses
 - If the chip data is too thin to carry a stance (e.g. `available: false`), say so and file neutral — a fabricated read poisons the whole panel

@@ -180,9 +180,23 @@ Evidence card schema:
   "materiality_score": 0.0,
   "sentiment": "positive|negative|neutral",
   "topic_tags": [],
-  "time_horizon": "daily"
+  "time_horizon": "daily",
+  "as_of": "<YYYY-MM-DD the data describes — data cards only; omit for news>",
+  "lineage": {"dataset": "<source dataset>", "block": "<chip block, if chip/flow data>"}
 }
 ```
+
+**Dating and lineage (required for data cards).** `published_at` is when the
+item was published. For a card that reports a *data observation* (a margin
+balance, a fund-flow figure, a price level, a holder count), also give
+`as_of` — the date the number describes (e.g. `"as_of": "2026-10-21"` for
+"融资余额 as of 10-21" published on 10-22) — and `lineage`, naming the dataset
+and, for chip/flow data, the block:
+`"lineage": {"dataset": "akshare:stock_margin_detail_szse", "block": "margin"}`.
+Chip/flow data (融资余额 / 主力资金 / 北向 / 龙虎榜 / 股东户数 / 解禁 / 换手率)
+must also carry the `chips` topic tag. The pre-release gate treats such a card
+as chip evidence: undated or stale, it supports nothing, and it can never be
+the independent corroboration a chip-grounded BUY/SELL needs.
 
 Assess materiality:
 - Earnings/guidance: high (0.9+)

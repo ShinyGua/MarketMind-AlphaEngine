@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A-share chip/flow collection via akshare for MarketMind-AlphaEngine.
 
-Collects the signals that answer "筹码干不干净" — the ones yfinance cannot see:
+Collects the signals that answer "筹码干不干净" — the ones daily OHLCV cannot show:
 
 | block            | akshare interface                     | question answered        |
 |------------------|---------------------------------------|--------------------------|
@@ -14,10 +14,18 @@ Collects the signals that answer "筹码干不干净" — the ones yfinance cann
 | restricted       | stock_restricted_release_queue_em     | unlock overhang (解禁)   |
 
 Writes {workspace}/raw/{date}/chips/cn_flows.json. Each block carries its own
-`data_quality` ("akshare" | "unavailable") and degrades independently — a
-blocked endpoint (e.g. push2his fund-flow behind some networks) never takes the
-others down. scripts/compute_chip_structure.py embeds the file under
+`data_quality` ("akshare" | "stale" | "unavailable") and degrades independently
+— a blocked endpoint (e.g. push2his fund-flow behind some networks) never takes
+the others down. scripts/compute_chip_structure.py embeds the file under
 `cn_flows` in chip_structure.json.
+
+Freshness (mcp/shared/freshness.py): every block records the date its data
+describes (`as_of`), its cadence and its lag in completed sessions. Daily rows
+for a session still trading are dropped. A block that is old for its cadence
+is reduced to `{data_quality: "stale", as_of, lag_sessions, reason}` — its
+numbers move to cn_flows_stale.json, so no downstream reader can present them
+as current (this is how a 2024 northbound series kept reappearing as a
+"5-day change" in 2026 decisions).
 
 Scope: `market_profile == "CN"` only. HK/US names exit 0 without writing —
 their chip read comes from the OHLCV-based engine alone. akshare missing or
@@ -40,7 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "mcp"))
-from shared import contracts  # noqa: E402
+from shared import contracts, freshness  # noqa: E402
 
 _PROXY_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                "http_proxy", "https_proxy", "all_proxy")
@@ -100,14 +108,25 @@ def _back_days(date: str, days: int) -> str:
 
 # ── signal builders ──────────────────────────────────────────────────
 
-def build_turnover(ak, code: str, date: str):
+def _completed_rows(df, col: str, ref: str):
+    """Rows dated on/before the last completed session, oldest first."""
+    df = df.assign(_d=df[col].map(freshness.normalize_date)).dropna(subset=["_d"])
+    df = df[df["_d"] <= ref].sort_values("_d")
+    if df.empty:
+        raise ValueError("no completed-session rows on/before run date")
+    return df
+
+
+def build_turnover(ak, code: str, date: str, ref: str):
     df = _call(lambda: ak.stock_zh_a_hist(
         symbol=code, period="daily",
         start_date=_back_days(date, 60), end_date=_yyyymmdd(date)))
     if df is None or df.empty or "换手率" not in df.columns:
         raise ValueError("no turnover column")
+    df = _completed_rows(df, "日期", ref)
     turn = df["换手率"].astype(float)
     return {
+        "as_of": df["_d"].iloc[-1],
         "turnover_pct": _num(turn.iloc[-1]),
         "avg_5d_pct": _num(turn.tail(5).mean()),
         "avg_20d_pct": _num(turn.tail(20).mean()) if len(turn) >= 20 else None,
@@ -116,13 +135,11 @@ def build_turnover(ak, code: str, date: str):
     }
 
 
-def build_fund_flow(ak, code: str, market: str, date: str):
+def build_fund_flow(ak, code: str, market: str, ref: str):
     df = _call(lambda: ak.stock_individual_fund_flow(stock=code, market=market))
     if df is None or df.empty:
         raise ValueError("empty fund flow")
-    df = df[df["日期"].astype(str) <= date]
-    if df.empty:
-        raise ValueError("no rows on/before run date")
+    df = _completed_rows(df, "日期", ref)
     col = "主力净流入-净额"
     if col not in df.columns:
         raise ValueError("main-force column missing")
@@ -138,6 +155,7 @@ def build_fund_flow(ak, code: str, market: str, date: str):
         return n
 
     return {
+        "as_of": df["_d"].iloc[-1],
         "net_1d": _num(net.iloc[-1]),
         "net_5d": _num(net.tail(5).sum()),
         "net_10d": _num(net.tail(10).sum()),
@@ -170,7 +188,9 @@ def build_lhb(ak, code: str, date: str):
             "interpretation": str(r.get("解读", ""))[:60],
             "net_buy": _num(r.get("龙虎榜净买额")),
         })
-    return {"appearances_90d": int(len(rows)), "events": events,
+    dated = [e["date"] for e in events if freshness.normalize_date(e["date"])]
+    return {"as_of": max(dated) if dated else None,
+            "appearances_90d": int(len(rows)), "events": events,
             "source": "stock_lhb_detail_em"}
 
 
@@ -184,6 +204,7 @@ def build_northbound(ak, code: str, date: str):
     df = df.sort_values("持股日期")
     pct = df["持股数量占A股百分比"].astype(float)
     out = {
+        "as_of": freshness.normalize_date(df["持股日期"].iloc[-1]),
         "holding_pct": _num(pct.iloc[-1]),
         "holding_pct_5d_ago": _num(pct.iloc[-6]) if len(pct) >= 6 else None,
         "holding_pct_20d_ago": _num(pct.iloc[-21]) if len(pct) >= 21 else None,
@@ -215,7 +236,8 @@ def build_margin(ak, code: str, exchange_hint: str, date: str):
         row = df[df[code_col].astype(str).str.zfill(6) == code.zfill(6)]
         if row.empty:
             raise ValueError("not a margin-eligible name")
-        return {"as_of": day, "margin_balance": _num(row.iloc[0][bal_col]),
+        return {"as_of": freshness.normalize_date(day),
+                "margin_balance": _num(row.iloc[0][bal_col]),
                 "source": "stock_margin_detail_sse/szse"}
     raise last_err or ValueError("no margin data within 7 days")
 
@@ -227,6 +249,7 @@ def build_holder_count(ak, code: str, date: str):
     date_col = next((c for c in df.columns if "股东户数统计截止日" in str(c) or "截止日" in str(c)), None)
     cur_col = next((c for c in df.columns if "本次" in str(c) and "户数" in str(c)), None)
     chg_col = next((c for c in df.columns if "增减比例" in str(c)), None)
+    pub_col = next((c for c in df.columns if "公告日期" in str(c)), None)
     if not (date_col and cur_col):
         raise ValueError(f"unexpected columns: {list(df.columns)[:6]}")
     df = df[df[date_col].astype(str) <= date].sort_values(date_col)
@@ -234,12 +257,16 @@ def build_holder_count(ak, code: str, date: str):
         raise ValueError("no rows on/before run date")
     recent = df.tail(4)
     history = [{"as_of": str(r[date_col])[:10], "holders": _num(r[cur_col]),
-                "change_pct": _num(r[chg_col]) if chg_col else None}
+                "change_pct": _num(r[chg_col]) if chg_col else None,
+                "published_at": freshness.normalize_date(r[pub_col]) if pub_col else None}
                for _, r in recent.iterrows()]
     changes = [h["change_pct"] for h in history if h["change_pct"] is not None]
     trend = "concentrating" if changes and all(c < 0 for c in changes[-2:]) else \
             "dispersing" if changes and all(c > 0 for c in changes[-2:]) else "mixed"
-    return {"latest": history[-1] if history else None, "history": history,
+    latest = history[-1] if history else None
+    return {"as_of": (latest or {}).get("as_of"),
+            "published_at": (latest or {}).get("published_at"),
+            "latest": latest, "history": history,
             "trend": trend, "source": "stock_zh_a_gdhs_detail_em"}
 
 
@@ -262,6 +289,34 @@ def build_restricted(ak, code: str, date: str):
             })
     upcoming.sort(key=lambda u: u["date"])
     return {"upcoming": upcoming[:4], "source": "stock_restricted_release_queue_em"}
+
+
+# ── freshness ────────────────────────────────────────────────────────
+
+_BLOCKS = ("turnover", "main_force", "lhb", "northbound", "margin",
+           "holder_count", "restricted_release")
+
+
+def apply_freshness(artifact: dict, date: str, acquired_at: str, now=None) -> dict:
+    """Stamp every block with as_of / cadence / lag; strip stale blocks.
+
+    Returns the stripped payloads keyed by block, for cn_flows_stale.json."""
+    stale = {}
+    for name in _BLOCKS:
+        block = artifact.get(name)
+        if not isinstance(block, dict) or block.get("data_quality") != "akshare":
+            continue
+        verdict = freshness.assess(name, block.get("as_of"), date, now)
+        block.update({"as_of": verdict["as_of"], "cadence": verdict["cadence"],
+                      "lag_sessions": verdict["lag_sessions"], "acquired_at": acquired_at})
+        if not verdict["fresh"]:
+            stale[name] = dict(block)
+            artifact[name] = {"data_quality": "stale", "as_of": verdict["as_of"],
+                              "cadence": verdict["cadence"],
+                              "lag_sessions": verdict["lag_sessions"],
+                              "reason": verdict["reason"], "acquired_at": acquired_at,
+                              "source": block.get("source")}
+    return stale
 
 
 # ── driver ───────────────────────────────────────────────────────────
@@ -299,27 +354,40 @@ def run(workspace: Path, date: str) -> dict | None:
         print(f"cn_chips: akshare not installed — wrote stub {out_path}")
         return artifact
 
+    ref = freshness.last_completed_session(date)
+    acquired_at = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     artifact = {
+        "schema_version": 2,
         "available": True,
         "date": date,
         "code": code,
-        "turnover": _block(lambda: build_turnover(ak, code, date)),
-        "main_force": _block(lambda: build_fund_flow(ak, code, em_market, date)),
+        "reference_session": ref,
+        "acquired_at": acquired_at,
+        "turnover": _block(lambda: build_turnover(ak, code, date, ref)),
+        "main_force": _block(lambda: build_fund_flow(ak, code, em_market, ref)),
         "lhb": _block(lambda: build_lhb(ak, code, date)),
         "northbound": _block(lambda: build_northbound(ak, code, date)),
         "margin": _block(lambda: build_margin(ak, code, exchange, date)),
         "holder_count": _block(lambda: build_holder_count(ak, code, date)),
         "restricted_release": _block(lambda: build_restricted(ak, code, date)),
     }
-    ok = [k for k, v in artifact.items()
-          if isinstance(v, dict) and v.get("data_quality") == "akshare"]
-    bad = [k for k, v in artifact.items()
-           if isinstance(v, dict) and v.get("data_quality") == "unavailable"]
+    stale = apply_freshness(artifact, date, acquired_at)
+    ok = [k for k in _BLOCKS if artifact[k].get("data_quality") == "akshare"]
+    bad = [k for k in _BLOCKS if artifact[k].get("data_quality") == "unavailable"]
     artifact["blocks_ok"] = ok
+    artifact["blocks_stale"] = sorted(stale)
     artifact["blocks_unavailable"] = bad
+    stale_path = out_path.with_name("cn_flows_stale.json")
+    if stale:
+        # Kept for audit only — never embedded downstream.
+        stale_path.write_text(json.dumps({"date": date, "note": (
+            "Stale chip blocks removed from cn_flows.json; not current evidence."),
+            "blocks": stale}, indent=2, ensure_ascii=False), encoding="utf-8")
+    elif stale_path.exists():
+        stale_path.unlink()
     out_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False),
                         encoding="utf-8")
-    print(f"cn_chips: wrote {out_path} (ok={ok}, unavailable={bad})")
+    print(f"cn_chips: wrote {out_path} (ok={ok}, stale={sorted(stale)}, unavailable={bad})")
     return artifact
 
 
