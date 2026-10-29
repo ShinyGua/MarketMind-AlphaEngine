@@ -140,6 +140,9 @@ def finalize(workspace: str, date: str) -> dict:
     release_gate = load_json(rg_path)
     release_status = release_gate.get("release_status") if release_gate else None
 
+    # Actual API-reported usage (eval/usage_telemetry.py), when it ran.
+    usage = load_json(ws / "eval" / date / "usage.json")
+
     # Ledger receipt, written by ledger/cli.py seal when the gate passed.
     receipt_path = ws / "decision" / date / "ledger_receipt.json"
     try:
@@ -186,6 +189,7 @@ def finalize(workspace: str, date: str) -> dict:
         "graders": graders,
         "all_graders_pass": all_graders_pass,
         "release_status": release_status,
+        "usage_tokens": (usage or {}).get("totals_attributed"),
         "sealed": receipt is not None,
         "ledger_seq": (receipt or {}).get("seq"),
         "decision_id": (receipt or {}).get("decision_id"),

@@ -256,8 +256,8 @@ def format_markdown(m: dict) -> str:
     lines.append("\n## Cost Analytics\n")
     lines.append(_md_table(["Metric", "Value"], [
         ["Avg tokens/run", f"{ca['avg_tokens_per_run']:.0f}"],
-        ["Avg cost/run ($)", f"{ca['avg_cost_per_run']:.4f}"],
-        ["Total cost ($)", f"{ca['total_cost']:.4f}"],
+        ["Avg byte-proxy 'cost'/run ($, not billing)", f"{ca['avg_cost_per_run']:.4f}"],
+        ["Total byte-proxy 'cost' ($, not billing)", f"{ca['total_cost']:.4f}"],
     ]))
 
     return "\n".join(lines)

@@ -30,9 +30,11 @@ Prereqs (real run): `codex` on PATH, the 3 MCP servers in ~/.codex/config.toml
 parity. `--dry-run` needs none of this — it prints the full ordered plan.
 """
 import argparse
+import itertools
 import json
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,7 +67,8 @@ def log(msg: str):
     print(f"[driver] {msg}", flush=True)
 
 
-def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> int:
+def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True,
+         stdout_path: Path | None = None) -> int:
     """Run a subprocess (or record it in dry-run). Returns exit code."""
     pretty = " ".join(cmd if len(cmd) < 12 else cmd[:11] + ["…"])
     ctx.plan.append(cmd)
@@ -73,7 +76,11 @@ def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> i
         print(f"  $ {pretty}")
         return 0
     log(f"$ {pretty}")
-    proc = subprocess.run(cmd, cwd=str(cwd))
+    if stdout_path is not None:
+        with open(stdout_path, "w", encoding="utf-8") as out:
+            proc = subprocess.run(cmd, cwd=str(cwd), stdout=out)
+    else:
+        proc = subprocess.run(cmd, cwd=str(cwd))
     if proc.returncode != 0 and critical:
         raise RuntimeError(f"command failed ({proc.returncode}): {pretty}")
     return proc.returncode
@@ -82,6 +89,26 @@ def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> i
 def det(ctx: Ctx, module: str, *args: str, critical: bool = True) -> int:
     """Run a deterministic committed-Python stage."""
     return _run([VENV_PY, module, *map(str, args)], ctx, critical=critical)
+
+
+_USAGE_LOCK = threading.Lock()
+_USAGE_SEQ = itertools.count(1)
+
+
+def _usage_stream(ctx: Ctx, skill: str, extra: tuple) -> Path | None:
+    """Where this call's `codex exec --json` events go (read by
+    eval/usage_telemetry.py), with a sidecar naming its stage and skill."""
+    if ctx.dry:
+        return None
+    with _USAGE_LOCK:
+        n = next(_USAGE_SEQ)
+    d = ctx.ws / "eval" / ctx.date / "usage"
+    d.mkdir(parents=True, exist_ok=True)
+    stem = f"{n:03d}_{skill}" + ("_" + "_".join(extra) if extra else "")
+    stage = getattr(ctx, "current_stage", None) or "unknown"
+    d.joinpath(f"{stem}.meta.json").write_text(json.dumps(
+        {"stage": stage, "skill": skill, "args": list(extra), "at": _now()}), encoding="utf-8")
+    return d / f"{stem}.jsonl"
 
 
 def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int:
@@ -105,11 +132,11 @@ def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int
     cmd = [CODEX, "exec", "-C", str(ROOT),
            "--sandbox", "workspace-write",
            "-c", "sandbox_workspace_write.network_access=true",
-           "--skip-git-repo-check"]
+           "--skip-git-repo-check", "--json"]
     if ctx.model:
         cmd += ["--model", ctx.model]
     cmd.append(prompt)
-    return _run(cmd, ctx, critical=critical)
+    return _run(cmd, ctx, critical=critical, stdout_path=_usage_stream(ctx, skill, extra))
 
 
 def parallel(ctx: Ctx, thunks: list):
@@ -518,6 +545,7 @@ def st_reflect(ctx):
     # sealed decision whose horizon has matured (all tickers, not just this one).
     det(ctx, "ledger/cli.py", "stamps", critical=False)
     det(ctx, "ledger/cli.py", "score", critical=False)
+    det(ctx, "eval/usage_telemetry.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)
     codex_skill(ctx, "mm-memory-writer", critical=False)
     det(ctx, "eval/finalize_run.py", ctx.ws, ctx.date, critical=False)
@@ -580,6 +608,7 @@ def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
         header = f"=== STAGE: {stage} ==="
         print(f"\n{header}")
         det(ctx, "eval/stage_timer.py", "start", ctx.ws, stage, critical=False)
+        ctx.current_stage = stage
         try:
             STAGE_FUNCS[stage](ctx)
             det(ctx, "eval/stage_timer.py", "end", ctx.ws, stage, "true", critical=False)

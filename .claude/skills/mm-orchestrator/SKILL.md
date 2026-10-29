@@ -108,6 +108,11 @@ Exception: `profile/` is undated (static company reference data).
 
 When dispatching skills, pass date as the second argument: `{workspace} {date}`
 
+**Every Agent dispatch's `description` is exactly `mm:{TICKER}:{date}:{stage}:{skill}`**
+(e.g. `mm:300308:2026-10-22:decide:mm-decision-panelist`). `eval/usage_telemetry.py`
+attributes real token usage to stages and skills by this string; a dispatch
+without it is reported as unattributed usage.
+
 ```
 1. Read {workspace}/status.json → get stages_completed list
 2. Determine the last trading session via `scripts/trading_day.py {workspace}` (market-aware; see Date Handling) → store as run_date in status.json
@@ -556,6 +561,8 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 # ledger upkeep: upgrade pending timestamp receipts, score matured horizons (all tickers)
 .venv/bin/python3 ledger/cli.py stamps
 .venv/bin/python3 ledger/cli.py score
+# actual token usage by stage/skill from the subagent transcripts (cost_tracker is a byte proxy)
+.venv/bin/python3 eval/usage_telemetry.py {workspace} {date}
 ```
 
 The release gate script reads all grader results and deterministically produces:
