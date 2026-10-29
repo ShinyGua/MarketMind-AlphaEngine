@@ -38,6 +38,9 @@ CADENCE = {
     "holder_count": {"kind": "quarterly_report"},
     "lhb": {"kind": "event", "max_lag_sessions": 20},
     "restricted_release": {"kind": "scheduled"},
+    # A desk-written chip card that names no block: cadence unknown, so it gets
+    # the event window — still far too short for a months-old observation.
+    "unknown": {"kind": "event", "max_lag_sessions": 20},
 }
 
 # Quarter-end -> statutory disclosure deadline (month, day) and year offset.

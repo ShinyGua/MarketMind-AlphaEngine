@@ -455,8 +455,9 @@ def build(workspace: Path, date: str, cfg: dict, lang: str = "en") -> dict:
         "ticker": symbol,
         "date": date,
         "usage": "directional",
-        "usage_note": ("First-class directional evidence: volume and chip structure "
-                       "may ground a stance/vote on their own (unlike macro=context, "
+        "usage_note": ("Directional evidence: volume and chip structure may push a "
+                       "stance/vote when fresh; a BUY/SELL resting on it needs "
+                       "independent corroboration (rule K1) (unlike macro=context, "
                        "intraday=timing_only, trend_regime=context_only)."),
     }
 

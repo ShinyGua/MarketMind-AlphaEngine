@@ -62,8 +62,10 @@ Round: $ARGUMENTS[3] (1-based integer)
 - `shared_context.chips` — volume & chip structure (量比, VPVR cost distribution,
   profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/
   融资/龙虎榜/股东户数/解禁). **DIRECTIONAL**: unlike trend_regime (backdrop),
-  macro (context) and intraday (timing-only), chip evidence may carry a stance/
-  vote on its own — cite the `ev_…_chip_*` cards. Respect per-block `data_quality`.
+  macro (context) and intraday (timing-only), chip evidence may push a stance —
+  cite the `ev_…_chip_*` cards. Only **fresh** chip data counts: respect per-block
+  `data_quality` (`stale` and `unavailable` support nothing) and each card's
+  `meta.as_of`.
 - `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
   `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
   land your conclusion on their horizon (no 3-year DCF answer to a swing
@@ -201,11 +203,15 @@ Write to: `{workspace}/discussion/{date}/panel/round_{N}/{role}_view.json`
 - A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
   for a stance — pair it with role-lens evidence (fundamentals, catalysts, risk,
   news, MACD/RS); on its own it is trend color, not a thesis.
-- **Chip/volume structure IS valid sole grounds for a stance** (`shared_context.chips`,
-  `ev_…_chip_*` cards) — this asymmetry with the SMA and valuation rules is
-  deliberate: chip exchange is the reproducible trace of buying/selling force,
-  not derived chart decoration. Respect `data_quality` — an `unavailable` block
-  supports nothing.
+- **Chip/volume structure is directional evidence** (`shared_context.chips`,
+  `ev_…_chip_*` cards, and any card carrying 融资余额 / 主力资金 / 北向 / 龙虎榜 /
+  股东户数 / 解禁 / 换手率 data) — chip exchange is the reproducible trace of
+  buying/selling force, not chart decoration. Until each chip card type passes
+  the out-of-sample study (rule K1), only fresh chip data counts (`stale` and
+  `unavailable` blocks support nothing), and a bullish or bearish stance that
+  rests on chips should name the independent evidence — fundamentals, a filing,
+  a catalyst, company-specific news — that points the same way; the final
+  BUY/SELL is blocked without it.
 - `stance` must be exactly `bullish`, `neutral`, or `bearish`. `conviction` is a
   float in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.

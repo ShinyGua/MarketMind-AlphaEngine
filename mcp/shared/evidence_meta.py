@@ -162,6 +162,29 @@ def as_of(card: dict) -> str | None:
     return None
 
 
+# Dated documents: their publication date is a fair observation date.
+_NEWS_TYPES = {"news", "nasdaq", "web", "article", "media", "press", "newsapi",
+               "filing", "announcement", "8-k", "10-q", "10-k", "form_4", "公告"}
+
+
+def observation_date(card: dict) -> tuple[str | None, str | None]:
+    """(date, basis) for freshness checks.
+
+    An explicit as_of always wins. A news or filing card may fall back to its
+    publication date — a dated document reports what was current when it ran,
+    and an old one is still old. A data card may not: desks stamp data cards
+    with the run date, which is how 2024 northbound numbers looked current in 2026.
+    """
+    explicit = as_of(card)
+    if explicit:
+        return explicit, "as_of"
+    if str(card.get("source_type", "")).lower() in _NEWS_TYPES:
+        when, precision = parse_when(card.get("published_at"))
+        if when is not None and precision in ("date", "datetime"):
+            return when.date().isoformat(), "published_at"
+    return None, None
+
+
 def classify(card: dict, target_ticker: str | None = None) -> dict:
     """Everything the digest and the gate need to know about one card."""
     cls = chip_class(card)

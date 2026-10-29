@@ -176,7 +176,8 @@ quant:
   # scripts/collect_cn_chips.py + scripts/chip_evidence_cards.py — deterministic).
   # DIRECTIONAL: unlike macro (context), intraday (timing-only) and trend_regime
   # (context-only), chip/volume structure is first-class stance evidence —
-  # analysts and panelists may ground a stance or vote in it.
+  # analysts and panelists may ground a stance or vote in it — when fresh, and a
+  # BUY/SELL resting on it needs independent corroboration (rule K1).
   chips:
     enabled: true
     history_period: 400d        # price_router daily fetch when the raw CSV is thin

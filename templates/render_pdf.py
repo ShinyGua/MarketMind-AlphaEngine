@@ -148,14 +148,34 @@ def strip_md_header(text: str) -> str:
     return "\n".join(out)
 
 
+def _gate_allows(workspace: Path, date: str, allow_ungated: bool) -> bool:
+    """The PDF is a release artifact: render only a decision the pre-release
+    gate passed and nobody edited since. --allow-ungated re-renders runs that
+    predate the gate; it never overrides a block."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
+    from pre_release_gate import gate_status
+
+    status = gate_status(workspace, date)
+    if status == "passed" or (status == "missing" and allow_ungated):
+        return True
+    reason = {"blocked": "the pre-release gate blocked this decision",
+              "stale": "final_decision.json changed after the gate passed",
+              "missing": "no pre-release gate result (pass --allow-ungated for pre-gate runs)"}[status]
+    print(f"render_pdf: not rendering — {reason}", file=sys.stderr)
+    return False
+
+
 def main():
-    if len(sys.argv) < 3:
-        print("usage: render_pdf.py <workspace> <date>", file=sys.stderr)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) < 2:
+        print("usage: render_pdf.py <workspace> <date> [--allow-ungated]", file=sys.stderr)
         sys.exit(2)
 
-    workspace = Path(sys.argv[1])
-    date = sys.argv[2]
+    workspace = Path(args[0])
+    date = args[1]
     ticker = workspace.name
+    if not _gate_allows(workspace, date, "--allow-ungated" in sys.argv):
+        sys.exit(3)
 
     cfg = load_json(workspace / "resolved_config.json") or {}
     lang = "ch" if cfg.get("language") == "ch" else "en"

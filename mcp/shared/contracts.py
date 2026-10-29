@@ -41,6 +41,21 @@ def decision_path(ws: Path, date: str) -> Path:
     return ws / "decision" / date / "final_decision.json"
 
 
+def pre_gate_decision_path(ws: Path, date: str) -> Path:
+    """The decision exactly as first written, kept when the gate blocks it."""
+    return ws / "decision" / date / "final_decision.pre_gate.json"
+
+
+def pre_release_gate_path(ws: Path, date: str) -> Path:
+    """Deterministic pre-export gate verdict (eval/pre_release_gate.py)."""
+    return ws / "decision" / date / "pre_release_gate.json"
+
+
+def blocked_report_path(ws: Path, date: str) -> Path:
+    """Written by export instead of the report when the gate blocked the run."""
+    return ws / "final" / date / "BLOCKED.md"
+
+
 # ── Decision-panel (multi-round vote → converge → exit) ──────────────
 
 def panel_dir(ws: Path, date: str) -> Path:
@@ -306,8 +321,11 @@ def detect_final_report(ws: Path, date: str) -> Path | None:
 RELEASE_PASSED = "passed"
 RELEASE_WARNING = "warning"
 RELEASE_FAILED = "failed"
+RELEASE_BLOCKED = "blocked"   # the pre-release gate stopped the decision; nothing exported
 
 # Metrics interpretation:
 #   passed  → strict success
 #   warning → operational success (advisory grader failed, report is usable)
 #   failed  → failure (critical grader failed = regression)
+#   blocked → stopped before export by eval/pre_release_gate.py (stale chip
+#             evidence, unresolved ids, K1); counted apart from failures

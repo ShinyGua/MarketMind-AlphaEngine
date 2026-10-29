@@ -120,6 +120,34 @@ def _convergence_score(panel: dict, conv: dict | None) -> float | None:
     return None
 
 
+def _reason_text(reason) -> str:
+    """top_reasons entries are strings (v1) or {text, evidence_ids, direction} (v2).
+    Scan only the prose — evidence ids like ev_..._valuation_001 are not claims."""
+    if isinstance(reason, dict):
+        return str(reason.get("text") or "")
+    return str(reason)
+
+
+def _forecast_label_conflicts(decision: dict) -> list[str]:
+    """Advisory: a BUY with p_outperform < 0.5, or a SELL with > 0.5, says the
+    action and the forecast disagree. Warning only — the summary may explain it."""
+    fc = decision.get("forecast") if isinstance(decision.get("forecast"), dict) else {}
+    p = fc.get("p_outperform")
+    if not isinstance(p, (int, float)) or isinstance(p, bool):
+        return []
+    labels = {"headline": decision.get("decision")}
+    actions = decision.get("actions") if isinstance(decision.get("actions"), dict) else {}
+    for track in ("if_flat", "if_long"):
+        if isinstance(actions.get(track), dict):
+            labels[track] = actions[track].get("label")
+    out = []
+    for where, label in labels.items():
+        if label == "BUY" and p < 0.5 or label == "SELL" and p > 0.5:
+            out.append(f"{where} action {label} disagrees with forecast p_outperform {p:.2f} "
+                       "(explain it in decision_summary)")
+    return out
+
+
 def _valuation_cited(decision: dict) -> bool:
     """True if valuation is invoked anywhere in the rationale text.
 
@@ -129,7 +157,7 @@ def _valuation_cited(decision: dict) -> bool:
     parts = []
     reasons = decision.get("top_reasons")
     if isinstance(reasons, list):
-        parts.extend(str(r) for r in reasons)
+        parts.extend(_reason_text(r) for r in reasons)
     for key in ("decision_summary", "stance_notes"):
         val = decision.get(key)
         if isinstance(val, str):
@@ -165,7 +193,7 @@ def _intraday_cited_as_reason(ws: Path, date: str, decision: dict) -> list[str]:
                 f"ballot {role} round {rnd} cites intraday indicators as a vote "
                 f"reason (timing-only contract)")
     reasons = decision.get("top_reasons")
-    if isinstance(reasons, list) and _cites_intraday_as_reason(" ".join(map(str, reasons))):
+    if isinstance(reasons, list) and _cites_intraday_as_reason(" ".join(map(_reason_text, reasons))):
         warnings.append(
             "final_decision.top_reasons cites intraday indicators as a vote reason "
             "(timing-only contract)")
@@ -268,12 +296,15 @@ def grade(workspace: str, date: str) -> dict:
     result["inputs"]["valuation_role"] = val_role
     if val_role == "reference":
         top = decision.get("top_reasons")
-        top_blob = " ".join(map(str, top)).lower() if isinstance(top, list) else ""
+        top_blob = " ".join(map(_reason_text, top)).lower() if isinstance(top, list) else ""
         if any(kw in top_blob for kw in _VAL_KEYWORDS):
             result["warnings"].append(
                 "final_decision.top_reasons cites valuation while valuation role is "
                 "'reference' (CN/HK): fair value may shape confidence and risk framing "
                 "only, never the stated reason for the label")
+
+    # 9. Forecast vs action coherence (warning-only).
+    result["warnings"].extend(_forecast_label_conflicts(decision))
 
     llm_conf = decision.get("confidence")
     result["llm_confidence"] = llm_conf

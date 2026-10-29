@@ -22,7 +22,7 @@ Each evidence family carries a `usage` contract that bounds what it may justify.
 
 | Family | Contract | May it set/flip a stance or vote? |
 |---|---|---|
-| **Chips / volume** (`shared_context.chips`) | `directional` | **Yes — first-class stance evidence, may stand alone in `top_reasons` and carry the label.** Chip exchange is the reproducible trace of actual buying/selling force. Respect per-block `data_quality`: an `unavailable` block supports nothing |
+| **Chips / volume** (`shared_context.chips`, chip cards, any card carrying 融资余额/主力资金/北向/龙虎榜/股东户数/解禁/换手率 data) | `directional`, **fresh and corroborated (rule K1)** | **Yes — directional evidence that may stand in `top_reasons` and push the label**, because chip exchange is the reproducible trace of actual buying/selling force. Until each chip card type passes the deferred out-of-sample study: (a) a cited chip card must carry its observation date within its block's cadence — `stale`/`unavailable` blocks and undated chip data support nothing, for any label; (b) a BUY or SELL whose same-direction reasons cite chip evidence must also cite independent same-direction evidence (company / filing / catalyst / company-specific news; never market, sector, macro, trend, intraday or reference valuation). Enforced by the blocking `eval/pre_release_gate.py` |
 | **Macro regime** | context, not trigger | No. Feeds the WACC input, analyst framing, and `risk_overlay` narrative; never flips a vote or caps conviction |
 | **Intraday 1h/4h** (`shared_context.intraday`) | `timing_only` | No. Frames staged entry/exit price zones in `stance_notes` only (chip S/R + daily ATR fallback when `available: false`). Citing it as a vote reason → decision-risk grader warns |
 | **Daily SMA / `trend_regime`** | `context_only` | No. Trend backdrop only; a price-vs-SMA position or MA cross is never the sole reason for a stance or vote (prompt-level de-weighting; no grader) |
@@ -133,14 +133,16 @@ Default is a multi-round **decision panel** (legacy single-shot when `decision.p
 2. **Chair tally** — **mm-decision-maker** (`tally` mode) → `panel_summary_round_{N}.json`
 3. **Convergence** — `eval/graders/panel_convergence_grader.py`, same guards as above → `convergence_round_{N}.json`
 
-**mm-decision-maker** (final mode) then writes `final_decision.json`: BUY/HOLD/SELL + `risk_overlay`, confidence score, conviction-weighted panel lean (not head-count), top reasons, key risks, disconfirming signals, a `main_force_read` block (`unclear` when thin), the investor `horizon`, and a `panel` block (rounds, final tally, convergence score, retained dissent).
+**mm-decision-maker** (final mode) then writes `final_decision.json` (schema v2): two actions — `actions.if_flat` and `actions.if_long`, each BUY/HOLD/SELL + overlay (none/hedge/trim/stop, where `stop` is a protective stop-loss) — and a separate `forecast.p_outperform` (probability the stock's 20-session price return beats its market benchmark's: S&P 500 / CSI 300 / HSI); confidence score, conviction-weighted panel lean (not head-count), structured `top_reasons` `{text, evidence_ids, direction}`, key risks, disconfirming signals, a `main_force_read` block (`unclear` when thin), the investor `horizon`, and a `panel` block (rounds, final tally, convergence score, retained dissent). The headline `decision`/`risk_overlay` are the action for the investor's declared `position_state`.
+
+**Pre-release gate (blocking).** `eval/pre_release_gate.py` then checks the decision before anything is exported: schema v2, every cited id exists, no cited card published after issuance, no stale/undated chip card, and rule K1. A block gets one `mm-decision-maker revise` pass (blocked original kept as `final_decision.pre_gate.json`); a second block releases the run as `blocked` — `final/{date}/BLOCKED.md` instead of a report, `errors[]` in status, and `render_pdf.py` refuses to render. The gate records the decision's sha256.
 
 All evidence-usage contracts above bind this stage — see the contracts table.
 
 Config: `decision.panel` (same knobs as the discussion panel, plus `overlay_labels`).
 
 ### 10. Export
-Final markdown + structured JSON to `final/`. **mm-pdf-exporter** renders annotated SVG charts (`templates/charts.py`) then markdown → HTML/CSS → PDF via **WeasyPrint** (committed `report.css` + `report.html.j2`; no LaTeX): page-1 rating box from JSON, embedded charts, styled tables, running headers/footers. Output: `exports/{date}/pdf/report.pdf` (+ `report.html` for debugging, `charts/*.svg`).
+Final markdown + structured JSON to `final/`. **mm-pdf-exporter** renders annotated SVG charts (`templates/charts.py`) then markdown → HTML/CSS → PDF via **WeasyPrint** (committed `report.css` + `report.html.j2`; no LaTeX): page-1 rating box from JSON, embedded charts, styled tables, running headers/footers. Output: `exports/{date}/pdf/report.pdf` (+ `report.html` for debugging, `charts/*.svg`). `render_pdf.py` renders only a decision the pre-release gate passed and nobody edited since (exit 3 otherwise); `--allow-ungated` re-renders runs that predate the gate but never overrides a block.
 
 ### 11. Reflect (Non-Critical)
 Run code-based graders, finalize `logs/run_log.jsonl`, and run **mm-memory-writer** to store episodic/semantic/procedural memories (including user-review feedback). Failure here still counts the pipeline as complete.

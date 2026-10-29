@@ -5,6 +5,11 @@ Release gate — deterministic pass/warning/failed assessment of a pipeline run.
 Reads grader results from {workspace}/eval/{date}/ and produces release_gate.json.
 If factuality or evidence graders fail, writes regression_flag.json (reviewer missed it).
 
+The pre-release gate (eval/pre_release_gate.py) runs earlier, before export,
+and its verdict wins here: a blocked decision — or one edited after it passed —
+is `blocked` whatever the graders say. A run with no pre-release result (the
+orchestrator skipped it) can be at best a `warning`, flagged `gate_missing`.
+
 Usage:
     .venv/bin/python3 eval/release_gate.py workspaces/AMD 2026-03-20
 """
@@ -16,7 +21,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "mcp"))
-from shared.contracts import grader_result_path, release_gate_path, regression_flag_path
+from shared.contracts import (RELEASE_BLOCKED, RELEASE_PASSED, RELEASE_WARNING,  # noqa: E402
+                              grader_result_path, release_gate_path, regression_flag_path)
+
+sys.path.insert(0, str(PROJECT_ROOT / "eval"))
+from pre_release_gate import gate_status  # noqa: E402
 
 
 def _read_grader(workspace: Path, date: str, name: str) -> dict | None:
@@ -82,8 +91,15 @@ def evaluate(workspace: Path, date: str) -> dict:
     else:
         release_status = "passed"
 
+    pre_release = gate_status(workspace, date)
+    if pre_release in ("blocked", "stale"):
+        release_status = RELEASE_BLOCKED
+    elif pre_release == "missing" and release_status == RELEASE_PASSED:
+        release_status = RELEASE_WARNING
+
     gate = {
         "release_status": release_status,
+        "pre_release_gate": "gate_missing" if pre_release == "missing" else pre_release,
         "missing_graders": missing,
         "grader_summary": summary,  # Only gate graders (factuality, evidence, consistency)
         "grader_details": {

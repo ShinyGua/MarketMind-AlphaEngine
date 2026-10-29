@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 VENV_PY = str(ROOT / ".venv" / "bin" / "python3")
 CODEX = "codex"
 sys.path.insert(0, str(ROOT / "mcp"))
+from shared import contracts  # noqa: E402
 from shared.contracts import STAGES  # noqa: E402
 
 # ── small utilities ────────────────────────────────────────────────────────
@@ -148,6 +149,19 @@ def set_stage(ctx: Ctx, stage: str, completed: str | None = None):
     st.setdefault("stages_completed", [])
     if completed and completed in STAGES and completed not in st["stages_completed"]:
         st["stages_completed"].append(completed)
+    path.write_text(json.dumps(st, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def add_error(ctx: Ctx, message: str) -> None:
+    """Append to status.json errors[] (the orchestrator's update_status(error=...))."""
+    if ctx.dry:
+        return
+    path = ctx.ws / "status.json"
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        st = {"ticker": ctx.ticker, "stages_completed": [], "errors": []}
+    st.setdefault("errors", []).append({"message": message, "at": _now()})
     path.write_text(json.dumps(st, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -357,6 +371,7 @@ def st_decide(ctx):
     panel = (ctx.cfg.get("decision", {}) or {}).get("panel", {}) or {}
     if not panel.get("enabled", True):
         codex_skill(ctx, "mm-decision-maker")   # legacy single-shot decision
+        gate_decision(ctx)
         return
     roles = _analyst_roles(ctx)
     max_r = int(panel.get("max_rounds", 3))
@@ -380,9 +395,77 @@ def st_decide(ctx):
         log(f"panel round {r}: no convergence, continuing")
     # 4. chair writes the final decision (reads panel summaries -> risk_overlay + panel block)
     codex_skill(ctx, "mm-decision-maker")
+    gate_decision(ctx)
+
+
+def _gate(ctx) -> str:
+    """Run the pre-release gate; branch on its JSON, never on the exit code."""
+    det(ctx, "eval/pre_release_gate.py", ctx.ws, ctx.date, critical=False)
+    if ctx.dry:
+        return "passed"
+    return (_read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}).get("status", "blocked")
+
+
+def gate_decision(ctx) -> str:
+    """Gate -> one revise on a block -> gate again. A second block releases the
+    run as blocked: recorded in status.json, and export renders nothing."""
+    if ctx.dry:
+        print("  # pre-release gate; if blocked: keep final_decision.pre_gate.json, "
+              "run mm-decision-maker revise once, gate again")
+    status = _gate(ctx)
+    if status == "passed":
+        return status
+    dec = contracts.decision_path(ctx.ws, ctx.date)
+    if dec.exists():
+        contracts.pre_gate_decision_path(ctx.ws, ctx.date).write_text(
+            dec.read_text(encoding="utf-8"), encoding="utf-8")
+    log("pre-release gate blocked the decision; one revision")
+    codex_skill(ctx, "mm-decision-maker", "revise", critical=False)
+    status = _gate(ctx)
+    if status != "passed":
+        gate = _read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}
+        checks = sorted({e.get("check", "?") for e in gate.get("errors", [])}) or ["unreadable"]
+        add_error(ctx, f"pre_release_gate blocked: {', '.join(checks)}")
+        log(f"release BLOCKED by the pre-release gate ({', '.join(checks)})")
+    return status
+
+
+def _write_blocked(ctx) -> None:
+    gate = _read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}
+    lines = [f"# {ctx.ticker} {ctx.date} — release blocked", "",
+             "The decision did not pass the pre-release gate, so no report was exported.", ""]
+    for e in gate.get("errors", []) or [{"check": "missing", "message": "no gate result"}]:
+        lines.append(f"- `{e.get('check')}`: {e.get('message')}")
+    out = contracts.blocked_report_path(ctx.ws, ctx.date)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _latest_draft(ctx) -> Path | None:
+    d = ctx.ws / "drafts" / ctx.date
+    drafts = sorted(d.glob("*.md"), key=lambda q: q.stat().st_mtime) if d.is_dir() else []
+    return drafts[-1] if drafts else None
 
 
 def st_export(ctx):
+    if not ctx.dry:
+        sys.path.insert(0, str(ROOT / "eval"))
+        from pre_release_gate import gate_status
+        if gate_status(ctx.ws, ctx.date) != "passed":
+            _write_blocked(ctx)
+            log("export skipped: release blocked (final/{date}/BLOCKED.md)")
+            return
+        # Same as orchestrator stage 13: the report and decision land in final/.
+        draft = _latest_draft(ctx)
+        if draft is not None:
+            final_md = contracts.final_report_path(ctx.ws, ctx.date, ctx.run_mode)
+            final_md.parent.mkdir(parents=True, exist_ok=True)
+            final_md.write_text(draft.read_text(encoding="utf-8"), encoding="utf-8")
+            decision = _read_json(contracts.decision_path(ctx.ws, ctx.date)) or {}
+            contracts.final_report_json_path(ctx.ws, ctx.date, ctx.run_mode).write_text(
+                json.dumps({"report_markdown": final_md.name, "draft_source": draft.name,
+                            "decision": decision, "exported_at": _now()},
+                           indent=2, ensure_ascii=False), encoding="utf-8")
     chart_args = [ctx.ws, ctx.date, ctx.ticker]
     if ctx.lang == "ch":
         chart_args.append("--lang")
@@ -392,10 +475,13 @@ def st_export(ctx):
 
 
 def st_user_review(ctx):
-    out = ctx.ws / "decision" / ctx.date / "user_review.json"
+    out = contracts.user_review_path(ctx.ws, ctx.date)
     if ctx.dry:
         print("  # prompt on stdin if a TTY, else write empty user_review.json (headless)")
         return
+    blocked = contracts.blocked_report_path(ctx.ws, ctx.date)
+    if blocked.exists():
+        print(blocked.read_text(encoding="utf-8"))
     feedback = ""
     if sys.stdin.isatty():
         try:
@@ -403,8 +489,10 @@ def st_user_review(ctx):
         except EOFError:
             feedback = ""
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"feedback": feedback, "at": _now()}, ensure_ascii=False, indent=2),
-                   encoding="utf-8")
+    review = ({"reviewed": True, "skipped": False, "agrees_with_decision": None,
+               "user_feedback": feedback, "timestamp": _now()} if feedback
+              else {"reviewed": False, "skipped": True, "timestamp": _now()})
+    out.write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def st_reflect(ctx):

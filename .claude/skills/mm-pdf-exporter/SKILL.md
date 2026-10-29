@@ -47,6 +47,8 @@ Writes vector SVG charts to `{workspace}/exports/{date}/pdf/charts/`:
 
 ```bash
 .venv/bin/python3 templates/render_pdf.py {workspace} {date}
+# exit 3 = not rendered: the pre-release gate blocked this decision, or it was
+# edited after the gate passed. Report that; do not work around it.
 ```
 
 This converts the final markdown report → HTML (with the branded `report.css` and `report.html.j2`) → PDF via **WeasyPrint**, embedding the SVG charts. It builds the Page-1 cover + rating box from the JSON artifacts (decision, quant, valuation, profile), styles all markdown tables, adds running headers/footers, and renders Chinese cleanly via the system CJK font. Charts that the report references inline (`![...](charts/*.svg)`) embed in place; any charts not referenced are appended in an **Exhibits** section so they are never dropped.

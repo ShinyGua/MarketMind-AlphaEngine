@@ -235,7 +235,8 @@ chip distribution, support/resistance, platform/breakout, CN flows) and projects
 material chip observations into evidence cards (`ev_{date}_chip_*`).
 **DIRECTIONAL contract** (`usage: "directional"`): unlike macro (context),
 intraday (timing-only) and trend_regime (context-only), chip/volume structure is
-first-class stance evidence — analysts may ground a stance or vote in it.
+directional stance evidence — but only when fresh, and a BUY/SELL resting on it
+needs independent corroboration (rule K1, checked by the pre-release gate).
 
 **Then create evidence_digest.json** — deduplicate cards across the desks + web-research (the 4 collectors run in parallel and can't see each other, so the same article can appear as several cards) and write the digest:
 ```bash
@@ -420,11 +421,39 @@ writes the final decision. Read `decision.panel.max_rounds` (default 3). Loop
 
 After the loop, dispatch **mm-decision-maker** with args: `{workspace} {date}`
 (final mode) → reads the panel summaries + convergence files and writes the
-enriched `final_decision.json` (with `risk_overlay` + `panel` block). Wait and
-verify it exists.
+enriched `final_decision.json` (schema v2: `actions`, `forecast`, structured
+`top_reasons`, `risk_overlay` + `panel` block). Wait and verify it exists.
+
+**Pre-release gate (deterministic, runs on both paths — panel and legacy):**
+
+```bash
+.venv/bin/python3 eval/pre_release_gate.py {workspace} {date}
+```
+
+It writes `{workspace}/decision/{date}/pre_release_gate.json` and exits 0
+(`passed`) or 2 (`blocked`). It also re-derives the headline `decision` /
+`risk_overlay` from `actions` and the investor's position — do not edit
+`final_decision.json` after it passes (its sha256 is recorded).
+
+- **Passed** → proceed.
+- **Blocked** → copy `final_decision.json` to `final_decision.pre_gate.json`,
+  dispatch **mm-decision-maker** with args: `{workspace} {date} revise` (it reads
+  the gate errors and rewrites the decision, adding a `gate_revision` block), then
+  run the gate again.
+- **Still blocked** → the release is **blocked**: call
+  `mcp__mm-workspace__update_status` with `error: "pre_release_gate blocked: <the
+  gate's error checks>"`, and continue the pipeline — export writes `BLOCKED.md`
+  instead of the report, and user_review tells the user why. A blocked release
+  is a completed run, not a crash.
+
 **Then immediately proceed to stage 13.**
 
 ### 13. export
+0. Read `{workspace}/decision/{date}/pre_release_gate.json`. **If its `status` is
+   not `passed` (or the file is missing), do not export the report:** write
+   `{workspace}/final/{date}/BLOCKED.md` listing the gate's errors, skip steps
+   1–4, and proceed to stage 14. `templates/render_pdf.py` also refuses to render
+   a blocked or ungated decision.
 1. Determine report basename from `resolved_config.run_mode`: `daily_report` for daily mode, `weekly_report` for weekly mode.
 2. Copy final draft to `{workspace}/final/{date}/{basename}.md`.
 3. Copy decision alongside. Create combined `{workspace}/final/{date}/{basename}.json`.
@@ -437,6 +466,12 @@ verify it exists.
 **This is the ONLY stage that pauses for user input.** All other stages run autonomously.
 
 **Stage timer**: Run `stage_timer.py start` before presenting the prompt. Run `stage_timer.py end` after writing `user_review.json` (or after the user skips). The timer captures wall-clock wait time including user think time — this is expected.
+
+**If the release was blocked** (stage 13 wrote `BLOCKED.md`), present that
+instead: the decision did not pass the pre-release gate, the gate's errors, and
+where the blocked decision is (`final_decision.json`, plus
+`final_decision.pre_gate.json` if a revision was attempted). Then collect
+feedback as below.
 
 Present the completed report to the user and collect feedback:
 

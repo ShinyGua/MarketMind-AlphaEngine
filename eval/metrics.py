@@ -15,7 +15,7 @@ RUN_LOG_PATH = PROJECT_ROOT / "logs" / "run_log.jsonl"
 
 import sys as _sys
 _sys.path.insert(0, str(PROJECT_ROOT / "mcp"))
-from shared.contracts import RELEASE_PASSED, RELEASE_WARNING, RELEASE_FAILED
+from shared.contracts import RELEASE_BLOCKED, RELEASE_PASSED, RELEASE_WARNING, RELEASE_FAILED
 
 
 def load_runs(path: Path) -> list[dict]:
@@ -70,6 +70,10 @@ def pipeline_health(runs: list[dict]) -> dict:
         if r["release_status"] in (RELEASE_PASSED, RELEASE_WARNING)
     )
 
+    # Blocked = the pre-release gate stopped the decision before export: neither
+    # a success nor a crash, so it is counted on its own.
+    blocked = sum(1 for r in has_release if r["release_status"] == RELEASE_BLOCKED)
+
     # Legacy fallback for entries without release_status
     legacy = [r for r in runs if r.get("release_status") is None]
     legacy_ok = sum(1 for r in legacy if r.get("success", r.get("all_graders_pass", False)))
@@ -89,6 +93,8 @@ def pipeline_health(runs: list[dict]) -> dict:
         "strict_success_rate": safe_pct(strict_ok + legacy_ok, total),
         "operational_success_rate": safe_pct(operational_ok + legacy_ok, total),
         "success_rate": safe_pct(strict_ok + legacy_ok, total),  # backward compat
+        "blocked_runs": blocked,
+        "blocked_rate": safe_pct(blocked, total),
         "avg_duration_s": safe_mean(durations),
         "avg_review_iterations": safe_mean(iters),
         "stage_avg_duration": {k: safe_mean(v) for k, v in sorted(stage_totals.items())},

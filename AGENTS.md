@@ -135,7 +135,10 @@ If MCP is not attached, fall back to the local Python servers/modules
   `scripts/chip_evidence_cards.py`) is **DIRECTIONAL** (`usage: "directional"`)
   — the deliberate asymmetry with macro/intraday/trend_regime: volume and chip
   exchange are the reproducible trace of buying/selling force, so chip evidence
-  may carry a stance/vote on its own. Respect per-block `data_quality`.
+  may push a stance/vote — but only fresh (`stale`/`unavailable` blocks and
+  undated chip cards support nothing), and a BUY/SELL resting on chips must also
+  cite independent same-direction evidence (rule K1, enforced before export by
+  the blocking `eval/pre_release_gate.py`).
 - `valuation_summary.role` is `anchor` (US/JP/UK/EU) or `reference` (CN/HK,
   via `valuation.role_by_market`): a reference valuation never appears in
   `final_decision.top_reasons` (decision_risk_grader warns); CN/HK reports lead
