@@ -9,6 +9,8 @@
     .venv/bin/python3 ledger/cli.py score                   # append outcomes for matured horizons
     .venv/bin/python3 ledger/cli.py report                  # preregistered read-out (markdown)
     .venv/bin/python3 ledger/cli.py backfill                # descriptive CSV of pre-ledger decisions
+    .venv/bin/python3 ledger/cli.py backup                  # restic snapshot to RESTIC_REPOSITORY
+    .venv/bin/python3 ledger/cli.py drill                   # restore latest snapshot and verify it
 
 Data root: MM_DATA_ROOT (default ~/MarketMindData), never inside iCloud.
 Exit: 0 ok, 1 refused or failed.
@@ -23,7 +25,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ledger import backfill, report, score, seal, stamp, store  # noqa: E402
+from ledger import backfill, backup, report, score, seal, stamp, store  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -41,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("score")
     sub.add_parser("report")
     sub.add_parser("backfill")
+    sub.add_parser("backup")
+    sub.add_parser("drill")
     args = ap.parse_args(argv)
     try:
         root = store.check_root(store.data_root())
@@ -73,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
             result = backfill.run(REPO / "workspaces", root)
             print(f"ledger: backfill wrote {result['rows']} rows to {result['dir']} "
                   "(provenance unverified; not in the ledger)")
+        elif args.cmd in ("backup", "drill"):
+            result = (backup.backup if args.cmd == "backup" else backup.drill)(root)
+            print(json.dumps(result, indent=2))
+            return 0 if result.get("ok") else 1
     except store.LedgerError as exc:
         print(f"ledger: REFUSED — {exc}", file=sys.stderr)
         return 1
