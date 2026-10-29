@@ -91,7 +91,11 @@ def _check_evidence(ws: Path, date: str, th: dict) -> dict:
 def _check_report(ws: Path, date: str, th: dict) -> dict:
     report = detect_final_report(ws, date)
     if report is None or not report.exists():
-        return {"status": "skipped", "reason": "no final report"}
+        # During the review loop final/ doesn't exist yet — grade the newest draft.
+        drafts = sorted((ws / "drafts" / date).glob("*.md"), key=lambda p: p.stat().st_mtime)
+        report = drafts[-1] if drafts else None
+    if report is None:
+        return {"status": "skipped", "reason": "no final report or draft"}
     text = report.read_text(encoding="utf-8")
     # split into "## Section" blocks
     parts = re.split(r"(?m)^## ", text)

@@ -53,13 +53,13 @@ STRINGS = {
             "investment advice, a recommendation, or an offer to buy or sell any "
             "security. Past performance is not indicative of future results. Users "
             "should conduct their own due diligence."),
-        "sources_list": ("<strong>Sources:</strong> Yahoo Finance, NewsAPI, "
-            "SEC EDGAR, FRED, web search."),
+        "sources_list": ("<strong>Sources:</strong> NASDAQ, SEC EDGAR, FRED, "
+            "NewsAPI, akshare, web search."),
         "verdict": {"cheap": "Cheap", "fair": "Fair", "expensive": "Expensive",
                     "unknown": "—"},
         "fair_value_ref": "Fair Value (ref, non-anchor)",
         "m_1d": "1D", "m_5d": "5D", "m_1m": "1M", "m_3m": "3M", "m_rsi": "RSI(14)",
-        "m_volr": "Vol Ratio", "m_profit": "Chips in Profit",
+        "m_volr": "Vol Ratio (intraday)", "m_profit": "Chips in Profit",
     },
     "ch": {
         "rating": "评级", "confidence": "置信度", "horizon": "时间维度",
@@ -71,13 +71,13 @@ STRINGS = {
         "disclaimer": ("<strong>免责声明：</strong>本报告由 MarketMind-AlphaEngine "
             "自动生成，仅供参考，不构成投资建议、推荐或任何证券买卖要约。过往表现不代表未来收益。"
             "用户应自行研判。"),
-        "sources_list": ("<strong>数据来源：</strong>Yahoo Finance、NewsAPI、"
-            "SEC EDGAR、FRED、网络搜索。"),
+        "sources_list": ("<strong>数据来源：</strong>NASDAQ、SEC EDGAR、FRED、"
+            "NewsAPI、akshare、网络搜索。"),
         "verdict": {"cheap": "低估", "fair": "合理", "expensive": "高估",
                     "unknown": "—"},
         "fair_value_ref": "估值参考（非锚）",
         "m_1d": "1日", "m_5d": "5日", "m_1m": "1月", "m_3m": "3月", "m_rsi": "RSI(14)",
-        "m_volr": "量比", "m_profit": "获利盘",
+        "m_volr": "量比(日内)", "m_profit": "获利盘",
     },
 }
 
@@ -98,21 +98,31 @@ def load_json(path: Path):
         return None
 
 
-def fmt_price(v):
-    return f"${v:,.2f}" if isinstance(v, (int, float)) else "—"
+CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥", "HKD": "HK$", "JPY": "¥",
+                    "GBP": "£", "EUR": "€"}
+
+
+def currency_symbol(profile: dict) -> str:
+    """Listing-currency symbol. Defaults to '$' when the profile is silent."""
+    code = str((profile or {}).get("currency") or "USD").upper()
+    return CURRENCY_SYMBOLS.get(code, "$")
+
+
+def fmt_price(v, sym="$"):
+    return f"{sym}{v:,.2f}" if isinstance(v, (int, float)) else "—"
 
 
 def fmt_pct(v):
     return f"{v:+.2f}%" if isinstance(v, (int, float)) else "—"
 
 
-def fmt_big(v):
+def fmt_big(v, sym="$"):
     if not isinstance(v, (int, float)) or v <= 0:
         return "—"
     for unit, div in (("T", 1e12), ("B", 1e9), ("M", 1e6)):
         if abs(v) >= div:
-            return f"${v/div:.2f}{unit}"
-    return f"${v:,.0f}"
+            return f"{sym}{v/div:.2f}{unit}"
+    return f"{sym}{v:,.0f}"
 
 
 def sign_class(v):
@@ -164,6 +174,7 @@ def main():
         sys.exit(1)
 
     profile = load_json(workspace / "profile" / "company_profile.json") or {}
+    sym = currency_symbol(profile)
     decision = load_json(workspace / "decision" / date / "final_decision.json") or {}
     quant = load_json(workspace / "quant" / date / "quant_summary.json") or {}
     val = load_json(workspace / "valuation" / date / "valuation_summary.json") or {}
@@ -204,11 +215,14 @@ def main():
     if fv is None:
         fv = rng.get("base")
     if fv is not None:
-        fair_value = fmt_price(fv)
+        fair_value = fmt_price(fv, sym)
         low = rng.get("low", rng.get("bear"))
         high = rng.get("high", rng.get("bull"))
         if low is not None and high is not None:
-            fair_value += f" ({fmt_price(low)[1:]}–{fmt_price(high)[1:]})"
+            # strip the symbol from the range endpoints (it is already on the
+            # headline value); len(sym) because it is not always one character.
+            fair_value += (f" ({fmt_price(low, sym)[len(sym):]}"
+                           f"–{fmt_price(high, sym)[len(sym):]})")
         method = val.get("valuation_method")
         if method and method != "none":
             fair_value += f" · {method}"
@@ -236,8 +250,20 @@ def main():
     vol_ratio = (chips.get("volume") or {}).get("volume_ratio")
     profit_ratio = (chips.get("chip_distribution") or {}).get("profit_ratio")
     if isinstance(vol_ratio, (int, float)):
+        # 量比 is an intraday time-weighted measure; the load-bearing volume read
+        # is today's volume vs the 20-day average. Colour the tile on THAT, so a
+        # high intraday ratio can never render as "volume expanded" on its own.
+        vol_ma = (chips.get("volume") or {}).get("vol_ma") or {}
+        vs_20d = None
+        try:
+            ma20 = float(vol_ma.get("20"))
+            last_vol = float(quant.get("latest_volume"))
+            vs_20d = last_vol / ma20 if ma20 > 0 else None
+        except (TypeError, ValueError):
+            vs_20d = None
+        expanded = vs_20d is not None and vs_20d >= 1.5
         metrics.append({"k": S["m_volr"], "v": f"{vol_ratio:.2f}",
-                        "cls": "pos" if vol_ratio >= 1.5 else ""})
+                        "cls": "pos" if expanded else ""})
     if isinstance(profit_ratio, (int, float)):
         metrics.append({"k": S["m_profit"], "v": f"{profit_ratio*100:.0f}%",
                         "cls": sign_class(profit_ratio - 0.5)})
@@ -255,12 +281,12 @@ def main():
         "confidence": (f"{decision.get('confidence'):.2f}"
                        if isinstance(decision.get("confidence"), (int, float)) else "—"),
         "horizon": decision.get("horizon") or "—",
-        "price": fmt_price(price),
+        "price": fmt_price(price, sym),
         "fair_value": fair_value,
         "fair_value_label": fair_value_label,
         "margin_of_safety": (f"{mos*100:+.0f}%" if isinstance(mos, (int, float)) else "—"),
         "mos_class": sign_class(mos),
-        "market_cap": fmt_big(profile.get("market_cap")),
+        "market_cap": fmt_big(profile.get("market_cap"), sym),
         "verdict": verdict,
         "metrics": metrics,
         "body_html": body_html,

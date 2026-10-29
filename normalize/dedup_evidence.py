@@ -82,7 +82,20 @@ def dedupe(cards: list[dict]) -> list[dict]:
     for card in cards:
         cu = canonical_url(card.get("url", ""))
         tk = title_key(card.get("title", ""))
-        key = f"u:{cu}" if cu else (f"t:{tk}" if tk else f"id:{card.get('id')}")
+        # Cluster on canonical URL AND near-identical title, per this module's
+        # docstring and CLAUDE.md ("canonical URL + title"). Keying on URL alone
+        # collapses every distinct fact extracted from one primary document
+        # (e.g. 11 separate findings from a single 205-page filing PDF) into one
+        # card. Cross-desk repeats of the same article still merge, because they
+        # share both the URL and a near-identical title.
+        if cu and tk:
+            key = f"u:{cu}|t:{tk}"
+        elif cu:
+            key = f"u:{cu}"
+        elif tk:
+            key = f"t:{tk}"
+        else:
+            key = f"id:{card.get('id')}"
         if key in by_key:
             kept = _better(by_key[key], card)
             dropped = card if kept is by_key[key] else by_key[key]

@@ -91,7 +91,8 @@ def L(key):
     return LABELS.get(LANG, LABELS['en']).get(key, key)
 
 
-_CJK_FONTS = ['PingFang SC', 'Heiti SC', 'Microsoft YaHei',
+_CJK_FONTS = ['Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC',
+              'PingFang SC', 'Heiti SC', 'Microsoft YaHei',
               'Noto Sans CJK SC', 'Source Han Sans SC',
               'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei']
 

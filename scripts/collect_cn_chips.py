@@ -154,6 +154,14 @@ def build_lhb(ak, code: str, date: str):
     if df is None or df.empty:
         raise ValueError("empty LHB window")
     rows = df[df["代码"].astype(str).str.zfill(6) == code.zfill(6)]
+    # akshare returns the window unsorted, so a bare tail() can drop the most
+    # recent appearances — exactly the ones that carry the signal. Sort first,
+    # then keep the newest 5 in ascending order (oldest → newest), which is the
+    # order downstream card builders assume.
+    if "上榜日" in rows.columns:
+        import pandas as pd
+
+        rows = rows.sort_values("上榜日", key=lambda s: pd.to_datetime(s, errors="coerce"))
     events = []
     for _, r in rows.tail(5).iterrows():
         events.append({

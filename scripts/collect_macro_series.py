@@ -164,8 +164,14 @@ def fetch_fred_csv(series_id: str, lookback_months: int) -> tuple[list, str | No
     except (requests.exceptions.RequestException, OSError) as exc:
         return [], _classify(exc=exc)
 
+    # FRED's maintenance page is served as HTTP 200 text/html; parsing it as CSV
+    # once yielded a bogus "400" HY spread (from a font URL's "300,400").
+    lines = body.splitlines()
+    if not lines or series_id not in lines[0] or "<" in lines[0]:
+        return [], "not_csv"
+
     rows = []
-    for line in body.splitlines()[1:]:  # skip the "observation_date,SERIES" header
+    for line in lines[1:]:  # skip the "observation_date,SERIES" header
         parts = line.split(",")
         if len(parts) < 2:
             continue
@@ -173,6 +179,7 @@ def fetch_fred_csv(series_id: str, lookback_months: int) -> tuple[list, str | No
         if raw in ("", "."):  # FRED gap marker
             continue
         try:
+            datetime.strptime(parts[0].strip(), "%Y-%m-%d")
             rows.append((parts[0].strip(), round(float(raw), 4)))
         except ValueError:
             continue

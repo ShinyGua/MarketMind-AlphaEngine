@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang }}">
+<html lang="{{ 'zh-CN' if lang == 'ch' else 'en' }}" class="lang-{{ lang }}">
 <head>
   <meta charset="utf-8">
   <style>{{ css|safe }}</style>
