@@ -227,6 +227,10 @@ Three types stored as append-only JSONL at `memory/{type}/index.jsonl`:
 
 `memory/retrieval.py` scores by `importance × confidence × recency_decay(days)` and returns top-k — injected before analyst memos (episodic + semantic), report writing (procedural + recent episodic) and review (procedural). Memory supplements, never replaces, current evidence.
 
+## Decision Ledger (`ledger/`)
+
+Outcome scoring needs a record nobody can backdate. `ledger/` keeps one append-only, hash-chained `ledger.jsonl` in `MM_DATA_ROOT` (default `~/MarketMindData`, never inside iCloud). Record 1 is the preregistration (`ledger/protocol_v1.json`: forecast event, 20-session horizon, benchmarks, action tracks, review points; "inconclusive" by default). After the pre-release gate passes, both drivers run `ledger/cli.py seal {workspace} {date}`: issuance time from the code's clock, forecast, both actions, final-round ballots with conviction- and equal-weight tallies, hashes of every dated input, config, skills and code version, plus a run archive. Each record hash gets a free OpenTimestamps receipt (`pending` → `attested` via `ledger/cli.py stamps`). A blocked release is recorded as `gate_block`, never sealed. `ledger/cli.py verify` recomputes the chain. Decisions before the first seal are history only — scored descriptively, never evaluated.
+
 ## Evaluation Layer (`eval/`)
 
 | Grader | Checks |

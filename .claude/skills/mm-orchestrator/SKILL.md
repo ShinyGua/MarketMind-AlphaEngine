@@ -435,14 +435,25 @@ It writes `{workspace}/decision/{date}/pre_release_gate.json` and exits 0
 `risk_overlay` from `actions` and the investor's position — do not edit
 `final_decision.json` after it passes (its sha256 is recorded).
 
-- **Passed** → proceed.
+- **Passed** → seal the decision in the ledger (outside the repo, in
+  `MM_DATA_ROOT`, default `~/MarketMindData`):
+  ```bash
+  .venv/bin/python3 ledger/cli.py seal {workspace} {date}
+  ```
+  It records the issuance time from its own clock, the forecast, both actions,
+  final-round ballots and hashes of every input, then requests an
+  OpenTimestamps receipt. A non-zero exit does **not** block the release, but
+  log it to `errors[]` ("ledger seal failed") — an unsealed decision can never
+  be scored. Then proceed.
 - **Blocked** → copy `final_decision.json` to `final_decision.pre_gate.json`,
   dispatch **mm-decision-maker** with args: `{workspace} {date} revise` (it reads
   the gate errors and rewrites the decision, adding a `gate_revision` block), then
   run the gate again.
 - **Still blocked** → the release is **blocked**: call
   `mcp__mm-workspace__update_status` with `error: "pre_release_gate blocked: <the
-  gate's error checks>"`, and continue the pipeline — export writes `BLOCKED.md`
+  gate's error checks>"`, record it with
+  `.venv/bin/python3 ledger/cli.py block {workspace} {date}`, and continue the
+  pipeline — export writes `BLOCKED.md`
   instead of the report, and user_review tells the user why. A blocked release
   is a completed run, not a crash.
 

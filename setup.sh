@@ -43,6 +43,9 @@ pip install -q pyyaml pandas ta fpdf2 markdown flask "mcp<2" pydantic pytest wea
 # (换手率/主力资金/龙虎榜/北向/融资/股东户数/解禁). Without it CN/HK prices
 # are unavailable and collect_cn_chips.py degrades to a stub.
 pip install -q akshare || echo "warn: akshare install failed — CN/HK prices and chip flows will degrade"
+# OpenTimestamps client: free public-calendar receipts for ledger record hashes
+# (only hashes leave the machine). Without it, seals record stamps as not_submitted.
+pip install -q opentimestamps-client || echo "warn: opentimestamps-client install failed — ledger stamps will wait"
 
 echo ""
 echo "MarketMind environment ready."

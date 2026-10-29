@@ -414,6 +414,7 @@ def gate_decision(ctx) -> str:
               "run mm-decision-maker revise once, gate again")
     status = _gate(ctx)
     if status == "passed":
+        _seal(ctx)
         return status
     dec = contracts.decision_path(ctx.ws, ctx.date)
     if dec.exists():
@@ -422,12 +423,23 @@ def gate_decision(ctx) -> str:
     log("pre-release gate blocked the decision; one revision")
     codex_skill(ctx, "mm-decision-maker", "revise", critical=False)
     status = _gate(ctx)
-    if status != "passed":
+    if status == "passed":
+        _seal(ctx)
+    else:
         gate = _read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}
         checks = sorted({e.get("check", "?") for e in gate.get("errors", [])}) or ["unreadable"]
         add_error(ctx, f"pre_release_gate blocked: {', '.join(checks)}")
         log(f"release BLOCKED by the pre-release gate ({', '.join(checks)})")
+        det(ctx, "ledger/cli.py", "block", ctx.ws, ctx.date, critical=False)
     return status
+
+
+def _seal(ctx) -> None:
+    """Seal the passed decision in the ledger. Never blocks the release, but a
+    failure is recorded loudly: an unsealed decision cannot be scored."""
+    if det(ctx, "ledger/cli.py", "seal", ctx.ws, ctx.date, critical=False) != 0:
+        add_error(ctx, "ledger seal failed: decision released but NOT sealed (run `ledger/cli.py init`?)")
+        log("WARNING: ledger seal failed — the decision is not in the ledger")
 
 
 def _write_blocked(ctx) -> None:

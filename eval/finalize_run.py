@@ -140,6 +140,13 @@ def finalize(workspace: str, date: str) -> dict:
     release_gate = load_json(rg_path)
     release_status = release_gate.get("release_status") if release_gate else None
 
+    # Ledger receipt, written by ledger/cli.py seal when the gate passed.
+    receipt_path = ws / "decision" / date / "ledger_receipt.json"
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        receipt = None
+
     # Read regression flag if present
     rf_path = _regression_flag_path(ws, date)
     regression_flag = load_json(rf_path)
@@ -179,6 +186,9 @@ def finalize(workspace: str, date: str) -> dict:
         "graders": graders,
         "all_graders_pass": all_graders_pass,
         "release_status": release_status,
+        "sealed": receipt is not None,
+        "ledger_seq": (receipt or {}).get("seq"),
+        "decision_id": (receipt or {}).get("decision_id"),
         "regression": regression_flag is not None,
         "regression_details": regression_flag,
         "user_review": user_review_summary,
