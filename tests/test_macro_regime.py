@@ -220,3 +220,20 @@ def test_malformed_threshold_override_keeps_defaults(tmp_path):
            / "indicators" / "macro_regime.json")
     mr.compute(ws, DATE)
     assert out.exists()  # artifact still written despite the malformed config
+
+
+def test_inflation_yoy_matches_the_same_month_across_a_missing_one():
+    # FRED skipped 2025-10 (shutdown): the 13th row back is a 13-month base
+    dates = [f"2025-{m:02d}-01" for m in (7, 8, 9, 11, 12)] + \
+            [f"2026-{m:02d}-01" for m in range(1, 10)]
+    cpi = [322.169, 323.291, 324.245, 325.063, 326.031, 326.588, 327.46, 330.293,
+           332.407, 333.979, 332.568, 332.813, 334.131, 336.298]
+    out = mr.inflation_trend(cpi, cpi, TH["inflation_band"], dates, dates)
+    assert out["cpi_yoy"] == round(336.298 / 324.245 - 1, 4)           # Sep vs Sep: 3.7%
+    assert out["cpi_3m_annualized"] == round((336.298 / 332.568) ** 4 - 1, 4)  # vs Jun
+
+
+def test_inflation_missing_base_month_is_none_not_a_neighbour():
+    dates = [f"2025-{m:02d}-01" for m in (8, 10, 11, 12)] + [f"2026-{m:02d}-01" for m in range(1, 10)]
+    out = mr.inflation_trend([300.0] * 13, [300.0] * 13, TH["inflation_band"], dates, dates)
+    assert out["cpi_yoy"] is None                                       # 2025-09 absent

@@ -85,15 +85,40 @@ def curve_slope(short_last: float | None, long_last: float | None, flat_band: fl
     return {"slope_2s10s": slope, "label": label}
 
 
-def inflation_trend(cpi: list[float], core: list[float], band: float) -> dict:
-    """Monthly index levels; needs >= 13 obs for YoY."""
+def _months_back(values: list[float], dates: list[str] | None, months: int) -> float | None:
+    """The observation `months` calendar months before the last one.
+
+    Matched by date when dates are given: FRED never published October 2025 CPI
+    (the shutdown), so the 13th row back is August 2025 and a positional YoY
+    measured 13 months (4.0% instead of 3.7%). A missing base month gives None.
+    """
+    if not values:
+        return None
+    if dates is None:
+        return values[-months - 1] if len(values) > months else None
+    y, m = int(dates[-1][:4]), int(dates[-1][5:7])
+    total = y * 12 + (m - 1) - months
+    target = f"{total // 12:04d}-{total % 12 + 1:02d}"
+    for d, v in zip(reversed(dates), reversed(values)):
+        if d[:7] == target:
+            return v
+    return None
+
+
+def inflation_trend(cpi: list[float], core: list[float], band: float,
+                    cpi_dates: list[str] | None = None,
+                    core_dates: list[str] | None = None) -> dict:
+    """Monthly index levels: YoY against the same month a year earlier, 3m against three months earlier."""
     out = {"cpi_yoy": None, "core_cpi_yoy": None, "cpi_3m_annualized": None, "direction": None}
-    if len(cpi) >= 13 and cpi[-13] > 0:
-        out["cpi_yoy"] = round(cpi[-1] / cpi[-13] - 1.0, 4)
-    if len(core) >= 13 and core[-13] > 0:
-        out["core_cpi_yoy"] = round(core[-1] / core[-13] - 1.0, 4)
-    if len(cpi) >= 4 and cpi[-4] > 0:
-        out["cpi_3m_annualized"] = round((cpi[-1] / cpi[-4]) ** 4 - 1.0, 4)
+    base = _months_back(cpi, cpi_dates, 12)
+    if base is not None and base > 0:
+        out["cpi_yoy"] = round(cpi[-1] / base - 1.0, 4)
+    base = _months_back(core, core_dates, 12)
+    if base is not None and base > 0:
+        out["core_cpi_yoy"] = round(core[-1] / base - 1.0, 4)
+    base = _months_back(cpi, cpi_dates, 3)
+    if base is not None and base > 0:
+        out["cpi_3m_annualized"] = round((cpi[-1] / base) ** 4 - 1.0, 4)
     if out["cpi_yoy"] is not None and out["cpi_3m_annualized"] is not None:
         gap = out["cpi_3m_annualized"] - out["cpi_yoy"]
         out["direction"] = "stable" if abs(gap) < band else ("heating" if gap > 0 else "cooling")
@@ -259,8 +284,11 @@ def compute(workspace: Path, date: str) -> dict:
     except (OSError, ValueError):
         sources = {"series": {}, "inputs_missing": []}
 
+    dates: dict[str, list[str]] = {}
+
     def load(sid: str, pct_to_decimal: bool = False) -> tuple[list[float], dict]:
         rows = read_series(macro_dir / f"{sid}.csv")
+        dates[sid] = [d for d, _ in rows]
         values = [v / 100.0 if pct_to_decimal else v for _, v in rows]
         meta = {"source": (sources.get("series", {}).get(sid) or {}).get("source", "missing"),
                 "as_of": rows[-1][0] if rows else None,
@@ -276,6 +304,8 @@ def compute(workspace: Path, date: str) -> dict:
     usd, musd = load("DTWEXBGS")
     hy, mhy = load("BAMLH0A0HYM2", pct_to_decimal=True)
 
+    inflation = inflation_trend(cpi, core, th["inflation_band"],
+                                dates["CPIAUCSL"], dates["CPILFESL"])
     regime = {
         "schema_version": 1,
         "date": date,
@@ -286,8 +316,8 @@ def compute(workspace: Path, date: str) -> dict:
                   "short_leg": m2["source"], "data_quality": (
                       "missing" if not (us2y and us10y)
                       else ("proxy" if "proxy" in (m2["data_quality"], m10["data_quality"]) else "fred"))},
-        "inflation": {**inflation_trend(cpi, core, th["inflation_band"]),
-                      "data_quality": mcpi["data_quality"] if len(cpi) >= 13 else "missing"},
+        "inflation": {**inflation, "data_quality": (
+                          mcpi["data_quality"] if inflation["cpi_yoy"] is not None else "missing")},
         "policy": {**policy_stance(ff, th["policy_band"]), "data_quality": mff["data_quality"]},
         "volatility": {**vix_percentile(vix, th["vix_percentile_window"], th["vix_labels"]),
                        "source": mvix["source"], "data_quality": (
