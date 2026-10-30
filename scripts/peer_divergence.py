@@ -132,6 +132,23 @@ def classify_path(returns: dict, corr_bench, close, bench_r60=None) -> str:
         if (r60 or 0) < 0 else "independent_up"
 
 
+def rank_5d(members: list[dict], target: str) -> dict | None:
+    """The target's 5-session return rank, 1 = best, among itself and its peers.
+
+    The denominator is stated (``of`` counts the target): a bare "rank 8" with
+    "8 peers" read as "last of 8" when HOOD was 8th of 9 names (2026-10-29).
+    """
+    scored = [(m["ticker"], m["return_5d_pct"]) for m in members
+              if m.get("return_5d_pct") is not None]
+    mine = next((r for t, r in scored if t == target), None)
+    if mine is None or len(scored) < 2:
+        return None
+    return {"rank": 1 + sum(1 for _t, r in scored if r > mine), "of": len(scored),
+            "target_return_pct": mine,
+            "convention": "1 = best 5-session return; 'of' counts the target and every peer with prices",
+            "worse": sorted(t for t, r in scored if r < mine)}
+
+
 def run(workspace: Path, date: str) -> dict:
     ws = Path(workspace)
     prices = ws / "raw" / date / "prices"
@@ -178,6 +195,7 @@ def run(workspace: Path, date: str) -> dict:
         members.append({
             **{k: v for k, v in entry.items() if v is not None or k in ("ticker", "name")},
             "returns_pct": returns,
+            "return_5d_pct": _ret(close, 5),
             "corr_benchmark_60d": corr_bench,
             "corr_target_60d": corr_target,
             "path_class": classify_path(returns, corr_bench, close, bench_r60),
@@ -198,6 +216,9 @@ def run(workspace: Path, date: str) -> dict:
         artifact["leader_60d"] = {"ticker": r60s[0][0], "return_pct": r60s[0][1]}
         artifact["laggard_60d"] = {"ticker": r60s[-1][0], "return_pct": r60s[-1][1]}
         artifact["dispersion_60d_pp"] = round(r60s[0][1] - r60s[-1][1], 2)
+    rank = rank_5d(members, target)
+    if rank:
+        artifact["rank_5d"] = rank
     if not artifact["available"]:
         artifact["reason"] = "fewer than 3 members with usable price history"
 

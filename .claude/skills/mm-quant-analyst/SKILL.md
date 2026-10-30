@@ -96,7 +96,12 @@ Compare company returns to:
 - Each peer
 
 Compute excess return over each benchmark for 5d and 1m windows.
-Rank the company among its peers for the 5d window.
+Rank the company among its peers for the 5d window. Copy `rank_5d` from
+`{workspace}/quant/{date}/peer_divergence.json` when present: `peer_rank_5d` =
+`rank_5d.rank` (1 = best) and `peer_rank_5d_of` = `rank_5d.of`, which **counts the
+company itself** (8 peers with prices → `of: 9`). Without that file, compute the same
+way. Never report a rank without its `of`: "rank 8" next to "8 peers" was written up
+as "last of 8" when the company was 8th of 9.
 
 Save to `{workspace}/quant/{date}/relative_strength.csv`.
 
@@ -185,7 +190,8 @@ The `quant_summary.json` should report values from the **latest row only** — t
   "relative_strength": {
     "vs_primary_index_5d": 0.0,
     "vs_sector_5d": 0.0,
-    "peer_rank_5d": 0
+    "peer_rank_5d": 0,
+    "peer_rank_5d_of": 0
   },
   "flags": [],
   "summary": "<1-2 sentence summary in the language from resolved_config.language>"
