@@ -53,7 +53,10 @@ REQUEST_DELAY_S = 0.15  # SEC fair-access: <10 req/s
 
 # First tag that the filer actually reports wins.
 TAGS = {
-    "revenue": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+    # Banks and brokers report the total as net revenue after interest expense;
+    # without it SOFI's "Revenues" sub-line (~$150M a quarter) won as the total.
+    "revenue": ["RevenuesNetOfInterestExpense",
+                "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
                 "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueNet"],
     "ebit": ["OperatingIncomeLoss"],
     "pretax_income": [
@@ -61,7 +64,10 @@ TAGS = {
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic"],
     "tax_provision": ["IncomeTaxExpenseBenefit"],
-    "net_income": ["NetIncomeLoss", "ProfitLoss"],
+    # ProfitLoss includes non-controlling interests: IBKR stopped tagging
+    # NetIncomeLoss in 2013, so ProfitLoss ($4.9B, 77% of it IBG Holdings') beat
+    # the $1.1B that belongs to the Class A shares the market cap counts.
+    "net_income": ["NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities",
                             "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
     "capex": ["PaymentsToAcquirePropertyPlantAndEquipment",
@@ -149,12 +155,28 @@ def resolve_cik(ticker: str) -> str | None:
     return None
 
 
+# Facts are read only from the company's own financial statements. Proxy
+# statements (DEF 14A pay-versus-performance tables), registration statements and
+# 8-Ks carry the same us-gaap tags and are filed *after* the 10-K, so as the
+# latest-filed value they override it: SCHW's 2026 proxy tagged FY2025 net income
+# as 8,852,000 (thousands dropped), which made the derived Q4 -$6.38B and TTM net
+# income $1.25B instead of ~$10B. An entry without a form (test fixtures) is kept.
+STATEMENT_FORMS = {"10-K", "10-K/A", "10-Q", "10-Q/A", "10-KT", "10-KT/A",
+                   "10-QT", "10-QT/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+
+
+def _from_statement(entry: dict) -> bool:
+    form = entry.get("form")
+    return form is None or form in STATEMENT_FORMS
+
+
 def _usd_entries(facts: dict, name: str) -> list[dict] | None:
     node = facts.get("facts", {}).get("us-gaap", {}).get(name)
     if not node:
         return None
     units = node.get("units", {})
-    return units.get("USD") or next((v for k, v in units.items() if k.startswith("USD")), None)
+    entries = units.get("USD") or next((v for k, v in units.items() if k.startswith("USD")), None)
+    return [e for e in entries or [] if _from_statement(e)] or None
 
 
 def _candidate_series(facts: dict, names: list[str]) -> list[list[dict]]:
@@ -208,7 +230,7 @@ def _annual(facts: dict, names: list[str], instant: bool = False) -> dict[str, f
 
 
 def _latest(facts: dict, names: list[str], instant: bool = True) -> float | None:
-    """Most recent balance-sheet (instant) value from ANY form.
+    """Most recent balance-sheet (instant) value from any statement form.
 
     Deliberately not restricted to 10-K: a 10-Q balance sheet is up to three
     quarters fresher, and stale cash/debt/equity would distort enterprise value
@@ -347,17 +369,49 @@ def _ttm(facts: dict, names: list[str], asof: str | None = None) -> float | None
     return None
 
 
-def _shares_outstanding(facts: dict) -> float | None:
-    dei = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding")
-    if not dei:
-        return None
+def _latest_share_count(entries: list[dict], quarterly: bool) -> tuple[str, float | None]:
     best_end, best_val = "", None
-    for entries in dei.get("units", {}).values():
-        for e in entries:
-            end = e.get("end") or ""
-            if e.get("val") is not None and end > best_end:
-                best_end, best_val = end, float(e["val"])
-    return best_val
+    for e in entries:
+        if not _from_statement(e) or e.get("val") is None:
+            continue
+        if quarterly and not (e.get("start") and 80 <= (_period_days(e["start"], e["end"]) or 0) <= 100):
+            continue
+        end = e.get("end") or ""
+        if end > best_end:
+            best_end, best_val = end, float(e["val"])
+    return best_end, best_val
+
+
+def _shares_outstanding(facts: dict) -> tuple[float | None, str | None]:
+    """(share count, basis). The cover-page count first; else the latest weighted average.
+
+    Companies with more than one share class (HOOD, COIN, XYZ, DKNG) tag the
+    cover-page count per class, and companyfacts drops per-class facts, so the
+    cover count is absent. The latest quarter's weighted-average basic shares
+    (the EPS denominator) is the fallback: it covers every economic class and
+    leaves out non-economic ones such as DKNG's Class B. A cover count more than
+    a year older than that average is stale and also loses to it.
+    """
+    f = facts.get("facts", {})
+    cover_end, cover = "", None
+    dei = f.get("dei", {}).get("EntityCommonStockSharesOutstanding")
+    for entries in (dei or {}).get("units", {}).values():
+        end, val = _latest_share_count(entries, quarterly=False)
+        if val is not None and end > cover_end:
+            cover_end, cover = end, val
+    avg_end, avg, avg_tag = "", None, None
+    for tag in ("WeightedAverageNumberOfSharesOutstandingBasic",
+                "WeightedAverageNumberOfDilutedSharesOutstanding"):
+        entries = (f.get("us-gaap", {}).get(tag) or {}).get("units", {}).get("shares") or []
+        end, val = _latest_share_count(entries, quarterly=True)
+        if val:
+            avg_end, avg, avg_tag = end, val, tag
+            break
+    if cover and not (avg and (_period_days(cover_end, avg_end) or 0) > 365):
+        return cover, "dei:EntityCommonStockSharesOutstanding"
+    if avg:
+        return avg, f"us-gaap:{avg_tag} (quarter ending {avg_end})"
+    return None, None
 
 
 def _price_series(symbol: str, end: str | None, months: int = 14):
@@ -468,7 +522,7 @@ def build(ticker: str, end: str | None = None, with_beta: bool = True) -> dict:
     total_debt = sum(bal.get(k) or 0 for k in ("lt_debt", "st_debt", "lt_lease", "st_lease")) \
         or bal.get("lt_debt")
 
-    shares = _shares_outstanding(facts)
+    shares, shares_basis = _shares_outstanding(facts)
     inputs_missing = []
 
     price_rows = _price_series(ticker, end)
@@ -599,6 +653,7 @@ def build(ticker: str, end: str | None = None, with_beta: bool = True) -> dict:
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "inputs_missing": sorted(set(inputs_missing)),
             "metrics_basis": "ttm" if not basis_stale else "mixed",
+            "shares_basis": shares_basis,
             "fiscal_year_fallback": sorted(set(basis_stale)),
             "note": ("Annual statements from 10-K XBRL facts; headline metrics are TTM "
                      "(last 4 quarters, unfiled Q4 derived from the annual). Market "
