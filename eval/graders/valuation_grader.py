@@ -270,6 +270,24 @@ def grade(workspace: str, date: str) -> dict:
             f"{sorted(comps_anchors)} — 'cheap' rests on a non-comps (e.g. divergent "
             f"DCF) component, not the reliable anchor")
 
+    # A comps candidate may anchor fair value only on a real peer sample: HOOD's
+    # "cheap" (fair value 285) rested on one peer's P/E. Mirrors the engine's
+    # comps_min_peers guard for summaries written before it or edited by hand.
+    comps_tbl = summary.get("comps") or {}
+    sources = {"comps_earnings": ("forward_pe", "trailing_pe", "ev_to_ebitda"),
+               "comps_revenue": ("ev_to_revenue",)}
+    for c in candidates:
+        multiples = sources.get(str(c.get("method")))
+        if not (c.get("included") and multiples):
+            continue
+        ns = [(comps_tbl.get(m) or {}).get("n") for m in multiples
+              if (comps_tbl.get(m) or {}).get("median") is not None]
+        ns = [n for n in ns if isinstance(n, int)]
+        if ns and max(ns) < 3:
+            result["warnings"].append(
+                f"{c['method']} anchors fair value on a peer median of n={max(ns)} — "
+                f"fewer than 3 peers is one company's multiple, not a market anchor")
+
     result["pass"] = hard_ok
     if hard_ok:
         result["details"].append(

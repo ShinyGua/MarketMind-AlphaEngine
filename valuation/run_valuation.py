@@ -75,6 +75,8 @@ _DEFAULTS = {
     # cap × comps blended, cap the DCF weight and downgrade its confidence. None = off.
     "dcf_comps_divergence_cap": None,
     "dcf_comps_divergence_weight": 0.35,
+    # fewest usable peer values a comps median needs before it may anchor fair value
+    "comps_min_peers": 3,
     # deterministic, fundamentals-driven growth selection (select_growth)
     "cagr_years": 3,                 # revenue-CAGR window
     "growth_divergence_ratio": 2.0,  # CAGR vs trailing ratio (both positive) → downgrade
@@ -660,8 +662,12 @@ def _select_fair_value(dcf_block, implied, price, cfg):
                          if _positive((implied or {}).get(k)))
     earnings_conf = "medium" if earnings_paths >= 2 else "low"
     earnings_reason = None
+    thin = (implied or {}).get("thin_multiples") or {}
     if not _positive(earnings_value):
         earnings_reason = "not available"
+        if thin:
+            earnings_reason += " (too few peers: " + ", ".join(
+                f"{m} n={n}" for m, n in sorted(thin.items())) + ")"
     elif earnings_paths < 2:
         earnings_reason = ("single-multiple anchor (only one of P/E / EV-EBITDA "
                            "available) — fragile")
@@ -825,7 +831,8 @@ def main():
         comps_table = comps_mod.build_comps(ticker, metrics,
                                             [{"ticker": p["ticker"], "metrics": p["metrics"]}
                                              for p in peers])
-        implied = comps_mod.implied_value_per_share(metrics, comps_table["benchmarks"])
+        implied = comps_mod.implied_value_per_share(
+            metrics, comps_table["benchmarks"], min_peers=int(cfg.get("comps_min_peers") or 1))
     else:
         inputs_missing.append("peer_fundamentals")
 

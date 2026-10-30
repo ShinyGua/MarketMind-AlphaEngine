@@ -236,6 +236,7 @@ valuation:
   # candidate and as the upper tail of fair_value_range (its bull scenario).
   dcf_comps_divergence_cap: 2.0     # null to disable; DCF > 2.0× comps → excluded
   dcf_comps_divergence_weight: 0.35 # DEPRECATED/legacy: ignored under the exclude path
+  comps_min_peers: 3               # a comps median from fewer usable peers never anchors fair value
   # --- deterministic, fundamentals-driven growth selection (select_growth) ---
   cagr_years: 3                   # revenue-CAGR window for growth selection
   growth_divergence_ratio: 2.0    # CAGR vs trailing ratio (both positive) → confidence downgrade
