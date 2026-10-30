@@ -53,32 +53,9 @@ Output: "Resuming {TICKER} pipeline from {next_stage}..."
 **If `stage != "completed"` and `run_date` is a previous day:**
 Auto-reset: set `stages_completed: []`, `stage: "initialized"`, `run_date: "{today}"`. Output: "Previous run was from {run_date}. Starting fresh for today..."
 
-### 3. Launch Background Progress Monitor
+### 3. Progress Reporting
 
-**This step is MANDATORY. Do NOT skip it. Do NOT proceed to Step 4 until the monitor launch is attempted.**
-
-Launch the **mm-progress-monitor** as a background agent:
-
-```
-Agent tool:
-  description: "Pipeline progress monitor"
-  prompt: "Read and follow .claude/skills/mm-progress-monitor/SKILL.md for workspace {WORKSPACE_PATH}"
-  run_in_background: true
-```
-
-**After launching the monitor**, set `progress_mode` in `status.json` via the MCP tool:
-
-```
-mcp__mm-workspace__update_status with:
-  ticker: {TICKER}
-  progress_mode: "monitor"
-```
-
-The monitor reads `status.json` every 5 seconds and updates the TodoWrite checklist. It runs independently and does not block the pipeline. **The monitor is the sole TodoWrite owner in this mode.**
-
-**If the Agent tool call fails** (monitor does not launch):
-
-Set `progress_mode` to `"orchestrator"` instead:
+You, the orchestrator, own the TodoWrite checklist. Set the mode once:
 
 ```
 mcp__mm-workspace__update_status with:
@@ -86,7 +63,10 @@ mcp__mm-workspace__update_status with:
   progress_mode: "orchestrator"
 ```
 
-In this fallback mode, the orchestrator itself will write TodoWrite after each stage transition. The user must always see progress regardless of whether the monitor is running.
+Do **not** launch `mm-progress-monitor`. Its loop (read status → TodoWrite → `sleep 5`)
+cost one model call every ~5 seconds for the whole run, foreground `sleep` is blocked
+in current Claude Code, and a background agent's TodoWrite list is its own, not the
+checklist the user sees. The HOOD run of 2026-10-29 skipped it for these reasons.
 
 ### 4. Execute Pipeline Directly
 
@@ -101,7 +81,7 @@ In this fallback mode, the orchestrator itself will write TodoWrite after each s
 
 **You are now the orchestrator. Start executing stages immediately. Do not delegate to another tool or skill — do it yourself right here.**
 
-**Note:** The progress monitor (or orchestrator fallback) handles TodoWrite updates. Do NOT call TodoWrite yourself in this step unless `progress_mode` is `"orchestrator"` — in that case, follow the orchestrator SKILL.md instructions for self-reporting.
+**Note:** Report progress with TodoWrite after each stage, as the orchestrator SKILL.md describes.
 
 ### 5. Completion
 
@@ -117,6 +97,10 @@ Pipeline complete for {TICKER} ({date})
   PDF:        {workspace}/exports/{date}/pdf/report.pdf
   Decision:   {workspace}/decision/{date}/final_decision.json
   Release:    {release_status}
+  Usage:      {output} output / {cache_read} cache-read / {cache_write} cache-write / {input} input tokens, {requests} requests
 ```
+
+(`Usage` comes from `totals_attributed` in `eval/{date}/usage.json`. The byte-proxy
+`cost_result.json` is not the run's tokens or cost; never report it as such.)
 
 (Use `daily_report.md` or `weekly_report.md` based on `resolved_config.run_mode`)

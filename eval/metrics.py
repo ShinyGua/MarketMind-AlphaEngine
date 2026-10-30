@@ -186,10 +186,17 @@ def cost_analytics(runs: list[dict]) -> dict:
         if isinstance(c, (int, float)):
             costs.append(float(c))
 
+    # API-reported usage (eval/usage_telemetry.py -> run_log usage_tokens): the
+    # real token counts; the byte-proxy figures above are not spend.
+    usage = [r["usage_tokens"] for r in runs if isinstance(r.get("usage_tokens"), dict)]
+    actual = {f"avg_{k}_tokens": safe_mean([u.get(k) or 0 for u in usage])
+              for k in ("output", "cache_read", "cache_write", "input")}
     return {
         "avg_tokens_per_run": safe_mean(tokens),
         "avg_cost_per_run": safe_mean(costs),
         "total_cost": round(sum(costs), 4) if costs else 0.0,
+        "runs_with_usage": len(usage),
+        **actual,
     }
 
 
@@ -254,11 +261,20 @@ def format_markdown(m: dict) -> str:
     lines.append(_md_table(["Metric", "Value"], da_rows))
 
     lines.append("\n## Cost Analytics\n")
-    lines.append(_md_table(["Metric", "Value"], [
-        ["Avg tokens/run", f"{ca['avg_tokens_per_run']:.0f}"],
+    rows = []
+    if ca.get("runs_with_usage"):
+        n = ca["runs_with_usage"]
+        rows += [[f"Avg {label} tokens/run (API-reported, {n} run(s))", f"{ca[key]:.0f}"]
+                 for label, key in (("output", "avg_output_tokens"),
+                                    ("cache-read", "avg_cache_read_tokens"),
+                                    ("cache-write", "avg_cache_write_tokens"),
+                                    ("input", "avg_input_tokens"))]
+    rows += [
+        ["Avg byte-proxy tokens/run (not billing)", f"{ca['avg_tokens_per_run']:.0f}"],
         ["Avg byte-proxy 'cost'/run ($, not billing)", f"{ca['avg_cost_per_run']:.4f}"],
         ["Total byte-proxy 'cost' ($, not billing)", f"{ca['total_cost']:.4f}"],
-    ]))
+    ]
+    lines.append(_md_table(["Metric", "Value"], rows))
 
     return "\n".join(lines)
 

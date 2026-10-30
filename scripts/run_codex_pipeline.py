@@ -545,9 +545,10 @@ def st_reflect(ctx):
     # sealed decision whose horizon has matured (all tickers, not just this one).
     det(ctx, "ledger/cli.py", "stamps", critical=False)
     det(ctx, "ledger/cli.py", "score", critical=False)
-    det(ctx, "eval/usage_telemetry.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)
     codex_skill(ctx, "mm-memory-writer", critical=False)
+    # usage last, so the memory writer's tokens are counted
+    det(ctx, "eval/usage_telemetry.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/finalize_run.py", ctx.ws, ctx.date, critical=False)
 
 

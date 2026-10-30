@@ -78,3 +78,24 @@ def test_codex_streams_both_event_shapes_and_unparsed(tmp_path):
     r = ut.collect_codex(ws, DATE)
     assert r["by_stage"]["draft"]["cache_read"] == 60 and r["by_stage"]["decide"]["thinking"] == 3
     assert r["unparsed_codex_files"] == ["003_mm-x.jsonl"]
+
+
+def test_window_bound_includes_requests_within_its_last_second(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join((_assistant("r1", 1, 2, ts="2026-10-30T06:13:12.500Z"),
+                               _assistant("r2", 1, 2, ts="2026-10-30T06:13:13.000Z"))),
+                    encoding="utf-8")
+    keys = [k for k, _m, _u in ut._transcript_requests(path, ("2026-10-30T03:45:38", "2026-10-30T06:13:12"))]
+    assert keys == ["r1"]
+
+
+def test_metrics_shows_api_reported_usage_next_to_the_proxy():
+    spec = importlib.util.spec_from_file_location("metrics", ROOT / "eval" / "metrics.py")
+    metrics = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(metrics)
+    runs = [{"graders": {"cost": {"estimated_total_tokens": 1592349, "estimated_cost_usd": 12.23}},
+             "usage_tokens": {"output": 1152903, "cache_read": 95945903, "cache_write": 4522785,
+                              "input": 1778}}]
+    ca = metrics.cost_analytics(runs)
+    assert ca["runs_with_usage"] == 1 and ca["avg_cache_read_tokens"] == 95945903
+    assert "cache-read tokens/run (API-reported, 1 run(s))" in metrics.format_markdown(metrics.compute_all(runs))

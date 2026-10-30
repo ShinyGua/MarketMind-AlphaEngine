@@ -72,7 +72,8 @@ def _transcript_requests(path: Path, window: tuple[str, str] | None = None):
             continue
         if ev.get("type") != "assistant":
             continue
-        if window and not (window[0] <= str(ev.get("timestamp", "")) <= window[1]):
+        # compare to the second: "06:13:12.5Z" sorts after a bound of "06:13:12"
+        if window and not (window[0] <= str(ev.get("timestamp", ""))[:19] <= window[1]):
             continue
         msg = ev.get("message") or {}
         usage = msg.get("usage")

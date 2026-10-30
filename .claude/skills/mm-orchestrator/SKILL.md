@@ -58,11 +58,9 @@ STAGES = [
 
 **Execute this protocol exactly. Do not deviate.**
 
-**Progress reporting is controlled by `progress_mode` in `status.json`:**
+**Progress reporting:**
 
-- **`progress_mode: "monitor"`** (default when launched via `/mm:run`): A background `mm-progress-monitor` agent is watching `status.json` and updating the TodoWrite checklist. You do NOT need to call TodoWrite yourself — just update `status.json` via MCP and the monitor handles the display.
-
-- **`progress_mode: "orchestrator"`** (fallback when monitor failed to launch, or when invoked directly without `/mm:run`): You ARE the TodoWrite owner. After completing each stage, call TodoWrite yourself with all 15 stages, marking completed/in_progress/pending accordingly. Use the same stage list and labels as `mm-progress-monitor`:
+- **You are the TodoWrite owner** (`progress_mode: "orchestrator"`; a `"monitor"` value left in an older `status.json` is treated the same — the background monitor is retired). After completing each stage, call TodoWrite yourself with all 15 stages, marking completed/in_progress/pending accordingly, with these labels:
 
 ```
 STAGE_LABELS = {
@@ -84,7 +82,6 @@ STAGE_LABELS = {
 }
 ```
 
-- **If `progress_mode` is not set in `status.json`**: Assume `"orchestrator"` mode (safe fallback — always show progress).
 
 ### Date Handling
 
@@ -261,7 +258,8 @@ classifier** (both non-critical):
 Peer divergence writes `{workspace}/quant/{date}/peer_divergence.json` — per-peer
 20/60/120/250d returns, benchmark/target correlations, and a path class
 (`follows_sector` / `independent_up` / `independent_down` / `basing` /
-`launched`) plus cohort dispersion and the current leader.
+`launched`) plus cohort dispersion, the current leader, and `rank_5d` (the
+company's 5-session rank, 1 = best, with `of` counting the company itself).
 This writes `{workspace}/quant/{date}/intraday_timing.json` (1h/4h RSI/MACD + swing
 levels). **Timing-only contract**: it frames staged entry/exit price zones and the
 risk overlay downstream — never a reason to flip a vote or change conviction.
@@ -561,8 +559,6 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 # ledger upkeep: upgrade pending timestamp receipts, score matured horizons (all tickers)
 .venv/bin/python3 ledger/cli.py stamps
 .venv/bin/python3 ledger/cli.py score
-# actual token usage by stage/skill from the subagent transcripts (cost_tracker is a byte proxy)
-.venv/bin/python3 eval/usage_telemetry.py {workspace} {date}
 ```
 
 The release gate script reads all grader results and deterministically produces:
@@ -592,6 +588,9 @@ Update status.json: append "reflect" to stages_completed.
 **IMPORTANT**: This step runs AFTER `stage_timer.py end {workspace} reflect true`, so that the run log captures complete reflect timing. Do NOT call finalize_run.py inside the reflect stage timer window.
 
 ```bash
+# actual token usage by stage/skill from the transcripts — run last, so the
+# memory writer is counted (cost_tracker is a byte proxy, never billing)
+.venv/bin/python3 eval/usage_telemetry.py {workspace} {date}
 .venv/bin/python3 eval/finalize_run.py {workspace} {date}
 ```
 
@@ -611,7 +610,12 @@ Pipeline complete for {TICKER} ({date})
   PDF:        {workspace}/exports/{date}/pdf/report.pdf
   Decision:   {workspace}/decision/{date}/final_decision.json
   Release:    {release_status from eval/{date}/release_gate.json}
+  Usage:      {output} output / {cache_read} cache-read / {cache_write} cache-write / {input} input tokens, {requests} requests
 ```
+
+`Usage` is `totals_attributed` from `{workspace}/eval/{date}/usage.json` (API-reported).
+Never present `cost_result.json` (`cost_tracker`, a file-size proxy marked `not_billing`)
+as the run's tokens or cost.
 
 ## Resume Logic
 
