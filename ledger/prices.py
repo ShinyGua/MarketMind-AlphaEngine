@@ -32,7 +32,11 @@ def fetch(symbol: str, since: str) -> tuple[list[dict], dict]:
     if symbol == "SP500":
         from collect_macro_series import fetch_fred_csv
 
-        rows, reason = fetch_fred_csv("SP500", int(_months_since(since)) + 1)
+        # fredgraph.csv answers in 6-17 s, near its 20 s timeout: retry a timeout once.
+        for _attempt in range(2):
+            rows, reason = fetch_fred_csv("SP500", int(_months_since(since)) + 1)
+            if reason != "network_failed":
+                break
         if reason:
             raise RuntimeError(f"FRED SP500: {reason}")
         bars = [{"Date": d, "Open": None, "High": None, "Low": None, "Close": float(v), "Volume": 0.0}

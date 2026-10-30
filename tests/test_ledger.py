@@ -207,3 +207,68 @@ def test_missing_client_is_not_submitted_never_raises(tmp_path, root):
     assert (root / "stamps" / f"{rec['seq']:06d}.hash").read_text().strip() == rec["hash"]
     assert stamp.stamp_summary(root) == {"not_submitted": 1}
     assert stamp.upgrade_all(root, binary=None) == []
+
+
+def _fake_ots(tmp_path: Path, state: dict) -> str:
+    """A stand-in `ots` client that prints what the real one prints: `upgrade`
+    exits 1 with "Failed! Timestamp not complete" until a block confirms."""
+    script = tmp_path / "fake_ots"
+    script.write_text(f"""#!{sys.executable}
+import json, pathlib, sys
+state = json.loads(pathlib.Path({str(tmp_path / 'state.json')!r}).read_text())
+cmd, path = sys.argv[1], pathlib.Path(sys.argv[2])
+if cmd == "stamp":
+    pathlib.Path(str(path) + ".ots").write_text("receipt")
+    sys.exit(0)
+if cmd == "upgrade":
+    if state["block"]:
+        print("Got 1 attestation(s) from https://alice.btc.calendar.opentimestamps.org")
+        print("Success! Timestamp complete"); sys.exit(0)
+    print("Calendar https://bob.btc.calendar.opentimestamps.org: no complete answer within 5 seconds")
+    print("Failed! Timestamp not complete"); sys.exit(1)
+if cmd == "info":
+    print("    verify PendingAttestation('https://bob.btc.calendar.opentimestamps.org')")
+    if state["block"]:
+        print("    verify BitcoinBlockHeaderAttestation(973691)")
+""", encoding="utf-8")
+    script.chmod(0o755)
+    (tmp_path / "state.json").write_text(json.dumps(state))
+    return str(script)
+
+
+def test_unconfirmed_receipt_stays_pending_then_attests(tmp_path, root):
+    store.append(root, "protocol", {"v": 1})
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    assert stamp.stamp_record(root, rec, binary=ots)["body"]["status"] == "pending"
+    # "Failed! Timestamp not complete" (exit 1) is the normal waiting state
+    assert stamp.upgrade_all(root, binary=ots) == []
+    assert stamp.stamp_summary(root) == {"pending": 1}
+    (tmp_path / "state.json").write_text(json.dumps({"block": True}))
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["attested"]
+    assert stamp.upgrade_all(root, binary=ots) == []                # attested is final
+    assert store.verify(root)["ok"]
+
+
+def test_wrongly_failed_receipt_is_corrected_to_pending(tmp_path, root):
+    store.append(root, "protocol", {"v": 1})
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    stamp.stamp_record(root, rec, binary=ots)
+    store.append(root, "stamp", {"target_seq": rec["seq"], "target_hash": rec["hash"],
+                                 "file": f"{rec['seq']:06d}.hash", "status": "failed",
+                                 "at": "2026-10-30T06:13:52+00:00", "detail": "old classifier"})
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["pending"]
+    assert stamp.stamp_summary(root) == {"pending": 1}
+
+
+def test_missing_receipt_is_failed(tmp_path, root):
+    store.append(root, "protocol", {"v": 1})
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    stamp.stamp_record(root, rec, binary=ots)
+    (root / "stamps" / f"{rec['seq']:06d}.hash.ots").unlink()
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["failed"]

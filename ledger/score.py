@@ -307,12 +307,13 @@ def _scored_keys(records: list[dict]) -> set[tuple[str, int]]:
             for r in records if r["type"] == "outcome"}
 
 
-def score_all(root: Path, fetch=None, horizons=HORIZONS) -> list[dict]:
+def score_all(root: Path, fetch=None, horizons=HORIZONS, now: datetime | None = None) -> list[dict]:
     """Append an outcome record for every sealed decision x matured horizon not
     yet scored. ``fetch(symbol, since) -> (rows, provenance)`` is injectable."""
     from . import prices, store
 
     fetch = fetch or prices.fetch
+    now = now or datetime.now(timezone.utc)
     fees = load_fees()
     records = store.read(root)
     done = _scored_keys(records)
@@ -323,6 +324,11 @@ def score_all(root: Path, fetch=None, horizons=HORIZONS) -> list[dict]:
         body = rec["body"]
         todo = [h for h in horizons if (body["decision_id"], h) not in done]
         if not todo:
+            continue
+        # h sessions after the reference close take at least h calendar days, so
+        # a decision younger than its shortest open horizon cannot have matured:
+        # skip it instead of fetching four price series for nothing.
+        if (now - _issued(body)).days < min(todo):
             continue
         market = body["market"] if body["market"] in TZ else "US"
         since = body["issued_at"]

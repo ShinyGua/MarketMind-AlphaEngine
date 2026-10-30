@@ -10,7 +10,10 @@ Statuses, appended to the ledger as ``stamp`` records:
   not_submitted  the client is missing or no calendar answered — retried by upgrade_all
   pending        calendars acknowledged; no Bitcoin attestation yet
   attested       the receipt carries a Bitcoin block attestation
-  failed         the client errored on an existing receipt
+  failed         the receipt is missing or holds no attestation at all
+
+A later upgrade appends a record only when the status changes (so a receipt
+that is merely still waiting adds nothing).
 
 ``attested`` is not ``verified``: checking an attestation against the Bitcoin
 chain needs a Bitcoin node or a trusted block explorer, and that deployment is
@@ -74,6 +77,28 @@ def _latest_status(records: list[dict]) -> dict[int, dict]:
     return latest
 
 
+def _upgrade(binary: str, receipt: Path) -> tuple[str, str]:
+    """Upgrade one receipt and read its state back from the receipt itself.
+
+    ``ots upgrade`` exits 1 and prints "Failed! Timestamp not complete" whenever
+    no Bitcoin block has confirmed the hash yet — the normal state for hours
+    after stamping — so neither its exit code nor its wording separates
+    "waiting" from "broken". ``ots info`` lists the attestations the receipt
+    holds: a BitcoinBlockHeaderAttestation means attested (an attested receipt
+    still lists other calendars as pending), a PendingAttestation alone means
+    still waiting, and anything else (missing or unreadable receipt) is failed.
+    """
+    if not receipt.exists():
+        return "failed", f"receipt missing: {receipt.name}"
+    _code, out = _run([binary, "upgrade", str(receipt)])
+    _icode, info = _run([binary, "info", str(receipt)])
+    if "BitcoinBlockHeaderAttestation" in info:
+        return "attested", out[-300:]
+    if "PendingAttestation" in info:
+        return "pending", out[-300:]
+    return "failed", (out + "\n" + info)[-300:]
+
+
 def upgrade_all(root: Path, binary: str | None = "auto") -> list[dict]:
     """Submit not-yet-submitted hashes and upgrade pending receipts."""
     binary = ots_binary() if binary == "auto" else binary
@@ -89,16 +114,12 @@ def upgrade_all(root: Path, binary: str | None = "auto") -> list[dict]:
             changed.append(stamp_record(root, by_seq[seq], binary))
             continue
         receipt = root / "stamps" / (last["file"] + ".ots")
-        code, out = _run([binary, "upgrade", str(receipt)])
-        if code == 0 and ("complete" in out.lower() or "success" in out.lower()):
-            status = "attested"
-        elif "pending" in out.lower() or "not yet" in out.lower() or code == 0:
-            continue  # still waiting for a Bitcoin block — nothing new to record
-        else:
-            status = "failed"
+        status, out = _upgrade(binary, receipt)
+        if status == last["status"]:
+            continue  # nothing new to record
         changed.append(store.append(root, "stamp", {
             "target_seq": seq, "target_hash": last["target_hash"], "file": last["file"],
-            "status": status, "at": _now(), "detail": out[-300:]}))
+            "status": status, "at": _now(), "detail": out}))
     return changed
 
 

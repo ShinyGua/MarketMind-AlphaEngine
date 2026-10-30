@@ -1,6 +1,7 @@
 """Outcome scoring on synthetic bars: reference timing, horizons, suspensions,
 limit locks, stops, hedges, trims, costs — and the runner/report/backfill."""
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -192,3 +193,19 @@ def test_backfill_uses_run_date_close_and_marks_unverified(tmp_path):
     r20 = next(r for r in rows if r["horizon_sessions"] == 20)
     assert r20["reference_date"] == "2026-10-22" and r20["provenance"] == "unverified"
     assert r20["status"] == "scored" and r20["excess_return"] > 0
+
+
+def test_runner_does_not_fetch_for_a_decision_too_young_to_mature(tmp_path):
+    root = tmp_path / "MMD"
+    store.append(root, "protocol", {"protocol": {}})
+    _sealed(root, "HOOD_x", "HOOD", "2026-10-30T05:49:04+00:00", 0.44, market="US", symbol="HOOD")
+    calls = []
+
+    def fetch(symbol, since):
+        calls.append(symbol)
+        raise RuntimeError("FRED SP500: network_failed")
+
+    now = datetime(2026, 10, 30, 6, 13, tzinfo=timezone.utc)      # 24 minutes later
+    assert score.score_all(root, fetch=fetch, now=now) == [] and calls == []
+    later = datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)       # 5 days on: try
+    assert score.score_all(root, fetch=fetch, now=later) == [] and calls == ["HOOD"]
