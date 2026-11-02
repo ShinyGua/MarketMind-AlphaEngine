@@ -280,8 +280,9 @@ def select_growth(income_statement: list[dict], metrics: dict, cfg: dict,
 
 
 def terminal_value(last_fcff: float, wacc_rate: float, terminal_growth: float) -> float:
-    """Gordon-growth terminal value. Raises if WACC <= terminal growth."""
-    if wacc_rate <= terminal_growth:
+    """Gordon-growth terminal value. Raises unless WACC > terminal growth."""
+    # NaN compares False both ways, so test the condition that must hold
+    if not (wacc_rate > terminal_growth):
         raise ValueError(
             f"WACC ({wacc_rate:.4f}) must exceed terminal growth ({terminal_growth:.4f})"
         )
@@ -366,11 +367,17 @@ def intrinsic_value_two_stage(base: float, initial_growth: float, fade_years: in
 
 
 def _centered_axis(center: float, step: float, n: int) -> list[float]:
-    """Symmetric odd-length axis centered on `center` (guarantees center cell)."""
+    """Symmetric odd-length axis centered on `center` (guarantees center cell).
+
+    The centre itself stays unrounded, so the centre cell is computed at the base
+    case's own rates: round(center, 6) moved a WACC 4e-7 above g onto g (an empty
+    centre) and shifted large per-share values by cents.
+    """
     if n % 2 == 0:
         n += 1
     half = n // 2
-    return [round(center + (i - half) * step, 6) for i in range(n)]
+    return [center if i == half else round(center + (i - half) * step, 6)
+            for i in range(n)]
 
 
 def sensitivity_grid(base: float, growth: float, years: int,

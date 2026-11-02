@@ -164,7 +164,8 @@ def implied_value_per_share(company: dict, benchmarks: dict, min_peers: int = MI
         implied_ev = peer_ev_rev_median * revenue
         out["by_ev_revenue"] = (implied_ev - net_debt) / shares
 
-        peer_growth = (benchmarks.get("revenue_growth") or {}).get("median")
+        # the growth median scales the anchor up to 2x, so it needs the same peer floor
+        peer_growth = median("revenue_growth")
         company_growth = company.get("revenue_growth")
         if company_growth and peer_growth and peer_growth > 0:
             adj = company_growth / peer_growth

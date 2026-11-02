@@ -37,10 +37,38 @@ def test_threshold_is_configurable_and_unknown_n_is_kept():
     assert comps.implied_value_per_share(HOOD, legacy)["by_pe"] is not None
 
 
-def test_grader_warns_on_a_thin_comps_anchor(tmp_path):
+def test_one_peer_growth_median_does_not_scale_the_ev_revenue_anchor():
+    # three EV/Revenue peers but one positive revenue growth: that one peer's growth
+    # doubled the anchor (60 -> 120) and flipped "expensive" to "cheap"
+    company = {**HOOD, "revenue_growth": 0.40}
+    peers = [{"ticker": "A", "metrics": {"ev_to_revenue": 2.0, "revenue_growth": 0.10}},
+             {"ticker": "B", "metrics": {"ev_to_revenue": 2.0, "revenue_growth": None}},
+             {"ticker": "C", "metrics": {"ev_to_revenue": 2.0, "revenue_growth": -0.3}}]
+    table = comps.build_comps("X", company, peers)
+    implied = comps.implied_value_per_share(company, table["benchmarks"])
+    assert implied["by_ev_revenue"] is not None
+    assert implied["by_ev_revenue_growth_adjusted"] is None
+    assert implied["thin_multiples"]["revenue_growth"] == 1
+    ungated = comps.implied_value_per_share(company, table["benchmarks"], min_peers=1)
+    assert ungated["by_ev_revenue_growth_adjusted"] > implied["by_ev_revenue"]
+
+
+def _thin_anchor_summary(n):
     s = _summary()
-    s["comps"] = {"trailing_pe": {"median": 129.4, "n": 1}, "ev_to_ebitda": {"median": None, "n": 0}}
+    s["comps"] = {"trailing_pe": {"median": 129.4, "n": n}, "ev_to_ebitda": {"median": None, "n": 0}}
     s["method_candidates"] = [{"method": "comps_earnings", "value": 285.19, "weight": 0.35,
                                "confidence": "low", "included": True}]
-    warnings = vg.grade(str(_make(tmp_path, s, regime=_regime())), DATE)["warnings"]
+    return s
+
+
+def test_grader_warns_on_a_thin_comps_anchor(tmp_path):
+    warnings = vg.grade(str(_make(tmp_path, _thin_anchor_summary(1), regime=_regime())),
+                        DATE)["warnings"]
     assert any("n=1" in w for w in warnings)
+
+
+def test_grader_uses_the_configured_peer_floor(tmp_path):
+    ws = _make(tmp_path, _thin_anchor_summary(2), regime=_regime())
+    assert any("n=2" in w for w in vg.grade(str(ws), DATE)["warnings"])     # default 3
+    (ws / "resolved_config.json").write_text('{"valuation": {"comps_min_peers": 2}}')
+    assert not any("peer median" in w for w in vg.grade(str(ws), DATE)["warnings"])

@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import math
 import os
 import sys
 
@@ -71,9 +72,10 @@ _DEFAULTS = {
     # story+chips game layer leads and valuation must not appear in top_reasons).
     "role_by_market": {"US": "anchor", "CN": "reference", "HK": "reference",
                        "JP": "anchor", "UK": "anchor", "EU": "anchor"},
-    # optional DCF-vs-comps sanity net: when the DCF base intrinsic value exceeds
-    # cap × comps blended, cap the DCF weight and downgrade its confidence. None = off.
-    "dcf_comps_divergence_cap": None,
+    # DCF-vs-comps sanity net: when the DCF base intrinsic value exceeds cap × comps
+    # blended, the DCF is excluded from the fair-value anchor. None = off. On by
+    # default, so a resolved config that lacks the key keeps the guard.
+    "dcf_comps_divergence_cap": 2.0,
     "dcf_comps_divergence_weight": 0.35,
     # fewest usable peer values a comps median needs before it may anchor fair value
     "comps_min_peers": 3,
@@ -518,6 +520,30 @@ def _positive(v) -> bool:
     return isinstance(v, (int, float)) and v > 0
 
 
+def _finite_or_none(v):
+    """None for NaN/±inf: json.load accepts them, but they are missing values, not data."""
+    return None if isinstance(v, float) and not math.isfinite(v) else v
+
+
+def _scrub_nonfinite(*blobs):
+    """Null the non-finite numbers of flat input dicts in place. A NaN beta would
+    otherwise pass every `<=` guard (NaN compares False) as a NaN WACC."""
+    for blob in blobs:
+        if isinstance(blob, dict):
+            for k, v in blob.items():
+                blob[k] = _finite_or_none(v)
+
+
+def _json_safe(v):
+    """Non-finite floats → None, recursively: json.dump would write bare NaN/Infinity
+    tokens, which are not JSON (float overflow can still produce them)."""
+    if isinstance(v, dict):
+        return {k: _json_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json_safe(x) for x in v]
+    return _finite_or_none(v)
+
+
 def _candidate(method, value, weight, confidence, included=True, reason=None):
     has_value = _positive(value)
     return {
@@ -615,16 +641,17 @@ def _select_fair_value(dcf_block, implied, price, cfg):
             dcf_reason = "downgraded: terminal value dominates enterprise value"
         # Low-confidence growth selection lowers the DCF's blend weight so the
         # fair value leans on comps. Only ever lowers (never raises) the weight.
+        # The label is capped at the growth confidence even when the weight already
+        # sits at the cap: the fragile-TV branch's (0.35, medium) must not outrank a
+        # sound DCF's (0.35, low).
         gconf = dcf_block.get("growth_confidence")
         weight_cap = {"high": 0.65, "medium": 0.5, "low": 0.35}.get(gconf)
-        if weight_cap is not None and dcf_weight > weight_cap:
-            dcf_weight = weight_cap
-            if gconf == "low":
-                dcf_conf = "low"
-            elif gconf == "medium" and dcf_conf == "high":
-                dcf_conf = "medium"
-            note = f"growth confidence {gconf}"
-            dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
+        if weight_cap is not None:
+            capped = (min(dcf_weight, weight_cap), _min_conf(dcf_conf, gconf))
+            if capped != (dcf_weight, dcf_conf):
+                dcf_weight, dcf_conf = capped
+                note = f"growth confidence {gconf}"
+                dcf_reason = f"{dcf_reason}; {note}" if dcf_reason else note
         # DCF-vs-comps sanity net (config-gated; enabled by default at 2.0x). A DCF
         # sitting far above the comps blended value is a divergence signal (e.g. a
         # low-beta WACC inflating a CNY name): the discounted intrinsic value can't
@@ -708,15 +735,20 @@ def _scenario_growths(initial_growth: float, delta: float, g_term: float) -> dic
 def _build_fair_value_range(fair_value, method_candidates, dcf_block):
     """Coherent fair-value band (low <= base <= high by construction). The band is
     the dispersion of the INCLUDED method candidates (the same ones feeding the
-    blended base) unioned with the DCF bull/bear scenarios. Because base is a
-    weighted average of the included candidate values it always lies within
+    blended base) unioned with the DCF bull/bear scenarios of a sound DCF. Because
+    base is a weighted average of the included candidate values it always lies within
     [min,max] of that pool; the min/max clamps absorb 2dp rounding. Distinct from
     intrinsic_range, which stays a DCF-scenario-only band."""
     if fair_value is None:
         return None
     pool = [c["value"] for c in (method_candidates or [])
             if c.get("included") and _positive(c.get("value"))]
-    if dcf_block:
+    # A DCF excluded only for diverging from comps keeps its scenarios in the band,
+    # so its upside is never hidden. One excluded by a maths guard (WACC ~ g,
+    # non-convergent) or with no positive base has no meaningful bull case: WACC
+    # 4e-7 above g put 17.9M on a $100 stock as the band's high.
+    dcf_c = next((c for c in method_candidates or [] if c.get("method") == "dcf"), {})
+    if dcf_block and (dcf_c.get("included") or "divergent" in (dcf_c.get("reason") or "")):
         for nm in ("bear", "bull"):
             v = (dcf_block.get("scenarios", {}).get(nm, {}) or {}).get("value_per_share")
             if _positive(v):
@@ -733,7 +765,8 @@ def _build_fair_value_range(fair_value, method_candidates, dcf_block):
 def _write_summary(out_dir, summary):
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "valuation_summary.json"), "w") as fh:
-        json.dump(summary, fh, indent=2, ensure_ascii=False, default=str)
+        json.dump(_json_safe(summary), fh, indent=2, ensure_ascii=False, default=str,
+                  allow_nan=False)
 
 
 def _not_applicable(out_dir, ticker, reason, lang):
@@ -777,6 +810,8 @@ def main():
         return
 
     metrics = fund["metrics"]
+    _scrub_nonfinite(metrics, fund.get("ttm"), *(fund.get("income_statement") or []),
+                     *(fund.get("cash_flow") or []))
     quote_type = (metrics.get("quote_type") or "").upper()
     if quote_type in _NON_EQUITY:
         _not_applicable(out_dir, ticker, f"instrument type {quote_type}", lang)
@@ -786,7 +821,7 @@ def main():
     price = metrics.get("current_price")
     if not price:
         q = _load_json(os.path.join(workspace, "quant", date, "quant_summary.json")) or {}
-        price = q.get("latest_close")
+        price = _finite_or_none(q.get("latest_close"))
 
     # sector/industry (for the financials/brokers DCF-growth caveat); graceful if absent
     profile = _load_json(os.path.join(workspace, "profile", "company_profile.json")) or {}
@@ -812,6 +847,7 @@ def main():
             fx_notes.append(note)
         adapted = _adapt_fundamentals(raw_peer)
         if adapted and adapted.get("metrics"):
+            _scrub_nonfinite(adapted["metrics"])
             peers.append(adapted)
 
     inputs_missing = []
@@ -843,7 +879,7 @@ def main():
     shares = metrics.get("shares_outstanding")
     if not income or not cash_flow:
         inputs_missing.append("financial_statements")
-    if not shares:
+    if not _positive(shares):  # a negative count would invert bear/base/bull
         inputs_missing.append("shares_outstanding")
 
     tax_rate = dcf_mod.effective_tax_rate(income)
@@ -854,91 +890,102 @@ def main():
     if base is None or base <= 0:
         inputs_missing.append("positive_free_cash_flow")
 
-    if base and base > 0 and shares:
-        beta = metrics.get("beta") or 1.0
-        net_debt = (metrics.get("total_debt") or 0.0) - (metrics.get("total_cash") or 0.0)
-        # market-aware CAPM: mature ERP (global, override per market), a flat
-        # country risk premium, and cost of debt (fall back to global cfg values)
-        _mc = (cfg.get("market_capm") or {}).get(market_profile) or {}
-        erp = _mc.get("equity_risk_premium")
-        if erp is None:
-            erp = cfg["equity_risk_premium"]
-        cod = _mc.get("cost_of_debt")
-        if cod is None:
-            cod = cfg["cost_of_debt"]
-        crp = _mc.get("country_risk_premium") or 0.0
-        wacc_rate = dcf_mod.wacc(
-            risk_free=rf["rate"], beta=beta,
-            equity_risk_premium=erp,
-            equity_value=metrics.get("market_cap") or 0.0,
-            debt_value=metrics.get("total_debt") or 0.0,
-            cost_of_debt=cod, tax_rate=tax_rate,
-            country_risk_premium=crp,
-        )
-        g_term = cfg["default_terminal_growth"]
-        # keep WACC strictly above terminal growth
-        if wacc_rate <= g_term:
-            wacc_rate = g_term + 0.03
+    if base and base > 0 and _positive(shares):
+        try:
+            beta = metrics.get("beta") or 1.0
+            net_debt = (metrics.get("total_debt") or 0.0) - (metrics.get("total_cash") or 0.0)
+            # market-aware CAPM: mature ERP (global, override per market), a flat
+            # country risk premium, and cost of debt (fall back to global cfg values)
+            _mc = (cfg.get("market_capm") or {}).get(market_profile) or {}
+            erp = _mc.get("equity_risk_premium")
+            if erp is None:
+                erp = cfg["equity_risk_premium"]
+            cod = _mc.get("cost_of_debt")
+            if cod is None:
+                cod = cfg["cost_of_debt"]
+            crp = _mc.get("country_risk_premium") or 0.0
+            wacc_rate = dcf_mod.wacc(
+                risk_free=rf["rate"], beta=beta,
+                equity_risk_premium=erp,
+                equity_value=metrics.get("market_cap") or 0.0,
+                debt_value=metrics.get("total_debt") or 0.0,
+                cost_of_debt=cod, tax_rate=tax_rate,
+                country_risk_premium=crp,
+            )
+            if not math.isfinite(wacc_rate):  # a NaN WACC would pass the guard below
+                raise OverflowError(f"WACC {wacc_rate}")
+            g_term = cfg["default_terminal_growth"]
+            # keep WACC strictly above terminal growth
+            if wacc_rate <= g_term:
+                wacc_rate = g_term + 0.03
 
-        # Two-stage fade DCF: the high-growth phase (capped at max_initial_growth,
-        # well above the legacy 0.20 constant-growth cap) fades linearly to terminal
-        # growth over fade_years, so fast growers are not understated by a single
-        # constant rate. Scenarios move the *initial* growth lever; bear is floored
-        # at terminal but never above base (a sub-terminal base — e.g. after the
-        # weak-margin haircut — would otherwise invert it), so bear <= base <= bull
-        # holds. growth_schedule fades up or down, so a sub-terminal bear is valid.
-        # Deterministic, fundamentals-driven growth selection (3yr revenue CAGR
-        # preferred, with divergence / profitability / sector / maturity guards).
-        gsel = dcf_mod.select_growth(income, metrics, cfg, sector=sector, industry=industry)
-        initial_growth = gsel["initial_growth"]
-        delta = cfg["scenario_growth_delta"]
-        fade_years = cfg["fade_years"]
+            # Two-stage fade DCF: the high-growth phase (capped at max_initial_growth,
+            # well above the legacy 0.20 constant-growth cap) fades linearly to terminal
+            # growth over fade_years, so fast growers are not understated by a single
+            # constant rate. Scenarios move the *initial* growth lever; bear is floored
+            # at terminal but never above base (a sub-terminal base — e.g. after the
+            # weak-margin haircut — would otherwise invert it), so bear <= base <= bull
+            # holds. growth_schedule fades up or down, so a sub-terminal bear is valid.
+            # Deterministic, fundamentals-driven growth selection (3yr revenue CAGR
+            # preferred, with divergence / profitability / sector / maturity guards).
+            gsel = dcf_mod.select_growth(income, metrics, cfg, sector=sector, industry=industry)
+            initial_growth = gsel["initial_growth"]
+            delta = cfg["scenario_growth_delta"]
+            fade_years = cfg["fade_years"]
 
-        scenarios = {}
-        for name, ig in _scenario_growths(initial_growth, delta, g_term).items():
-            res = dcf_mod.intrinsic_value_two_stage(
-                base, ig, fade_years, wacc_rate, g_term, net_debt, shares)
-            scenarios[name] = {
-                "growth": _round(ig, 4),
-                "value_per_share": _round(res["value_per_share"]),
-                "tv_fraction": _round(res["tv_fraction"], 3),
+            scenarios = {}
+            for name, ig in _scenario_growths(initial_growth, delta, g_term).items():
+                res = dcf_mod.intrinsic_value_two_stage(
+                    base, ig, fade_years, wacc_rate, g_term, net_debt, shares)
+                if not math.isfinite(res["value_per_share"]):
+                    raise OverflowError(f"{name} value per share {res['value_per_share']}")
+                scenarios[name] = {
+                    "growth": _round(ig, 4),
+                    "value_per_share": _round(res["value_per_share"]),
+                    "tv_fraction": _round(res["tv_fraction"], 3),
+                }
+
+            base_vps = scenarios["base"]["value_per_share"]
+            tv_frac = scenarios["base"]["tv_fraction"]
+            base_schedule = dcf_mod.growth_schedule(initial_growth, g_term, fade_years)
+            dcf_block = {
+                "model": "fcff_two_stage",
+                "wacc": _round(wacc_rate, 4),
+                "risk_free_rate": _round(rf["rate"], 4),
+                "risk_free_source": rf["source"],
+                "equity_risk_premium": _round(erp, 4),
+                "country_risk_premium": _round(crp, 4),
+                "cost_of_debt": _round(cod, 4),
+                "terminal_growth": _round(g_term, 4),
+                "tax_rate": _round(tax_rate, 4),
+                "beta": _round(beta, 3),
+                "base_fcff": _round(base),
+                "net_debt": _round(net_debt),
+                "initial_growth": _round(initial_growth, 4),
+                "growth_source": gsel["source"],
+                "growth_confidence": gsel["confidence"],
+                "growth_reason": gsel["reason"],
+                "growth_components": {k: _round(v, 4) for k, v in gsel["components"].items()},
+                "fade_years": fade_years,
+                "projection_years": fade_years,
+                "growth_schedule": [_round(g, 4) for g in base_schedule],
+                "scenarios": scenarios,
+                "tv_fraction_in_band": (tv_frac is not None
+                                        and dcf_mod.TV_FRACTION_MIN <= tv_frac <= dcf_mod.TV_FRACTION_MAX),
             }
 
-        base_vps = scenarios["base"]["value_per_share"]
-        tv_frac = scenarios["base"]["tv_fraction"]
-        base_schedule = dcf_mod.growth_schedule(initial_growth, g_term, fade_years)
-        dcf_block = {
-            "model": "fcff_two_stage",
-            "wacc": _round(wacc_rate, 4),
-            "risk_free_rate": _round(rf["rate"], 4),
-            "risk_free_source": rf["source"],
-            "equity_risk_premium": _round(erp, 4),
-            "country_risk_premium": _round(crp, 4),
-            "cost_of_debt": _round(cod, 4),
-            "terminal_growth": _round(g_term, 4),
-            "tax_rate": _round(tax_rate, 4),
-            "beta": _round(beta, 3),
-            "base_fcff": _round(base),
-            "net_debt": _round(net_debt),
-            "initial_growth": _round(initial_growth, 4),
-            "growth_source": gsel["source"],
-            "growth_confidence": gsel["confidence"],
-            "growth_reason": gsel["reason"],
-            "growth_components": {k: _round(v, 4) for k, v in gsel["components"].items()},
-            "fade_years": fade_years,
-            "projection_years": fade_years,
-            "growth_schedule": [_round(g, 4) for g in base_schedule],
-            "scenarios": scenarios,
-            "tv_fraction_in_band": (tv_frac is not None
-                                    and dcf_mod.TV_FRACTION_MIN <= tv_frac <= dcf_mod.TV_FRACTION_MAX),
-        }
-
-        grid = dcf_mod.sensitivity_grid(
-            base, initial_growth, fade_years, net_debt, shares,
-            wacc_center=wacc_rate, g_center=g_term, n=cfg["sensitivity_dims"],
-            model="fcff_two_stage", initial_growth=initial_growth, fade_years=fade_years)
-        grid["center_value"] = base_vps  # equals scenarios.base — QC asserts this
-        sensitivity = grid
+            grid = dcf_mod.sensitivity_grid(
+                base, initial_growth, fade_years, net_debt, shares,
+                wacc_center=wacc_rate, g_center=g_term, n=cfg["sensitivity_dims"],
+                model="fcff_two_stage", initial_growth=initial_growth, fade_years=fade_years)
+            grid["center_value"] = base_vps  # equals scenarios.base — QC asserts this
+            sensitivity = grid
+        except OverflowError:
+            # Never raise into the pipeline: an absurd input (beta 1e40) overflows
+            # (1 + WACC)**t; overflow elsewhere yields inf/NaN, re-raised above.
+            # Either way there is no DCF to anchor on.
+            dcf_block, sensitivity = None, None
+            inputs_missing.append("dcf_overflow")
 
     intrinsic_base = (dcf_block or {}).get("scenarios", {}).get("base", {}).get("value_per_share")
     fair_value, margin_of_safety, valuation_method, method_candidates = _select_fair_value(

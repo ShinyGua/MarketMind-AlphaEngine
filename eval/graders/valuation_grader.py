@@ -5,8 +5,8 @@ The analog of an Excel model audit — it does not re-run the DCF, it checks tha
 the numbers the engine wrote are mutually consistent and obey the guardrails:
 
   HARD FAIL (math is wrong):
-    - terminal growth >= WACC (Gordon model invalid)
-    - sensitivity-grid center cell != base-case intrinsic value
+    - WACC below terminal growth at the published 4 dp (Gordon model invalid)
+    - sensitivity-grid center cell != base-case intrinsic value, or empty
     - margin_of_safety != (fair_value - price) / price
     - intrinsic range not ordered bear <= base <= bull
     - fair_value_range not ordered low <= base <= high
@@ -27,11 +27,12 @@ from pathlib import Path
 # Reuse the engine's own confidence derivation so this check can never drift from
 # what the engine actually does (valuation/ has no heavy deps — safe to import).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "valuation"))
-from run_valuation import _component_confidence, _CONF_ORD  # noqa: E402
+from run_valuation import _cfg, _component_confidence, _CONF_ORD  # noqa: E402
 
 # tolerances: engine rounds prices/values to 2 dp and ratios to 4 dp
 _ABS_TOL = 0.05      # per-share value comparisons
 _MOS_TOL = 0.01      # margin-of-safety (1 percentage point)
+_HALF_CENT = 0.005   # largest 2 dp rounding error in a published price / value
 _BLEND_TOL = 0.02
 _REL_TOL = 1e-4      # 0.01% — large-value sensitivity-grid center vs base (non-USD safe)
 
@@ -154,7 +155,10 @@ def grade(workspace: str, date: str) -> dict:
     if dcf:
         w, g = dcf.get("wacc"), dcf.get("terminal_growth")
         if w is not None and g is not None:
-            hard_ok &= check("wacc_gt_terminal_growth", w > g,
+            # both are published at 4 dp, and rounding is monotone: a WACC a hair
+            # above g (0.0250004 > 0.025) is published equal to it, so only w < g
+            # shows the engine's WACC > g guard failed
+            hard_ok &= check("wacc_gt_terminal_growth", w >= g,
                              f"wacc={w}, terminal_growth={g}")
 
     # 2. intrinsic range ordering bear <= base <= bull
@@ -176,7 +180,12 @@ def grade(workspace: str, date: str) -> dict:
     base_iv = summary.get("intrinsic_value_base")
     if base_iv is not None and sens_path.exists():
         center = _center_cell(sens_path)
-        if center is not None:
+        if center is None:
+            # the engine computes the centre at the base case's own rates, so an
+            # empty centre beside a base value means the two disagree
+            hard_ok &= check("sensitivity_center_eq_base", False,
+                             f"center cell empty or unparseable, base={base_iv}")
+        else:
             hard_ok &= check("sensitivity_center_eq_base",
                              abs(center - base_iv) <= max(_ABS_TOL, abs(base_iv) * _REL_TOL),
                              f"center={center}, base={base_iv}")
@@ -188,8 +197,11 @@ def grade(workspace: str, date: str) -> dict:
     mos_anchor = fair_value if fair_value is not None else base_iv
     if mos is not None and mos_anchor is not None and price:
         recomputed = (mos_anchor - price) / price
+        # the engine divides the unrounded values; rounding both to 2 dp alone moves
+        # the recomputed ratio by up to this much (HK 0.123 published as 0.12: 4 pts)
+        rounding = _HALF_CENT * (1 + abs(mos_anchor / price)) / abs(price)
         hard_ok &= check("margin_of_safety_recompute",
-                         abs(recomputed - mos) <= _MOS_TOL,
+                         abs(recomputed - mos) <= _MOS_TOL + rounding,
                          f"stored={mos}, recomputed={recomputed:.4f}")
 
     # 5. comps blended implied value == mean of earnings/cash-flow components
@@ -272,7 +284,9 @@ def grade(workspace: str, date: str) -> dict:
 
     # A comps candidate may anchor fair value only on a real peer sample: HOOD's
     # "cheap" (fair value 285) rested on one peer's P/E. Mirrors the engine's
-    # comps_min_peers guard for summaries written before it or edited by hand.
+    # comps_min_peers guard for summaries written before it or edited by hand, at the
+    # floor the engine was configured with (resolved exactly as run_valuation does).
+    min_peers = int(_cfg(str(ws))[0].get("comps_min_peers") or 1)
     comps_tbl = summary.get("comps") or {}
     sources = {"comps_earnings": ("forward_pe", "trailing_pe", "ev_to_ebitda"),
                "comps_revenue": ("ev_to_revenue",)}
@@ -283,10 +297,10 @@ def grade(workspace: str, date: str) -> dict:
         ns = [(comps_tbl.get(m) or {}).get("n") for m in multiples
               if (comps_tbl.get(m) or {}).get("median") is not None]
         ns = [n for n in ns if isinstance(n, int)]
-        if ns and max(ns) < 3:
+        if ns and max(ns) < min_peers:
             result["warnings"].append(
                 f"{c['method']} anchors fair value on a peer median of n={max(ns)} — "
-                f"fewer than 3 peers is one company's multiple, not a market anchor")
+                f"fewer than {min_peers} peers is one company's multiple, not a market anchor")
 
     result["pass"] = hard_ok
     if hard_ok:
