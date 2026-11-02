@@ -396,6 +396,22 @@ Read `review.max_revision_loops` from config (default: 3). Loop:
 
 ### 12. decide
 
+**First, check whether this run date is already settled:**
+
+```bash
+.venv/bin/python3 ledger/cli.py outcome {workspace} {date}
+```
+
+If it prints a record (exit 2), the ledger already holds this run date's
+release outcome — a seal or a block from an earlier attempt. Do **not** decide
+again: a second decision can never be sealed or published. Go straight to
+stage 13. (A run date has one outcome; `seal` and `block` refuse a second.)
+If it fails (exit 1: the ledger does not verify), the outcome is unknown: do not
+decide and do **not** mark decide completed. Record the error with
+`mcp__mm-workspace__update_status` (`error`, no `completed_stage`) and stop the
+run, telling the user to repair the ledger (`ledger/cli.py verify`). Re-running
+the same command afterwards resumes at decide.
+
 Read `decision.panel` from config. **If `decision.panel.enabled` is false** (or the
 block is absent): dispatch **mm-decision-maker** with args: `{workspace} {date}`,
 wait, verify `final_decision.json` exists, and proceed to stage 13 (legacy
@@ -434,9 +450,12 @@ enriched `final_decision.json` (schema v2: `actions`, `forecast`, structured
 ```
 
 It writes `{workspace}/decision/{date}/pre_release_gate.json` and exits 0
-(`passed`) or 2 (`blocked`). It also re-derives the headline `decision` /
-`risk_overlay` from `actions` and the investor's position — do not edit
-`final_decision.json` after it passes (its sha256 is recorded).
+(`passed`) or 2 (`blocked`); any other exit is a crash — treat it as blocked. It
+also re-derives the headline `decision` / `risk_overlay` from `actions` and the
+investor's position — do not edit `final_decision.json` after it passes (its
+sha256 is recorded). Never write `pre_release_gate.json` yourself: seal, export
+and the PDF renderer re-evaluate the decision, so a hand-written verdict only
+gets the release blocked.
 
 - **Passed** → seal the decision in the ledger (outside the repo, in
   `MM_DATA_ROOT`, default `~/MarketMindData`):
@@ -452,27 +471,28 @@ It writes `{workspace}/decision/{date}/pre_release_gate.json` and exits 0
   dispatch **mm-decision-maker** with args: `{workspace} {date} revise` (it reads
   the gate errors and rewrites the decision, adding a `gate_revision` block), then
   run the gate again.
-- **Still blocked** → the release is **blocked**: call
+- **Still blocked** → the release is **blocked**: record it with
+  `.venv/bin/python3 ledger/cli.py block {workspace} {date}`, then call
   `mcp__mm-workspace__update_status` with `error: "pre_release_gate blocked: <the
-  gate's error checks>"`, record it with
-  `.venv/bin/python3 ledger/cli.py block {workspace} {date}`, and continue the
-  pipeline — export writes `BLOCKED.md`
+  gate's error checks>"`, and continue the pipeline — export writes `BLOCKED.md`
   instead of the report, and user_review tells the user why. A blocked release
   is a completed run, not a crash.
 
 **Then immediately proceed to stage 13.**
 
 ### 13. export
-0. Read `{workspace}/decision/{date}/pre_release_gate.json`. **If its `status` is
-   not `passed` (or the file is missing), do not export the report:** write
-   `{workspace}/final/{date}/BLOCKED.md` listing the gate's errors, skip steps
-   1–4, and proceed to stage 14. `templates/render_pdf.py` also refuses to render
-   a blocked or ungated decision.
-1. Determine report basename from `resolved_config.run_mode`: `daily_report` for daily mode, `weekly_report` for weekly mode.
-2. Copy final draft to `{workspace}/final/{date}/{basename}.md`.
-3. Copy decision alongside. Create combined `{workspace}/final/{date}/{basename}.json`.
-3. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
-4. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
+1. Run the export step (the same code the Codex driver runs):
+   ```bash
+   .venv/bin/python3 scripts/export_release.py {workspace} {date}
+   ```
+   It re-checks the decision against the gate and the ledger, then copies the
+   latest draft to `{workspace}/final/{date}/{basename}.md` (header decision taken
+   from the gated decision) with the combined `{basename}.json` — or, exit 2,
+   writes `{workspace}/final/{date}/BLOCKED.md` instead. **Do not copy or write
+   `final/` files yourself.** On exit 2, skip steps 2–3 and proceed to stage 14.
+2. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
+   (`templates/render_pdf.py` refuses a blocked, edited or unsealed-mismatch decision.)
+3. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
 **Then immediately proceed to stage 14.**
 
 ### 14. user_review
