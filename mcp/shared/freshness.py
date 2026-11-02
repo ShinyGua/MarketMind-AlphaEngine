@@ -19,6 +19,10 @@ included) is not yet an observation.
 Northbound per-stock daily holdings stopped being published in 2024-08, so
 that block comes out stale under the generic daily rule — no special case,
 and it recovers on its own if the source ever resumes.
+
+Sessions are counted on the card's own market (``market`` = the workspace's
+``market_profile``): a US name's price-structure card is judged on the NYSE
+calendar and clock, not Shanghai's. Unknown markets keep the Shanghai rule.
 """
 from __future__ import annotations
 
@@ -30,6 +34,18 @@ from zoneinfo import ZoneInfo
 CN_TZ = ZoneInfo("Asia/Shanghai")
 CN_SESSION_DONE = time(15, 30)  # a run-date bar counts only after this
 
+# market_profile -> (exchange calendar, local zone, local time after which that
+# day's session is an observation) — the same cutoffs as scripts/price_router.py
+MARKETS = {
+    "CN": ("XSHG", CN_TZ, CN_SESSION_DONE),
+    "HK": ("XHKG", ZoneInfo("Asia/Hong_Kong"), time(16, 30)),
+    "US": ("XNYS", ZoneInfo("America/New_York"), time(16, 30)),
+}
+
+
+def _market(market: str | None) -> tuple:
+    return MARKETS.get(str(market or "CN").upper(), MARKETS["CN"])
+
 CADENCE = {
     "turnover": {"kind": "daily", "max_lag_sessions": 2},
     "main_force": {"kind": "daily", "max_lag_sessions": 2},
@@ -38,8 +54,9 @@ CADENCE = {
     "holder_count": {"kind": "quarterly_report"},
     "lhb": {"kind": "event", "max_lag_sessions": 20},
     "restricted_release": {"kind": "scheduled"},
-    # A desk-written chip card that names no block: cadence unknown, so it gets
-    # the event window — still far too short for a months-old observation.
+    # A chip card whose fields name no known block: cadence unknown (desks tag
+    # short interest or Form 4 data "chips"), so it gets the event window —
+    # still far too short for a months-old observation.
     "unknown": {"kind": "event", "max_lag_sessions": 20},
 }
 
@@ -53,23 +70,29 @@ _DEADLINES = (
 )
 
 
-@lru_cache(maxsize=1)
-def _calendar():
+@lru_cache(maxsize=4)
+def _calendar(code: str = "XSHG"):
     try:
         import exchange_calendars as xcals
 
-        return xcals.get_calendar("XSHG")
+        return xcals.get_calendar(code)
     except Exception:  # noqa: BLE001 - degrade to weekdays
         return None
 
 
-def sessions_between(start: str, end: str) -> list[str]:
-    """XSHG sessions in [start, end] as ISO dates (weekdays if no calendar)."""
+def calendar_end(market: str = "CN") -> str | None:
+    """Last session the installed calendar knows; holidays after it are unknown."""
+    cal = _calendar(_market(market)[0])
+    return cal.last_session.date().isoformat() if cal is not None else None
+
+
+def sessions_between(start: str, end: str, market: str = "CN") -> list[str]:
+    """The market's sessions in [start, end] as ISO dates (weekdays if no calendar)."""
     if end < start:
         return []
     lo, hi = _date.fromisoformat(start), _date.fromisoformat(end)
     out: list[str] = []
-    cal = _calendar()
+    cal = _calendar(_market(market)[0])
     if cal is not None:
         first, last = cal.first_session.date(), cal.last_session.date()
         a, b = max(lo, first), min(hi, last)
@@ -84,22 +107,24 @@ def sessions_between(start: str, end: str) -> list[str]:
     return out
 
 
-def last_completed_session(run_date: str, now: datetime | None = None) -> str:
+def last_completed_session(run_date: str, now: datetime | None = None,
+                           market: str = "CN") -> str:
     """The newest session that had finished trading, no later than run_date."""
-    local = (now or datetime.now(CN_TZ)).astimezone(CN_TZ)
+    _code, tz, done = _market(market)
+    local = (now or datetime.now(tz)).astimezone(tz)
     cap = min(_date.fromisoformat(run_date), local.date())
-    if cap == local.date() and local.time() < CN_SESSION_DONE:
+    if cap == local.date() and local.time() < done:
         cap -= timedelta(days=1)
-    recent = sessions_between((cap - timedelta(days=30)).isoformat(), cap.isoformat())
+    recent = sessions_between((cap - timedelta(days=30)).isoformat(), cap.isoformat(), market)
     return recent[-1] if recent else cap.isoformat()
 
 
-def session_lag(as_of: str, reference: str) -> int:
+def session_lag(as_of: str, reference: str, market: str = "CN") -> int:
     """Completed sessions after ``as_of`` up to and including ``reference``."""
     if as_of >= reference:
         return 0
     following = (_date.fromisoformat(as_of) + timedelta(days=1)).isoformat()
-    return len(sessions_between(following, reference))
+    return len(sessions_between(following, reference, market))
 
 
 def required_quarter_end(run_date: str) -> str:
@@ -129,7 +154,8 @@ def normalize_date(value) -> str | None:
         return None
 
 
-def assess(block: str, as_of, run_date: str, now: datetime | None = None) -> dict:
+def assess(block: str, as_of, run_date: str, now: datetime | None = None,
+           market: str = "CN") -> dict:
     """Freshness verdict for one block: {cadence, as_of, lag_sessions, fresh, reason}."""
     rule = CADENCE.get(block, {"kind": "daily", "max_lag_sessions": 2})
     kind = rule["kind"]
@@ -149,11 +175,14 @@ def assess(block: str, as_of, run_date: str, now: datetime | None = None) -> dic
             return {**out, "fresh": False,
                     "reason": f"as_of {as_of} predates the {need} period already due for disclosure"}
         return out
-    ref = last_completed_session(run_date, now)
-    lag = session_lag(as_of, ref)
+    ref = last_completed_session(run_date, now, market)
+    lag = session_lag(as_of, ref, market)
     out["lag_sessions"] = lag
     if lag > rule["max_lag_sessions"]:
         out["fresh"] = False
         out["reason"] = (f"as_of {as_of} is {lag} sessions before {ref} "
                          f"(limit {rule['max_lag_sessions']})")
+        end = calendar_end(market)
+        if end and ref > end:  # weekdays stand in for sessions: holidays count
+            out["reason"] += f"; holidays after {end} unknown — upgrade exchange_calendars"
     return out

@@ -90,7 +90,7 @@ def test_run_writes_stale_sidecar(tmp_path, monkeypatch):
         else:
             payload.pop("data_quality")
             monkeypatch.setattr(cc, name, lambda *a, _p=payload, **k: dict(_p))
-    monkeypatch.setattr(cc.freshness, "last_completed_session", lambda d, now=None: "2026-10-28")
+    monkeypatch.setattr(cc.freshness, "last_completed_session", lambda d, now=None, market="CN": "2026-10-28")
     monkeypatch.setattr("time.sleep", lambda s: None)  # _block's retry pause
 
     art = cc.run(ws, "2026-10-28")

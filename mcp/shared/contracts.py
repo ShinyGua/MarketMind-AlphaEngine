@@ -11,7 +11,17 @@ textual owner — but the values must match this module.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file and rename: a crash leaves the old file or the new
+    one, never a torn one (status.json, gate verdicts, decisions)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 # ── Stage contract ────────────────────────────────────────────────────
 

@@ -37,9 +37,9 @@ CHIP_DATASETS = ("stock_margin_detail", "stock_margin_", "stock_individual_fund_
 CHIP_TAGS = {"chips", "chip", "筹码"}
 
 _CHIP_PHRASES_CN = ("融资余额", "融资融券", "两融", "融资买入", "融资净买", "主力资金",
-                    "主力净流入", "主力净流出", "主力净买", "主力净卖", "北向资金", "北向持股",
-                    "沪股通", "深股通", "陆股通", "龙虎榜", "股东户数", "限售股解禁",
-                    "解禁", "换手率", "筹码")
+                    "主力净流入", "主力净流出", "主力净买", "主力净卖", "大单净流入", "大单净流出",
+                    "北向资金", "北向持股", "沪股通", "深股通", "陆股通", "龙虎榜", "股东户数",
+                    "股东人数", "限售股解禁", "解禁", "换手率", "筹码")
 _CHIP_PHRASES_EN = ("margin balance", "margin financing", "margin debt", "main-force",
                     "main force", "northbound", "dragon tiger", "dragon-tiger",
                     "shareholder count", "holder count", "lock-up expir", "lockup expir",
@@ -158,7 +158,7 @@ def as_of(card: dict) -> str | None:
     for v in (meta.get("as_of"), card.get("as_of")):
         when, precision = parse_when(v)
         if when is not None and precision in ("date", "datetime"):
-            return str(v)[:10]
+            return str(v).strip()[:10]
     return None
 
 
