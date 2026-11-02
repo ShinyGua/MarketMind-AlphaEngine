@@ -176,7 +176,7 @@ def set_stage(ctx: Ctx, stage: str, completed: str | None = None):
     st.setdefault("stages_completed", [])
     if completed and completed in STAGES and completed not in st["stages_completed"]:
         st["stages_completed"].append(completed)
-    path.write_text(json.dumps(st, indent=2, ensure_ascii=False), encoding="utf-8")
+    contracts.write_atomic(path, json.dumps(st, indent=2, ensure_ascii=False))
 
 
 def add_error(ctx: Ctx, message: str) -> None:
@@ -189,7 +189,7 @@ def add_error(ctx: Ctx, message: str) -> None:
     except (FileNotFoundError, json.JSONDecodeError):
         st = {"ticker": ctx.ticker, "stages_completed": [], "errors": []}
     st.setdefault("errors", []).append({"message": message, "at": _now()})
-    path.write_text(json.dumps(st, indent=2, ensure_ascii=False), encoding="utf-8")
+    contracts.write_atomic(path, json.dumps(st, indent=2, ensure_ascii=False))
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -232,18 +232,46 @@ def load_existing_config(ctx: Ctx):
             pass
 
 
-def resolve_run_date(ctx: Ctx) -> str:
-    p = ctx.ws / "status.json"
-    if p.exists():
-        try:
-            d = json.loads(p.read_text(encoding="utf-8")).get("run_date")
-            if d:
-                return d
-        except json.JSONDecodeError:
-            pass
+def resolve_run_date(ctx: Ctx, keep_recorded: bool = False) -> str:
+    """The run's date: the last trading session, as the orchestrator does. A run
+    recorded for that same date is resumed (see _completed_stages); a run of an
+    earlier session, finished or not, never pins the date. An explicit --from
+    re-runs part of the recorded run, so it keeps the recorded date."""
+    if keep_recorded:
+        recorded = (_read_json(ctx.ws / "status.json") or {}).get("run_date")
+        if recorded:
+            return recorded
     out = subprocess.run([VENV_PY, str(ROOT / "scripts" / "trading_day.py"), str(ctx.ws)],
                          capture_output=True, text=True, cwd=str(ROOT))
     return (out.stdout or "").strip() or datetime.now(timezone.utc).date().isoformat()
+
+
+def start_fresh_if_new_date(ctx: Ctx) -> None:
+    """A new run date starts a new status: the previous run's completed stages
+    and errors must not be read as this run's."""
+    if ctx.dry:
+        return
+    st = _read_json(ctx.ws / "status.json")
+    if st is not None and st.get("run_date") == ctx.date:
+        return
+    contracts.write_atomic(ctx.ws / "status.json", json.dumps(
+        {"ticker": ctx.ticker, "run_mode": ctx.run_mode, "run_date": ctx.date,
+         "stage": None, "started_at": _now(), "updated_at": _now(),
+         "stages_completed": [], "errors": []}, indent=2, ensure_ascii=False))
+
+
+def reopen_stages(ctx: Ctx, stages: list[str]) -> None:
+    """A forced re-run (--from) redoes these stages: they are no longer complete, so a
+    crash part-way resumes them instead of finding the earlier run marked done."""
+    if ctx.dry:
+        return
+    st = _read_json(ctx.ws / "status.json")
+    if st is None or st.get("run_date") != ctx.date:
+        return
+    st["stages_completed"] = [s for s in st.get("stages_completed") or [] if s not in stages]
+    st["stage"] = stages[0] if stages else st.get("stage")
+    st["updated_at"] = _now()
+    contracts.write_atomic(ctx.ws / "status.json", json.dumps(st, indent=2, ensure_ascii=False))
 
 
 def _analyst_roles(ctx: Ctx) -> list[str]:
@@ -251,11 +279,13 @@ def _analyst_roles(ctx: Ctx) -> list[str]:
     return roles or ["company_analyst", "chips_analyst", "risk_analyst", "market_analyst"]
 
 
-def _read_json(path: Path):
+def _read_json(path: Path) -> dict | None:
+    """A JSON object from a workspace file; None if missing, torn or not an object."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 # ── stages ─────────────────────────────────────────────────────────────────
@@ -335,12 +365,14 @@ def st_discuss_debate(ctx):
         ])
         # 2. chair tallies views + surfaces retained dissent
         codex_skill(ctx, "mm-discussion-moderator", "tally", str(r), critical=False)
-        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds);
+        #    a verdict the grader did not write this round (it crashed) is never acted on
+        _clear(ctx, contracts.discussion_convergence_path(ctx.ws, ctx.date, r))
         det(ctx, "eval/graders/discussion_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
         if ctx.dry:
             print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
             break
-        conv = _read_json(ctx.ws / "discussion" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        conv = _read_json(contracts.discussion_convergence_path(ctx.ws, ctx.date, r))
         if (conv or {}).get("exit"):
             log(f"discussion panel converged on round {r}: {(conv or {}).get('exit_reason')}")
             break
@@ -394,7 +426,59 @@ def _latest_review(ctx):
     return _read_json(files[-1]) if files else None
 
 
+def _clear(ctx, path: Path) -> None:
+    if not ctx.dry:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:   # not a file (a directory, say): _read_json reads it as nothing
+            pass
+
+
+def _ledger_outcome(ctx) -> dict | None:
+    """This run date's release outcome in the ledger (sealed or blocked), if any.
+    A ledger that cannot be read yields {"type": "unreadable"}: it may hold one."""
+    if ctx.dry:
+        return None
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from ledger import seal as ledger_seal
+        return ledger_seal.outcome(ctx.ws, ctx.date)
+    except Exception as exc:  # noqa: BLE001 - unknown is not none
+        return {"type": "unreadable", "seq": None, "error": str(exc)}
+
+
+def _release_check(ctx, ledger: bool = True) -> dict:
+    if str(ROOT / "eval") not in sys.path:
+        sys.path.insert(0, str(ROOT / "eval"))
+    from pre_release_gate import release_check
+    return release_check(ctx.ws, ctx.date, ledger=ledger)
+
+
+class LedgerUnavailable(RuntimeError):
+    """The ledger cannot be verified, so this run date's outcome is unknown. Raised
+    out of the decide stage: the stage fails, is not marked complete, and a normal
+    re-run after the ledger is repaired decides (or finds the outcome) then."""
+
+
 def st_decide(ctx):
+    # A run date has one release outcome. Once the ledger holds it (a crash after
+    # the seal or the block, a resume, --from decide), deciding again could only
+    # produce a decision that can never be sealed or published.
+    settled = _ledger_outcome(ctx)
+    if settled and settled["type"] == "unreadable":
+        add_error(ctx, f"ledger unreadable, so {ctx.date}'s outcome is unknown; not deciding "
+                       f"until it is repaired (ledger/cli.py verify): {settled['error']}")
+        raise LedgerUnavailable("ledger unreadable; repair it, then re-run to resume at decide")
+    if settled:
+        log(f"decide: the ledger already holds record {settled['seq']} ({settled['type']}) "
+            f"for {ctx.date}; not deciding again")
+        if settled["type"] == "gate_block":
+            errors = (_read_json(ctx.ws / "status.json") or {}).get("errors") or []
+            if not any("pre_release_gate blocked" in str(e.get("message", "")) for e in errors
+                       if isinstance(e, dict)):
+                add_error(ctx, f"pre_release_gate blocked (ledger record {settled['seq']})")
+        return
     panel = (ctx.cfg.get("decision", {}) or {}).get("panel", {}) or {}
     if not panel.get("enabled", True):
         codex_skill(ctx, "mm-decision-maker")   # legacy single-shot decision
@@ -410,12 +494,14 @@ def st_decide(ctx):
         ])
         # 2. chair tallies ballots + surfaces retained dissent
         codex_skill(ctx, "mm-decision-maker", "tally", str(r), critical=False)
-        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds);
+        #    a verdict the grader did not write this round (it crashed) is never acted on
+        _clear(ctx, contracts.panel_convergence_path(ctx.ws, ctx.date, r))
         det(ctx, "eval/graders/panel_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
         if ctx.dry:
             print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
             break
-        conv = _read_json(ctx.ws / "decision" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        conv = _read_json(contracts.panel_convergence_path(ctx.ws, ctx.date, r))
         if (conv or {}).get("exit"):
             log(f"panel converged on round {r}: {(conv or {}).get('exit_reason')}")
             break
@@ -426,11 +512,17 @@ def st_decide(ctx):
 
 
 def _gate(ctx) -> str:
-    """Run the pre-release gate; branch on its JSON, never on the exit code."""
-    det(ctx, "eval/pre_release_gate.py", ctx.ws, ctx.date, critical=False)
+    """Run the pre-release gate, then re-check rather than trust its file: the
+    gate removes any earlier verdict before it runs, and release_check
+    re-evaluates the decision, so a crashed gate or a planted verdict reads
+    blocked. Exit 0 is passed and 2 blocked; anything else is a crash."""
+    rc = det(ctx, "eval/pre_release_gate.py", ctx.ws, ctx.date, critical=False)
     if ctx.dry:
         return "passed"
-    return (_read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}).get("status", "blocked")
+    if rc not in (0, 2):
+        return "blocked"
+    # the decision alone; whether it is the sealed one is st_decide's and export's question
+    return "passed" if _release_check(ctx, ledger=False)["status"] == "passed" else "blocked"
 
 
 def gate_decision(ctx) -> str:
@@ -453,11 +545,13 @@ def gate_decision(ctx) -> str:
     if status == "passed":
         _seal(ctx)
     else:
-        gate = _read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}
-        checks = sorted({e.get("check", "?") for e in gate.get("errors", [])}) or ["unreadable"]
+        checks = sorted({str(e.get("check", "?")) for e in _release_check(ctx, ledger=False)["errors"]}) or ["unreadable"]
+        # ledger first: a crash between the two then resumes into st_decide's
+        # settled path, which adds the missing error — never an error without a block
+        if det(ctx, "ledger/cli.py", "block", ctx.ws, ctx.date, critical=False) != 0:
+            add_error(ctx, "ledger block not recorded: the ledger refused it (ledger/cli.py verify)")
         add_error(ctx, f"pre_release_gate blocked: {', '.join(checks)}")
         log(f"release BLOCKED by the pre-release gate ({', '.join(checks)})")
-        det(ctx, "ledger/cli.py", "block", ctx.ws, ctx.date, critical=False)
     return status
 
 
@@ -469,42 +563,17 @@ def _seal(ctx) -> None:
         log("WARNING: ledger seal failed — the decision is not in the ledger")
 
 
-def _write_blocked(ctx) -> None:
-    gate = _read_json(contracts.pre_release_gate_path(ctx.ws, ctx.date)) or {}
-    lines = [f"# {ctx.ticker} {ctx.date} — release blocked", "",
-             "The decision did not pass the pre-release gate, so no report was exported.", ""]
-    for e in gate.get("errors", []) or [{"check": "missing", "message": "no gate result"}]:
-        lines.append(f"- `{e.get('check')}`: {e.get('message')}")
-    out = contracts.blocked_report_path(ctx.ws, ctx.date)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _latest_draft(ctx) -> Path | None:
-    d = ctx.ws / "drafts" / ctx.date
-    drafts = sorted(d.glob("*.md"), key=lambda q: q.stat().st_mtime) if d.is_dir() else []
-    return drafts[-1] if drafts else None
-
-
 def st_export(ctx):
+    # Same command as orchestrator stage 13: re-check the decision, then the
+    # report and the decision land in final/ — or BLOCKED.md does.
     if not ctx.dry:
-        sys.path.insert(0, str(ROOT / "eval"))
-        from pre_release_gate import gate_status
-        if gate_status(ctx.ws, ctx.date) != "passed":
-            _write_blocked(ctx)
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        import export_release
+        result = export_release.export(ctx.ws, ctx.date, ctx.run_mode, ctx.lang)
+        if result["status"] == "blocked":
             log("export skipped: release blocked (final/{date}/BLOCKED.md)")
             return
-        # Same as orchestrator stage 13: the report and decision land in final/.
-        draft = _latest_draft(ctx)
-        if draft is not None:
-            final_md = contracts.final_report_path(ctx.ws, ctx.date, ctx.run_mode)
-            final_md.parent.mkdir(parents=True, exist_ok=True)
-            final_md.write_text(draft.read_text(encoding="utf-8"), encoding="utf-8")
-            decision = _read_json(contracts.decision_path(ctx.ws, ctx.date)) or {}
-            contracts.final_report_json_path(ctx.ws, ctx.date, ctx.run_mode).write_text(
-                json.dumps({"report_markdown": final_md.name, "draft_source": draft.name,
-                            "decision": decision, "exported_at": _now()},
-                           indent=2, ensure_ascii=False), encoding="utf-8")
     chart_args = [ctx.ws, ctx.date, ctx.ticker]
     if ctx.lang == "ch":
         chart_args.append("--lang")
@@ -595,11 +664,14 @@ def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
     # existing resolved_config so the header/lang are accurate (the
     # resolve_config stage re-merges fresh when it runs).
     load_existing_config(ctx)
-    ctx.date = resolve_run_date(ctx)
+    ctx.date = resolve_run_date(ctx, keep_recorded=from_stage is not None)
+    start_fresh_if_new_date(ctx)
     # An explicit --from is a forced re-run from that stage; otherwise resume by
     # skipping stages status.json already records as completed for this date.
     # Dry runs never skip — --dry-run previews the full plan, not resume state.
     skip = _completed_stages(ctx) if (from_stage is None and not ctx.dry) else set()
+    if from_stage is not None:
+        reopen_stages(ctx, STAGES[start:])
     log(f"ticker={ctx.ticker} run_date={ctx.date} lang={ctx.lang} "
         f"stages={STAGES[start]}..{STAGES[end-1]} dry_run={ctx.dry}")
     for stage in STAGES[start:end]:
