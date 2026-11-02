@@ -4,6 +4,7 @@
     .venv/bin/python3 ledger/cli.py init                    # seal the preregistration (record 1)
     .venv/bin/python3 ledger/cli.py seal  <workspace> <date> # after the pre-release gate passed
     .venv/bin/python3 ledger/cli.py block <workspace> <date> # record a gate-blocked release
+    .venv/bin/python3 ledger/cli.py outcome <workspace> <date> # the run date's seal/block, if any
     .venv/bin/python3 ledger/cli.py verify                  # recompute every hash and link
     .venv/bin/python3 ledger/cli.py stamps                  # submit/upgrade OpenTimestamps receipts
     .venv/bin/python3 ledger/cli.py score                   # append outcomes for matured horizons
@@ -13,7 +14,7 @@
     .venv/bin/python3 ledger/cli.py drill                   # restore latest snapshot and verify it
 
 Data root: MM_DATA_ROOT (default ~/MarketMindData), never inside iCloud.
-Exit: 0 ok, 1 refused or failed.
+Exit: 0 ok, 1 refused or failed; `outcome` exits 2 when the run date is settled.
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="MarketMind decision ledger")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
-    for name in ("seal", "block"):
+    for name in ("seal", "block", "outcome"):
         p = sub.add_parser(name)
         p.add_argument("workspace", type=Path)
         p.add_argument("date")
@@ -59,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
             rec = seal.record_block(args.workspace, args.date, root)
             print("ledger: no protocol record; block not recorded" if rec is None
                   else f"ledger: recorded gate block as record {rec['seq']}")
+        elif args.cmd == "outcome":
+            found = seal.outcome(args.workspace, args.date, root)
+            print(json.dumps(found) if found else "none")
+            return 2 if found else 0
         elif args.cmd == "verify":
             result = store.verify(root)
             result["stamps"] = stamp.stamp_summary(root)

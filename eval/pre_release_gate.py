@@ -10,19 +10,32 @@ Checks, in order:
   derive            headline `decision` / legacy `risk_overlay` are re-derived
                     from `actions` and the investor's declared position
   unresolved_id     every cited evidence id exists as a card file
+  ambiguous_id      ... and exactly one: two different card files claiming the
+                    same id would let either one be judged
   future_card       no cited card was published after issuance
   stale_chip /      every cited chip card carries its observation date and is
-  undated_chip      fresh for its block's cadence (any label, overlay or read)
-  k1_uncorroborated a BUY or SELL whose same-direction reasons cite chip
-                    evidence also cites independent same-direction evidence
+  undated_chip      fresh for its block's cadence (any label, overlay or read),
+                    on the workspace market's calendar
+  no_supporting_    a BUY or SELL has at least one reason pointing its way
+  reason
+  k1_uncorroborated a BUY or SELL that leans on chip evidence — cited by a
+                    same-direction or neutral reason, or a chip card whose own
+                    sentiment points the label's way under any tag — also cites
+                    independent, dated same-direction evidence
                     (company / filing / catalyst / company-specific news)
 
 Warnings (never block): headline mismatch, suspected chip cards without a date,
-a card whose sentiment opposes the reason citing it, a BUY/SELL with no
-same-direction reason.
+cited cards without a parseable publication date, a card whose sentiment
+opposes the reason citing it.
 
 Writes decision/{date}/pre_release_gate.json with the sha256 of the decision
-file as released, so the ledger seal can refuse an edited decision.
+file as released. The gate never raises on LLM-written input: anything it
+cannot evaluate is blocked. It removes any earlier verdict before it reads the
+decision, so a crash can never leave an old "passed" in place.
+
+Consumers (ledger seal, export, PDF renderer) call `release_check()`, which
+re-evaluates the decision instead of trusting the verdict file: the file is
+writable by the same LLM steps the gate guards against.
 
 Usage:
     .venv/bin/python3 eval/pre_release_gate.py <workspace> <date>
@@ -51,25 +64,86 @@ LABELS = {"BUY", "HOLD", "SELL"}
 OVERLAYS = {"none", "hedge", "trim", "stop"}
 DIRECTIONS = {"up", "down", "neutral"}
 LABEL_DIRECTION = {"BUY": "up", "SELL": "down"}
+DIRECTION_SENTIMENT = {"up": "positive", "down": "negative"}
 _ID_RE = re.compile(r"ev_\d{4}-?\d{2}-?\d{2}_[A-Za-z]+_\d{3}")
+
+# Chip blocks a card's own fields imply: source type and dataset name, beside
+# any block it names. The strictest wins, so a missing, mislabelled or
+# capitalised block cannot buy a longer freshness window.
+_SOURCE_TYPE_BLOCK = {"margin_data": "margin", "fund_flow": "main_force",
+                      "northbound_holding": "northbound", "lhb": "lhb", "dragon_tiger": "lhb",
+                      "holder_count": "holder_count", "turnover": "turnover"}
+_DATASET_BLOCK = (("stock_margin", "margin"), ("margin_detail", "margin"),
+                  ("stock_hsgt", "northbound"), ("fund_flow", "main_force"),
+                  ("stock_lhb", "lhb"), ("stock_zh_a_gdhs", "holder_count"),
+                  ("turnover_rate", "turnover"), ("stock_restricted_release", "restricted_release"))
+# Daily bars, and an unlock schedule (a snapshot read on its as_of), are judged
+# like a daily block. Strictest first; a card implying none of these is "unknown".
+_JUDGED_AS = {"price_structure": "turnover", "restricted_release": "turnover"}
+_STRICTEST_FIRST = ("turnover", "main_force", "northbound", "margin", "lhb", "holder_count")
 
 
 def _err(check: str, message: str, **extra) -> dict:
     return {"check": check, "message": message, **extra}
 
 
-def load_cards(ws: Path, date: str) -> dict[str, dict]:
-    """Every card file for the run, keyed by its id (file stem as fallback)."""
+def _list(value) -> list:
+    """An LLM-written list field; anything else reads as empty (check_schema says so)."""
+    return value if isinstance(value, list) else []
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def load_cards_checked(ws: Path, date: str) -> tuple[dict[str, dict], set[str]]:
+    """Every card file for the run keyed by its id (file stem as fallback), plus
+    the ids that two different card files claim."""
     cards: dict[str, dict] = {}
+    ambiguous: set[str] = set()
     for path in sorted((ws / "normalized" / date / "evidence_cards").glob("*.json")):
         try:
             card = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if isinstance(card, dict):
-            cards.setdefault(str(card.get("id") or path.stem), card)
-            cards.setdefault(path.stem, card)
-    return cards
+            for key in dict.fromkeys((str(card.get("id") or path.stem), path.stem)):
+                if key in cards and cards[key] != card:
+                    ambiguous.add(key)
+                cards.setdefault(key, card)
+    return cards, ambiguous
+
+
+def load_cards(ws: Path, date: str) -> dict[str, dict]:
+    return load_cards_checked(ws, date)[0]
+
+
+def chip_block(card: dict) -> str:
+    """The cadence a chip card is judged by: the strictest its fields imply."""
+    meta = _dict(card.get("meta"))
+    lineages = [_dict(meta.get("lineage")), _dict(card.get("lineage"))]
+    names = [str(lin.get("block")).strip().lower() for lin in lineages if lin.get("block")]
+    names.append(_SOURCE_TYPE_BLOCK.get(str(card.get("source_type", "")).strip().lower()))
+    sources = " ".join(str(x) for x in [card.get("source_name")]
+                       + [lin.get("dataset") for lin in lineages] if x).lower()
+    names += [block for fragment, block in _DATASET_BLOCK if fragment in sources]
+    judged = {_JUDGED_AS.get(n, n) for n in names if n}
+    return next((b for b in _STRICTEST_FIRST if b in judged), "unknown")
+
+
+def market_profile(ws: Path) -> str:
+    """The workspace's market (US|HK|CN|...), whose calendar judges chip freshness."""
+    for path, keys in ((ws / "profile" / "company_profile.json", ("market_profile",)),
+                       (ws / "resolved_config.json", ("company", "market_profile"))):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            for k in keys:
+                value = value.get(k)
+        except (OSError, ValueError, AttributeError):
+            continue
+        if value:
+            return str(value).upper()
+    return "CN"
 
 
 def position_state(ws: Path) -> str:
@@ -93,7 +167,7 @@ def check_schema(dec: dict) -> list[dict]:
             a = actions.get(track)
             if not isinstance(a, dict) or a.get("label") not in LABELS:
                 errs.append(_err("schema", f"actions.{track}.label must be BUY|HOLD|SELL"))
-            elif a.get("overlay", "none") not in OVERLAYS:
+            elif not isinstance(a.get("overlay", "none"), str) or a.get("overlay", "none") not in OVERLAYS:
                 errs.append(_err("schema", f"actions.{track}.overlay must be none|hedge|trim|stop"))
     fc = dec.get("forecast")
     p = fc.get("p_outperform") if isinstance(fc, dict) else None
@@ -107,6 +181,8 @@ def check_schema(dec: dict) -> list[dict]:
     conf = dec.get("confidence")
     if not isinstance(conf, (int, float)) or isinstance(conf, bool) or not 0 <= conf <= 1:
         errs.append(_err("schema", "confidence must be a number in [0, 1]"))
+    if not isinstance(dec.get("supporting_evidence_ids", []), list):
+        errs.append(_err("schema", "supporting_evidence_ids must be a list"))
     reasons = dec.get("top_reasons")
     if not isinstance(reasons, list) or not reasons:
         errs.append(_err("schema", "top_reasons must be a non-empty list"))
@@ -133,7 +209,7 @@ def audit_reasons(dec: dict) -> list[dict]:
     """v1 string reasons -> structured, assuming each supports the label."""
     direction = LABEL_DIRECTION.get(str(dec.get("decision", "")).upper(), "neutral")
     out = []
-    for r in dec.get("top_reasons") or []:
+    for r in _list(dec.get("top_reasons")):
         if isinstance(r, dict):
             out.append(r)
         else:
@@ -158,7 +234,7 @@ def evaluate(ws: Path, date: str, dec: dict, issued_at: datetime,
     errors: list[dict] = []
     warnings: list[dict] = []
     schema_errors = check_schema(dec)
-    reasons = audit_reasons(dec) if audit else [r for r in (dec.get("top_reasons") or [])
+    reasons = audit_reasons(dec) if audit else [r for r in _list(dec.get("top_reasons"))
                                                 if isinstance(r, dict)]
     if audit:
         warnings += [{**e, "check": "schema_v1"} for e in schema_errors]
@@ -173,12 +249,15 @@ def evaluate(ws: Path, date: str, dec: dict, issued_at: datetime,
                                  f"decision {dec.get('decision')} != {derived['track']} action "
                                  f"{derived['decision']}; using the action"))
 
-    cards = load_cards(ws, date)
+    cards, ambiguous = load_cards_checked(ws, date)
     ticker = ws.name
-    cited = []
-    for r in reasons:
-        cited += [str(i) for i in (r.get("evidence_ids") or [])]
-    cited += [str(i) for i in (dec.get("supporting_evidence_ids") or [])]
+    market = market_profile(ws)
+
+    def ids(r: dict) -> list[str]:
+        return [str(i) for i in _list(r.get("evidence_ids"))]
+
+    cited = [i for r in reasons for i in ids(r)]
+    cited += [str(i) for i in _list(dec.get("supporting_evidence_ids"))]
     classes: dict[str, dict] = {}
     for cid in dict.fromkeys(cited):
         card = cards.get(cid)
@@ -186,11 +265,18 @@ def evaluate(ws: Path, date: str, dec: dict, issued_at: datetime,
             errors.append(_err("unresolved_id", f"{cid} is not an evidence card of this run",
                                evidence_id=cid))
             continue
+        if cid in ambiguous:
+            errors.append(_err("ambiguous_id", f"{cid} is claimed by more than one card file",
+                               evidence_id=cid))
+            continue
         cls = evidence_meta.classify(card, ticker)
         classes[cid] = cls
         if evidence_meta.published_after(card, issued_at):
             errors.append(_err("future_card", f"{cid} published {card.get('published_at')}, "
                                f"after issuance {issued_at.isoformat()}", evidence_id=cid))
+        if evidence_meta.parse_when(card.get("published_at"))[0] is None:
+            warnings.append(_err("undated_card", f"{cid} has no parseable published_at, so "
+                                 "look-ahead cannot be ruled out", evidence_id=cid))
         if cls["chip_class"] == "chip":
             obs_date, basis = evidence_meta.observation_date(card)
             if obs_date is None:
@@ -201,13 +287,13 @@ def evaluate(ws: Path, date: str, dec: dict, issued_at: datetime,
                     warnings.append(_err("as_of_from_published_at",
                                          f"news chip card {cid} dated by its publication date",
                                          evidence_id=cid))
-                block = (((card.get("meta") or {}).get("lineage") or card.get("lineage") or {})
-                         .get("block"))
-                if block == "price_structure":
-                    block = "turnover"  # same daily cadence
-                elif block not in freshness.CADENCE:
-                    block = "unknown"
-                verdict = freshness.assess(block, obs_date, date, issued_at)
+                verdict = freshness.assess(chip_block(card), obs_date, date, issued_at,
+                                           market=market)
+                horizon = freshness.calendar_end(market)
+                if horizon and date > horizon:
+                    warnings.append(_err("calendar_horizon", f"{cid}: sessions after {horizon} are "
+                                         "weekdays (holidays unknown); upgrade exchange_calendars",
+                                         evidence_id=cid))
                 if not verdict["fresh"]:
                     errors.append(_err("stale_chip", f"chip card {cid}: {verdict['reason']}",
                                        evidence_id=cid))
@@ -217,25 +303,36 @@ def evaluate(ws: Path, date: str, dec: dict, issued_at: datetime,
 
     for i, r in enumerate(reasons):
         d = r.get("direction")
-        for cid in r.get("evidence_ids") or []:
-            sent = str((cards.get(cid) or {}).get("sentiment", "")).lower()
+        for cid in ids(r):
+            sent = str(_dict(cards.get(cid)).get("sentiment", "")).lower()
             if (d == "up" and sent == "negative") or (d == "down" and sent == "positive"):
                 warnings.append(_err("sentiment_conflict",
                                      f"top_reasons[{i}] points {d} but {cid} is {sent}",
                                      evidence_id=cid))
 
     # K1 — once per direction implied by any BUY/SELL among headline and actions.
+    # The direction tags are the decision author's own, so a tag alone cannot
+    # take chip evidence out of K1: a "neutral" reason citing chips still leans
+    # on them, so does any reason citing a chip card whose own sentiment points
+    # the label's way (the generator sets it), and a BUY/SELL must have a reason
+    # its way.
     for label in sorted(_labels(dec) - {"HOLD"}):
         d = LABEL_DIRECTION[label]
         same = [r for r in reasons if r.get("direction") == d]
         if not same:
-            warnings.append(_err("no_supporting_reason", f"{label} has no '{d}' reason"))
+            errors.append(_err("no_supporting_reason", f"{label} has no '{d}' reason"))
             continue
-        ids = [str(i) for r in same for i in (r.get("evidence_ids") or []) if str(i) in classes]
-        chip_ids = [i for i in ids if classes[i]["chip_class"] in ("chip", "suspected_chip")]
+        chip_ids = [i for r in reasons for i in ids(r) if i in classes
+                    and classes[i]["chip_class"] in ("chip", "suspected_chip")
+                    and (r.get("direction") in (d, "neutral")
+                         or str(cards[i].get("sentiment", "")).lower() == DIRECTION_SENTIMENT[d])]
         if not chip_ids:
             continue
-        independent = [i for i in ids if classes[i]["independent"]
+        # Corroboration needs a publication date: an undated or month/year card
+        # could post-date the decision.
+        independent = [i for r in same for i in ids(r) if i in classes and classes[i]["independent"]
+                       and evidence_meta.parse_when(cards[i].get("published_at"))[1]
+                       in ("date", "datetime")
                        and not evidence_meta.published_after(cards[i], issued_at)]
         if not independent:
             errors.append(_err("k1_uncorroborated",
@@ -267,45 +364,131 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _not_evaluable(issued_at: datetime, message: str) -> dict:
+    return {"gate": "pre_release", "version": 1, "mode": "release", "status": "blocked",
+            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "issued_at": issued_at.isoformat(timespec="seconds"), "derived_fields": None,
+            "errors": [_err("schema", message)], "warnings": [], "counts": {}}
+
+
+def evaluate_safely(ws: Path, date: str, dec, issued_at: datetime) -> dict:
+    """evaluate() for release: LLM-written input it cannot evaluate blocks, never raises."""
+    if not isinstance(dec, dict):
+        return _not_evaluable(issued_at, "final_decision.json is not a JSON object")
+    try:
+        return evaluate(ws, date, dec, issued_at)
+    except Exception as exc:  # noqa: BLE001 - malformed input must block, not crash the gate
+        return _not_evaluable(issued_at, f"decision not evaluable: {type(exc).__name__}: {exc}")
+
+
 def run(ws: Path, date: str, now: datetime | None = None) -> dict:
     """Release mode: derive headline fields into the decision, check, record."""
     path = contracts.decision_path(ws, date)
+    out = contracts.pre_release_gate_path(ws, date)
+    out.unlink(missing_ok=True)   # no verdict from an earlier attempt survives this run
     issued_at = now or datetime.now(timezone.utc)
+    raw = None
     try:
-        dec = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        dec = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as exc:
-        result = {"gate": "pre_release", "version": 1, "mode": "release", "status": "blocked",
-                  "checked_at": issued_at.isoformat(timespec="seconds"),
-                  "issued_at": issued_at.isoformat(timespec="seconds"), "derived_fields": None,
-                  "errors": [_err("schema", f"final_decision.json unreadable: {exc}")],
-                  "warnings": [], "counts": {}}
+        result = _not_evaluable(issued_at, f"final_decision.json unreadable: {exc}")
     else:
-        result = evaluate(ws, date, dec, issued_at)
+        result = evaluate_safely(ws, date, dec, issued_at)
         derived = result["derived_fields"]
         if derived:
             dec["decision"] = derived["decision"]
             dec["risk_overlay"] = derived["risk_overlay"]
             dec["derived_fields"] = {k: derived[k] for k in ("position_state", "track")}
-            path.write_text(json.dumps(dec, indent=2, ensure_ascii=False), encoding="utf-8")
-    result["decision_sha256"] = sha256_file(path) if path.exists() else None
-    out = contracts.pre_release_gate_path(ws, date)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+            text = json.dumps(dec, indent=2, ensure_ascii=False)
+            contracts.write_atomic(path, text)
+            raw = text.encode("utf-8")
+    # the hash of the bytes this run judged, not of a re-read the file could change under
+    result["decision_sha256"] = hashlib.sha256(raw).hexdigest() if raw is not None else None
+    contracts.write_atomic(out, json.dumps(result, indent=2, ensure_ascii=False))
     return result
 
 
-def gate_status(ws: Path, date: str) -> str:
-    """'passed' | 'blocked' | 'missing' | 'stale' (decision edited after the gate)."""
+def _ledger_outcome(ws: Path, date: str) -> dict | None:
+    """The ledger's release outcome for this run date; raises if the ledger is unreadable."""
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from ledger import seal as ledger_seal
+    return ledger_seal.outcome(ws, date)
+
+
+def release_check(ws: Path, date: str, at: datetime | None = None,
+                  ledger: bool = True) -> dict:
+    """Re-derive the verdict for the decision file as it is now.
+
+    The verdict file only says which decision bytes the gate saw; whether they
+    pass is recomputed here, at ``at``. By default that is a clock nothing in the
+    workspace can set: the issuance time the ledger sealed for this decision, or
+    else now — never the verdict file's own `issued_at`, which would let a
+    backdated file make old chip data fresh. Once the ledger holds this run
+    date's outcome, only the sealed decision may be published; a ledger that
+    exists but cannot be read blocks, since it may hold that outcome. Returns
+    {status, errors, decision, sha256, gate}; status is 'passed' | 'blocked' |
+    'missing' | 'stale' (edited after the gate) | 'mismatch' (the recorded
+    verdict says passed, but re-evaluation does not, or the ledger sealed
+    something else or cannot be read).
+    """
+    out = {"status": "missing", "errors": [], "decision": None, "sha256": None, "gate": None,
+           "sealed": False}
     try:
         gate = json.loads(contracts.pre_release_gate_path(ws, date).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "missing"
+        return out
+    out["gate"] = gate = _dict(gate)
     if gate.get("status") != "passed":
-        return "blocked"
-    path = contracts.decision_path(ws, date)
-    if not path.exists() or sha256_file(path) != gate.get("decision_sha256"):
-        return "stale"
-    return "passed"
+        out["status"] = "blocked"
+        out["errors"] = [e for e in _list(gate.get("errors")) if isinstance(e, dict)]
+        return out
+    try:
+        raw = contracts.decision_path(ws, date).read_bytes()
+    except OSError:
+        out["status"] = "stale"
+        return out
+    out["sha256"] = hashlib.sha256(raw).hexdigest()
+    if out["sha256"] != gate.get("decision_sha256"):
+        out["status"] = "stale"
+        return out
+    sealed = None
+    if ledger:
+        try:
+            sealed = _ledger_outcome(ws, date)
+        except Exception as exc:  # noqa: BLE001 - unknown outcome: never publish past it
+            out["status"] = "mismatch"
+            out["errors"] = [_err("ledger", f"the ledger cannot be read, so this run date's "
+                                  f"outcome is unknown: {exc}")]
+            return out
+        if sealed and (sealed["type"] != "decision" or sealed.get("decision_sha256") != out["sha256"]):
+            out["status"] = "mismatch"
+            out["errors"] = [_err("ledger", f"the ledger already holds record {sealed['seq']} "
+                                  f"({sealed['type']}) for {ws.name} {date}; only that outcome "
+                                  "may be published")]
+            return out
+    if at is None:
+        when, precision = evidence_meta.parse_when((sealed or {}).get("issued_at"))
+        at = when if when is not None and precision == "datetime" else datetime.now(timezone.utc)
+    try:
+        dec = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        dec = None
+    result = evaluate_safely(ws, date, dec, at)
+    if result["status"] != "passed":
+        out["status"] = "mismatch"
+        out["errors"] = result["errors"]
+        return out
+    out["decision"] = dec
+    out["sealed"] = bool(sealed and sealed["type"] == "decision")
+    out["status"] = "passed"
+    return out
+
+
+def gate_status(ws: Path, date: str) -> str:
+    """'passed' | 'blocked' | 'missing' | 'stale' | 'mismatch' — see release_check."""
+    return release_check(ws, date)["status"]
 
 
 def main() -> int:

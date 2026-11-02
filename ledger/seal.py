@@ -1,8 +1,13 @@
 """Seal a released decision into the ledger, or record a blocked one.
 
 Sealing happens right after the pre-release gate passes and before export. It
-refuses unless (a) the preregistration protocol is record 1 of the ledger and
-(b) the gate passed this exact file (its recorded sha256 still matches).
+refuses unless (a) the preregistration protocol is record 1 of the ledger,
+(b) the gate passed this exact file (its recorded sha256 still matches) and the
+decision still passes when re-evaluated at the seal's own issuance time — the
+verdict file alone is writable by the LLM steps it judges — and (c) the ledger
+holds no release outcome (decision or gate_block) for this ticker and run date
+yet: a run date has one outcome, so a crash, a retry or `--from decide` cannot
+add a second scored forecast. (c) is checked under the ledger lock.
 
 A decision record carries everything needed to score it later without trusting
 the workspace: the issuance time from this code's clock (never an LLM-written
@@ -14,10 +19,12 @@ artifacts plus a profile snapshot are archived as ``archive/{id}.tar.gz``.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tarfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,11 +37,32 @@ DATED_DIRS = ("raw", "normalized", "quant", "valuation", "discussion", "drafts",
 LABELS = ("BUY", "HOLD", "SELL")
 
 
-def _gate_status(ws: Path, date: str) -> str:
+def _release_check(ws: Path, date: str, at: datetime | None = None) -> dict:
     if str(ROOT / "eval") not in sys.path:
         sys.path.insert(0, str(ROOT / "eval"))
-    from pre_release_gate import gate_status
-    return gate_status(ws, date)
+    from pre_release_gate import release_check
+    return release_check(ws, date, at=at, ledger=False)
+
+
+def _same_run(ws: Path, date: str):
+    """Records that settle this run date's release: its seal or its block."""
+    def match(rec: dict) -> bool:
+        body = rec.get("body") or {}
+        return (rec.get("type") in ("decision", "gate_block")
+                and body.get("ticker") == ws.name and body.get("run_date") == date)
+    return match
+
+
+def outcome(ws: Path, date: str, root: Path | None = None) -> dict | None:
+    """The release outcome the ledger holds for this run date, or None when it holds
+    none (no ledger file counts as none). Raises store.LedgerError when the ledger
+    cannot be read completely: it may hold an outcome that must be respected."""
+    root = store.check_root(root or store.data_root())
+    rec = next((r for r in store.read_complete(root) if _same_run(ws, date)(r)), None)
+    if rec is None:
+        return None
+    return {"type": rec["type"], "seq": rec["seq"], "issued_at": rec["body"].get("issued_at"),
+            "decision_sha256": ((rec["body"].get("gate") or {}).get("decision_sha256"))}
 
 
 def _sha(path: Path) -> str:
@@ -50,7 +78,7 @@ def _now() -> datetime:
 
 
 def has_protocol(root: Path) -> bool:
-    recs = store.read(root)
+    recs = store.read_complete(root)   # a torn or corrupt ledger refuses, never crashes
     return bool(recs) and recs[0]["type"] == "protocol"
 
 
@@ -68,20 +96,40 @@ def init(root: Path, stamp_binary: str | None = "auto") -> dict:
     return rec
 
 
-def manifest(ws: Path, date: str) -> dict:
-    """sha256 of every dated artifact of the run plus the undated inputs."""
-    files = {}
+def _run_files(ws: Path, date: str) -> list[Path]:
+    """Every dated artifact of the run plus the undated inputs."""
+    paths = []
     for sub in DATED_DIRS:
         base = ws / sub / date
         if base.is_dir():
-            for p in sorted(base.rglob("*")):
-                if p.is_file():
-                    files[str(p.relative_to(ws))] = _sha(p)
-    for p in [ws / "shared_context" / f"{date}.json", ws / "resolved_config.json",
-              *sorted((ws / "profile").glob("*.json"))]:
-        if p.is_file():
-            files[str(p.relative_to(ws))] = _sha(p)
-    return files
+            paths += [p for p in sorted(base.rglob("*")) if p.is_file()]
+    paths += [p for p in (ws / "shared_context" / f"{date}.json", ws / "resolved_config.json")
+              if p.is_file()]
+    if (ws / "profile").is_dir():
+        paths += [p for p in sorted((ws / "profile").rglob("*")) if p.is_file()]
+    return paths
+
+
+def snapshot(ws: Path, date: str, dest: Path) -> tuple[str, dict]:
+    """Archive the run to ``dest`` and hash each file from the bytes archived.
+
+    One read per file, so the manifest describes exactly the archive even while
+    something else writes to the workspace. Returns (archive sha256, manifest).
+    """
+    files = {}
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dest, "w:gz") as tar:
+        for p in _run_files(ws, date):
+            try:
+                data = p.read_bytes()
+            except OSError:   # removed since it was listed
+                continue
+            rel = str(p.relative_to(ws))
+            info = tarfile.TarInfo(f"{ws.name}/{rel}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+            files[rel] = hashlib.sha256(data).hexdigest()
+    return _sha(dest), files
 
 
 def skills_sha() -> str:
@@ -145,44 +193,39 @@ def _profile(ws: Path) -> dict:
         return {}
 
 
-def archive(ws: Path, date: str, dest: Path) -> str:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(dest, "w:gz") as tar:
-        for sub in DATED_DIRS:
-            base = ws / sub / date
-            if base.is_dir():
-                tar.add(base, arcname=f"{ws.name}/{sub}/{date}")
-        for p in [ws / "shared_context" / f"{date}.json", ws / "resolved_config.json"]:
-            if p.is_file():
-                tar.add(p, arcname=f"{ws.name}/{p.relative_to(ws)}")
-        if (ws / "profile").is_dir():
-            tar.add(ws / "profile", arcname=f"{ws.name}/profile")
-    return _sha(dest)
-
-
 def seal(ws: Path, date: str, root: Path | None = None, now: datetime | None = None,
          stamp_binary: str | None = "auto") -> dict:
     """Seal a gate-passed decision. Raises store.LedgerError on refusal."""
     root = store.check_root(root or store.data_root())
     if not has_protocol(root):
         raise store.LedgerError("no protocol record — run `ledger init` before sealing")
-    status = _gate_status(ws, date)
-    if status != "passed":
-        raise store.LedgerError(f"pre-release gate status is {status!r}; only a passed, "
-                                "unedited decision can be sealed")
+    prior = outcome(ws, date, root)
+    if prior:
+        raise store.LedgerError(f"{ws.name} {date} already has a release outcome: record "
+                                f"{prior['seq']} ({prior['type']}); a run date is sealed once")
     issued_at = now or _now()
-    dec_path = ws / "decision" / date / "final_decision.json"
-    dec = json.loads(dec_path.read_text(encoding="utf-8"))
-    gate = json.loads((ws / "decision" / date / "pre_release_gate.json").read_text(encoding="utf-8"))
+    chk = _release_check(ws, date, issued_at)
+    if chk["status"] != "passed":
+        why = "; ".join(f"{e.get('check')}: {e.get('message')}" for e in chk["errors"][:3])
+        raise store.LedgerError(f"pre-release gate status is {chk['status']!r}; only a passed, "
+                                "unedited decision can be sealed" + (f" ({why})" if why else ""))
+    # Seal exactly the bytes that were re-checked, not a later re-read.
+    dec, gate = chk["decision"], chk["gate"]
     profile = _profile(ws)
     decision_id = f"{ws.name}_{date}_{issued_at.strftime('%Y%m%dT%H%M%SZ')}"
 
-    files = manifest(ws, date)
+    # Files are named per attempt: a seal that loses the race under the ledger
+    # lock never overwrites the winner's archive, and removes only its own.
+    stem = f"{decision_id}_{uuid.uuid4().hex[:8]}"
+    arch_path = root / "archive" / f"{stem}.tar.gz"
+    man_path = root / "manifests" / f"{stem}.json"
+    arch_sha, files = snapshot(ws, date, arch_path)
+    if files.get(f"decision/{date}/final_decision.json") != chk["sha256"]:
+        arch_path.unlink(missing_ok=True)
+        raise store.LedgerError("final_decision.json changed while it was being sealed")
     man = {"decision_id": decision_id, "workspace": ws.name, "run_date": date, "files": files}
-    man_path = root / "manifests" / f"{decision_id}.json"
     man_path.parent.mkdir(parents=True, exist_ok=True)
     man_path.write_text(json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
-    arch_sha = archive(ws, date, root / "archive" / f"{decision_id}.tar.gz")
     ballots = final_ballots(ws, date)
 
     body = {
@@ -200,17 +243,24 @@ def seal(ws: Path, date: str, root: Path | None = None, now: datetime | None = N
         "confidence": dec.get("confidence"),
         "ballots": ballots,
         "tallies": tallies(ballots),
-        "gate": {"status": gate.get("status"), "decision_sha256": gate.get("decision_sha256"),
+        "gate": {"status": chk["status"], "decision_sha256": chk["sha256"],
                  "warnings": len(gate.get("warnings") or [])},
         "gate_revision": dec.get("gate_revision"),
+        "manifest_file": man_path.name,
         "manifest_sha256": _sha(man_path),
+        "archive_file": arch_path.name,
         "archive_sha256": arch_sha,
         "config_sha256": files.get("resolved_config.json"),
         "skills_sha256": skills_sha(),
         "git": git_state(),
     }
-    rec = store.append(root, "decision", body)
-    stamp_rec = stamp.stamp_record(root, rec, stamp_binary)
+    try:
+        rec = store.append(root, "decision", body, conflicts=_same_run(ws, date))
+    except store.LedgerError:
+        man_path.unlink(missing_ok=True)
+        arch_path.unlink(missing_ok=True)
+        raise
+    stamp_rec = stamp.stamp_record(root, rec, stamp_binary)   # after the lock: network
     receipt = {"decision_id": decision_id, "seq": rec["seq"], "hash": rec["hash"],
                "issued_at": body["issued_at"], "stamp_status": stamp_rec["body"]["status"],
                "ledger": str(store.ledger_path(root))}
@@ -220,14 +270,15 @@ def seal(ws: Path, date: str, root: Path | None = None, now: datetime | None = N
 
 
 def record_block(ws: Path, date: str, root: Path | None = None) -> dict | None:
-    """Append a gate_block record for a release the gate stopped (no seal)."""
+    """Append a gate_block record for a release the gate stopped (no seal).
+    Refuses when the decision passes, or when the run date already has an outcome."""
     root = store.check_root(root or store.data_root())
     if not has_protocol(root):
         return None
-    try:
-        gate = json.loads((ws / "decision" / date / "pre_release_gate.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        gate = {}
+    chk = _release_check(ws, date)
+    if chk["status"] == "passed":
+        raise store.LedgerError("the pre-release gate passed this decision; there is no block to record")
     body = {"ticker": ws.name, "run_date": date, "at": _now().isoformat(timespec="seconds"),
-            "errors": [f"{e.get('check')}: {e.get('message')}" for e in gate.get("errors", [])]}
-    return store.append(root, "gate_block", body)
+            "errors": [f"{e.get('check')}: {e.get('message')}" for e in chk["errors"]]
+                      or [f"gate result {chk['status']}"]}
+    return store.append(root, "gate_block", body, conflicts=_same_run(ws, date))

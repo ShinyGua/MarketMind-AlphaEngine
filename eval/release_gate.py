@@ -92,7 +92,7 @@ def evaluate(workspace: Path, date: str) -> dict:
         release_status = "passed"
 
     pre_release = gate_status(workspace, date)
-    if pre_release in ("blocked", "stale"):
+    if pre_release in ("blocked", "stale", "mismatch"):
         release_status = RELEASE_BLOCKED
     elif pre_release == "missing" and release_status == RELEASE_PASSED:
         release_status = RELEASE_WARNING

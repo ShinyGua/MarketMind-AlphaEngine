@@ -9,18 +9,32 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("run_codex_pipeline", ROOT / "scripts" / "run_codex_pipeline.py")
 driver = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(driver)
 
 DATE = "2026-10-22"
+CARD = "ev_2026-10-22_company_001"
+# A valid v2 decision: the driver re-checks a "passed" verdict, so the fixture must pass.
+DECISION = {"schema_version": 2, "decision": "HOLD", "risk_overlay": "none",
+            "actions": {"if_flat": {"label": "HOLD", "overlay": "none"},
+                        "if_long": {"label": "HOLD", "overlay": "none"}},
+            "forecast": {"p_outperform": 0.5, "benchmark": "CSI300", "horizon_sessions": 20},
+            "confidence": 0.5,
+            "top_reasons": [{"text": "Shipments doubled", "evidence_ids": [CARD], "direction": "up"}]}
 
 
 def _ctx(tmp_path):
     ws = tmp_path / "300308"
     (ws / "decision" / DATE).mkdir(parents=True)
-    (ws / "decision" / DATE / "final_decision.json").write_text('{"decision": "SELL"}')
+    (ws / "decision" / DATE / "final_decision.json").write_text(json.dumps(DECISION))
+    cards = ws / "normalized" / DATE / "evidence_cards"
+    cards.mkdir(parents=True)
+    (cards / f"{CARD}.json").write_text(json.dumps(
+        {"id": CARD, "desk": "company", "source_type": "news", "ticker": "300308",
+         "title": "Q3 800G shipments doubled", "published_at": "2026-10-21"}))
     (ws / "status.json").write_text(json.dumps({"stages_completed": [], "errors": []}))
     return SimpleNamespace(ws=ws, date=DATE, dry=False, ticker="300308", run_mode="daily",
                            lang="en", cfg={}, plan=[])
@@ -39,7 +53,9 @@ def _install(monkeypatch, ctx, verdicts):
             (ctx.ws / "decision" / DATE / "pre_release_gate.json").write_text(json.dumps({
                 "status": status, "errors": [] if status == "passed" else
                 [{"check": "k1_uncorroborated", "message": "chip-only SELL"}],
+                "issued_at": "2026-10-22T09:00:00+00:00",
                 "decision_sha256": hashlib.sha256(dec.read_bytes()).hexdigest()}))
+            return 0 if status == "passed" else 2
         return 0
 
     monkeypatch.setattr(driver, "det", fake_det)
@@ -55,7 +71,7 @@ def test_blocked_twice_revises_once_and_records_the_error(tmp_path, monkeypatch)
     assert driver.gate_decision(ctx) == "blocked"
     assert calls["skills"] == [("mm-decision-maker", ("revise",))]
     assert calls["gate"] == 2
-    assert (ctx.ws / "decision" / DATE / "final_decision.pre_gate.json").read_text() == '{"decision": "SELL"}'
+    assert json.loads((ctx.ws / "decision" / DATE / "final_decision.pre_gate.json").read_text()) == DECISION
     errors = json.loads((ctx.ws / "status.json").read_text())["errors"]
     assert errors and "k1_uncorroborated" in errors[-1]["message"]
 
@@ -96,7 +112,7 @@ def test_passed_release_copies_the_report_then_renders(tmp_path, monkeypatch):
     driver.st_export(ctx)
     assert (ctx.ws / "final" / DATE / "daily_report.md").read_text() == "# Report v1"
     combined = json.loads((ctx.ws / "final" / DATE / "daily_report.json").read_text())
-    assert combined["decision"] == {"decision": "SELL"}
+    assert combined["decision"] == DECISION
     assert calls["det"] == ["templates/charts.py", "templates/render_pdf.py"]
 
 
@@ -115,8 +131,12 @@ def test_render_pdf_refuses_blocked_edited_or_ungated(tmp_path, monkeypatch):
     rp = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rp)
     ctx = _ctx(tmp_path)
-    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=False) is False   # missing
-    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=True) is True     # pre-gate re-render
+    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=False) is None    # missing
+    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=True) == DECISION  # pre-gate re-render
+    later = "2026-11-02"                                                   # a run the gate existed for
+    (ctx.ws / "decision" / later).mkdir(parents=True)
+    (ctx.ws / "decision" / later / "final_decision.json").write_text(json.dumps(DECISION))
+    assert rp._gate_allows(ctx.ws, later, allow_ungated=True) is None
     _install(monkeypatch, ctx, ["blocked"])
     driver._gate(ctx)
-    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=True) is False    # never overrides a block
+    assert rp._gate_allows(ctx.ws, DATE, allow_ungated=True) is None     # never overrides a block

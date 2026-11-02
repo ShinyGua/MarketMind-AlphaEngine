@@ -148,21 +148,36 @@ def strip_md_header(text: str) -> str:
     return "\n".join(out)
 
 
-def _gate_allows(workspace: Path, date: str, allow_ungated: bool) -> bool:
-    """The PDF is a release artifact: render only a decision the pre-release
-    gate passed and nobody edited since. --allow-ungated re-renders runs that
-    predate the gate; it never overrides a block."""
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
-    from pre_release_gate import gate_status
+# Runs dated before this predate eval/pre_release_gate.py (f06ae1b); only they
+# may be re-rendered without a gate result.
+FIRST_GATED_RUN_DATE = "2026-10-29"
 
-    status = gate_status(workspace, date)
-    if status == "passed" or (status == "missing" and allow_ungated):
-        return True
+
+def _gate_allows(workspace: Path, date: str, allow_ungated: bool) -> dict | None:
+    """The PDF is a release artifact: render only a decision that passes the
+    pre-release gate as it stands now (re-checked, not read from the verdict
+    file) and, once sealed, only the sealed one. Returns the decision to render,
+    or None. --allow-ungated re-renders runs that predate the gate; it never
+    overrides a block and never applies to a run the gate existed for."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
+    from pre_release_gate import release_check
+
+    chk = release_check(workspace, date)
+    status = chk["status"]
+    if status == "passed":
+        return chk["decision"]
+    if status == "missing" and allow_ungated and date < FIRST_GATED_RUN_DATE:
+        return load_json(workspace / "decision" / date / "final_decision.json") or {}
     reason = {"blocked": "the pre-release gate blocked this decision",
               "stale": "final_decision.json changed after the gate passed",
-              "missing": "no pre-release gate result (pass --allow-ungated for pre-gate runs)"}[status]
-    print(f"render_pdf: not rendering — {reason}", file=sys.stderr)
-    return False
+              "mismatch": "the decision does not pass the gate on re-check, or is not "
+                          "the decision the ledger sealed",
+              "missing": f"no pre-release gate result (--allow-ungated covers only runs "
+                         f"dated before {FIRST_GATED_RUN_DATE})"}[status]
+    detail = "; ".join(f"{e.get('check')}: {e.get('message')}" for e in chk["errors"][:3])
+    print(f"render_pdf: not rendering — {reason}" + (f" ({detail})" if detail else ""),
+          file=sys.stderr)
+    return None
 
 
 def main():
@@ -174,7 +189,8 @@ def main():
     workspace = Path(args[0])
     date = args[1]
     ticker = workspace.name
-    if not _gate_allows(workspace, date, "--allow-ungated" in sys.argv):
+    decision = _gate_allows(workspace, date, "--allow-ungated" in sys.argv)
+    if decision is None:
         sys.exit(3)
 
     cfg = load_json(workspace / "resolved_config.json") or {}
@@ -195,7 +211,6 @@ def main():
 
     profile = load_json(workspace / "profile" / "company_profile.json") or {}
     sym = currency_symbol(profile)
-    decision = load_json(workspace / "decision" / date / "final_decision.json") or {}
     quant = load_json(workspace / "quant" / date / "quant_summary.json") or {}
     val = load_json(workspace / "valuation" / date / "valuation_summary.json") or {}
     chips = load_json(workspace / "quant" / date / "chip_structure.json") or {}

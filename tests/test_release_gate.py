@@ -29,12 +29,25 @@ def _ws(tmp_path: Path, present: list[str], pre_release: str | None = "passed") 
         (eval_dir / f"{name}_result.json").write_text(
             json.dumps({"pass": True}), encoding="utf-8")
     if pre_release is not None:
+        card = f"ev_{DATE}_company_001"
+        cards = ws / "normalized" / DATE / "evidence_cards"
+        cards.mkdir(parents=True, exist_ok=True)
+        (cards / f"{card}.json").write_text(json.dumps(
+            {"id": card, "desk": "company", "source_type": "news", "title": "Orders up",
+             "published_at": DATE}), encoding="utf-8")
         dec = ws / "decision" / DATE / "final_decision.json"
         dec.parent.mkdir(parents=True, exist_ok=True)
-        dec.write_text(json.dumps({"decision": "HOLD"}), encoding="utf-8")
+        # a valid v2 decision: the pre-release status is re-checked, not read from the file
+        dec.write_text(json.dumps({
+            "schema_version": 2, "decision": "HOLD", "confidence": 0.5,
+            "actions": {"if_flat": {"label": "HOLD"}, "if_long": {"label": "HOLD"}},
+            "forecast": {"p_outperform": 0.5},
+            "top_reasons": [{"text": "Orders up", "evidence_ids": [card], "direction": "up"}]}),
+            encoding="utf-8")
         sha = hashlib.sha256(dec.read_bytes()).hexdigest()
         (dec.parent / "pre_release_gate.json").write_text(
-            json.dumps({"status": pre_release, "decision_sha256": sha}), encoding="utf-8")
+            json.dumps({"status": pre_release, "decision_sha256": sha,
+                        "issued_at": f"{DATE}T12:00:00+00:00"}), encoding="utf-8")
     return ws
 
 
