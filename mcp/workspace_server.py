@@ -16,6 +16,7 @@ from shared.contracts import (  # noqa: E402
     evidence_digest_path, shared_context_read_path, quant_summary_path,
     valuation_summary_path,
     thesis_map_path, decision_path, memory_context_read_path, detect_final_report,
+    write_atomic,
 )
 
 import mcp.types
@@ -44,8 +45,7 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 def _write_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")  # never torn
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")

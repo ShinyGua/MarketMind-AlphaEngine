@@ -58,11 +58,9 @@ STAGES = [
 
 **Execute this protocol exactly. Do not deviate.**
 
-**Progress reporting is controlled by `progress_mode` in `status.json`:**
+**Progress reporting:**
 
-- **`progress_mode: "monitor"`** (default when launched via `/mm:run`): A background `mm-progress-monitor` agent is watching `status.json` and updating the TodoWrite checklist. You do NOT need to call TodoWrite yourself — just update `status.json` via MCP and the monitor handles the display.
-
-- **`progress_mode: "orchestrator"`** (fallback when monitor failed to launch, or when invoked directly without `/mm:run`): You ARE the TodoWrite owner. After completing each stage, call TodoWrite yourself with all 15 stages, marking completed/in_progress/pending accordingly. Use the same stage list and labels as `mm-progress-monitor`:
+- **You are the TodoWrite owner** (`progress_mode: "orchestrator"`; a `"monitor"` value left in an older `status.json` is treated the same — the background monitor is retired). After completing each stage, call TodoWrite yourself with all 15 stages, marking completed/in_progress/pending accordingly, with these labels:
 
 ```
 STAGE_LABELS = {
@@ -84,7 +82,6 @@ STAGE_LABELS = {
 }
 ```
 
-- **If `progress_mode` is not set in `status.json`**: Assume `"orchestrator"` mode (safe fallback — always show progress).
 
 ### Date Handling
 
@@ -107,6 +104,11 @@ Store the result via `mcp__mm-workspace__update_status` with `run_date: "{date}"
 Exception: `profile/` is undated (static company reference data).
 
 When dispatching skills, pass date as the second argument: `{workspace} {date}`
+
+**Every Agent dispatch's `description` is exactly `mm:{TICKER}:{date}:{stage}:{skill}`**
+(e.g. `mm:300308:2026-10-22:decide:mm-decision-panelist`). `eval/usage_telemetry.py`
+attributes real token usage to stages and skills by this string; a dispatch
+without it is reported as unattributed usage.
 
 ```
 1. Read {workspace}/status.json → get stages_completed list
@@ -204,7 +206,7 @@ Verify `{workspace}/profile/company_profile.json` exists.
 .venv/bin/python3 scripts/collect_cn_chips.py {workspace} {date}
 ```
 This fetches the FRED macro series (CPI, Fed funds, Treasury curve, USD, HY spread, VIX;
-yfinance proxies when keyless), classifies the regime into
+the keyless fredgraph CSV when there is no FRED key), classifies the regime into
 `workspaces/shared/market_context/{date}/indicators/macro_regime.json`, and projects
 material macro observations into per-ticker evidence cards (`ev_{date}_macro_*`).
 The chips collector pulls A-share flow signals via akshare (换手率, 主力资金,
@@ -235,7 +237,8 @@ chip distribution, support/resistance, platform/breakout, CN flows) and projects
 material chip observations into evidence cards (`ev_{date}_chip_*`).
 **DIRECTIONAL contract** (`usage: "directional"`): unlike macro (context),
 intraday (timing-only) and trend_regime (context-only), chip/volume structure is
-first-class stance evidence — analysts may ground a stance or vote in it.
+directional stance evidence — but only when fresh, and a BUY/SELL resting on it
+needs independent corroboration (rule K1, checked by the pre-release gate).
 
 **Then create evidence_digest.json** — deduplicate cards across the desks + web-research (the 4 collectors run in parallel and can't see each other, so the same article can appear as several cards) and write the digest:
 ```bash
@@ -255,7 +258,8 @@ classifier** (both non-critical):
 Peer divergence writes `{workspace}/quant/{date}/peer_divergence.json` — per-peer
 20/60/120/250d returns, benchmark/target correlations, and a path class
 (`follows_sector` / `independent_up` / `independent_down` / `basing` /
-`launched`) plus cohort dispersion and the current leader.
+`launched`) plus cohort dispersion, the current leader, and `rank_5d` (the
+company's 5-session rank, 1 = best, with `of` counting the company itself).
 This writes `{workspace}/quant/{date}/intraday_timing.json` (1h/4h RSI/MACD + swing
 levels). **Timing-only contract**: it frames staged entry/exit price zones and the
 risk overlay downstream — never a reason to flip a vote or change conviction.
@@ -392,6 +396,22 @@ Read `review.max_revision_loops` from config (default: 3). Loop:
 
 ### 12. decide
 
+**First, check whether this run date is already settled:**
+
+```bash
+.venv/bin/python3 ledger/cli.py outcome {workspace} {date}
+```
+
+If it prints a record (exit 2), the ledger already holds this run date's
+release outcome — a seal or a block from an earlier attempt. Do **not** decide
+again: a second decision can never be sealed or published. Go straight to
+stage 13. (A run date has one outcome; `seal` and `block` refuse a second.)
+If it fails (exit 1: the ledger does not verify), the outcome is unknown: do not
+decide and do **not** mark decide completed. Record the error with
+`mcp__mm-workspace__update_status` (`error`, no `completed_stage`) and stop the
+run, telling the user to repair the ledger (`ledger/cli.py verify`). Re-running
+the same command afterwards resumes at decide.
+
 Read `decision.panel` from config. **If `decision.panel.enabled` is false** (or the
 block is absent): dispatch **mm-decision-maker** with args: `{workspace} {date}`,
 wait, verify `final_decision.json` exists, and proceed to stage 13 (legacy
@@ -420,16 +440,59 @@ writes the final decision. Read `decision.panel.max_rounds` (default 3). Loop
 
 After the loop, dispatch **mm-decision-maker** with args: `{workspace} {date}`
 (final mode) → reads the panel summaries + convergence files and writes the
-enriched `final_decision.json` (with `risk_overlay` + `panel` block). Wait and
-verify it exists.
+enriched `final_decision.json` (schema v2: `actions`, `forecast`, structured
+`top_reasons`, `risk_overlay` + `panel` block). Wait and verify it exists.
+
+**Pre-release gate (deterministic, runs on both paths — panel and legacy):**
+
+```bash
+.venv/bin/python3 eval/pre_release_gate.py {workspace} {date}
+```
+
+It writes `{workspace}/decision/{date}/pre_release_gate.json` and exits 0
+(`passed`) or 2 (`blocked`); any other exit is a crash — treat it as blocked. It
+also re-derives the headline `decision` / `risk_overlay` from `actions` and the
+investor's position — do not edit `final_decision.json` after it passes (its
+sha256 is recorded). Never write `pre_release_gate.json` yourself: seal, export
+and the PDF renderer re-evaluate the decision, so a hand-written verdict only
+gets the release blocked.
+
+- **Passed** → seal the decision in the ledger (outside the repo, in
+  `MM_DATA_ROOT`, default `~/MarketMindData`):
+  ```bash
+  .venv/bin/python3 ledger/cli.py seal {workspace} {date}
+  ```
+  It records the issuance time from its own clock, the forecast, both actions,
+  final-round ballots and hashes of every input, then requests an
+  OpenTimestamps receipt. A non-zero exit does **not** block the release, but
+  log it to `errors[]` ("ledger seal failed") — an unsealed decision can never
+  be scored. Then proceed.
+- **Blocked** → copy `final_decision.json` to `final_decision.pre_gate.json`,
+  dispatch **mm-decision-maker** with args: `{workspace} {date} revise` (it reads
+  the gate errors and rewrites the decision, adding a `gate_revision` block), then
+  run the gate again.
+- **Still blocked** → the release is **blocked**: record it with
+  `.venv/bin/python3 ledger/cli.py block {workspace} {date}`, then call
+  `mcp__mm-workspace__update_status` with `error: "pre_release_gate blocked: <the
+  gate's error checks>"`, and continue the pipeline — export writes `BLOCKED.md`
+  instead of the report, and user_review tells the user why. A blocked release
+  is a completed run, not a crash.
+
 **Then immediately proceed to stage 13.**
 
 ### 13. export
-1. Determine report basename from `resolved_config.run_mode`: `daily_report` for daily mode, `weekly_report` for weekly mode.
-2. Copy final draft to `{workspace}/final/{date}/{basename}.md`.
-3. Copy decision alongside. Create combined `{workspace}/final/{date}/{basename}.json`.
-3. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
-4. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
+1. Run the export step (the same code the Codex driver runs):
+   ```bash
+   .venv/bin/python3 scripts/export_release.py {workspace} {date}
+   ```
+   It re-checks the decision against the gate and the ledger, then copies the
+   latest draft to `{workspace}/final/{date}/{basename}.md` (header decision taken
+   from the gated decision) with the combined `{basename}.json` — or, exit 2,
+   writes `{workspace}/final/{date}/BLOCKED.md` instead. **Do not copy or write
+   `final/` files yourself.** On exit 2, skip steps 2–3 and proceed to stage 14.
+2. Dispatch **mm-pdf-exporter** with args: `{workspace} {date}`. Wait.
+   (`templates/render_pdf.py` refuses a blocked, edited or unsealed-mismatch decision.)
+3. Verify `{workspace}/exports/{date}/pdf/report.pdf` exists.
 **Then immediately proceed to stage 14.**
 
 ### 14. user_review
@@ -437,6 +500,12 @@ verify it exists.
 **This is the ONLY stage that pauses for user input.** All other stages run autonomously.
 
 **Stage timer**: Run `stage_timer.py start` before presenting the prompt. Run `stage_timer.py end` after writing `user_review.json` (or after the user skips). The timer captures wall-clock wait time including user think time — this is expected.
+
+**If the release was blocked** (stage 13 wrote `BLOCKED.md`), present that
+instead: the decision did not pass the pre-release gate, the gate's errors, and
+where the blocked decision is (`final_decision.json`, plus
+`final_decision.pre_gate.json` if a revision was attempted). Then collect
+feedback as below.
 
 Present the completed report to the user and collect feedback:
 
@@ -507,6 +576,9 @@ Run code-based graders, then the release gate script (deterministic, reproducibl
 .venv/bin/python3 eval/graders/language_purity_grader.py {workspace} {date}
 .venv/bin/python3 eval/graders/cost_tracker.py {workspace} {date}
 .venv/bin/python3 eval/release_gate.py {workspace} {date}
+# ledger upkeep: upgrade pending timestamp receipts, score matured horizons (all tickers)
+.venv/bin/python3 ledger/cli.py stamps
+.venv/bin/python3 ledger/cli.py score
 ```
 
 The release gate script reads all grader results and deterministically produces:
@@ -536,6 +608,9 @@ Update status.json: append "reflect" to stages_completed.
 **IMPORTANT**: This step runs AFTER `stage_timer.py end {workspace} reflect true`, so that the run log captures complete reflect timing. Do NOT call finalize_run.py inside the reflect stage timer window.
 
 ```bash
+# actual token usage by stage/skill from the transcripts — run last, so the
+# memory writer is counted (cost_tracker is a byte proxy, never billing)
+.venv/bin/python3 eval/usage_telemetry.py {workspace} {date}
 .venv/bin/python3 eval/finalize_run.py {workspace} {date}
 ```
 
@@ -555,7 +630,12 @@ Pipeline complete for {TICKER} ({date})
   PDF:        {workspace}/exports/{date}/pdf/report.pdf
   Decision:   {workspace}/decision/{date}/final_decision.json
   Release:    {release_status from eval/{date}/release_gate.json}
+  Usage:      {output} output / {cache_read} cache-read / {cache_write} cache-write / {input} input tokens, {requests} requests
 ```
+
+`Usage` is `totals_attributed` from `{workspace}/eval/{date}/usage.json` (API-reported).
+Never present `cost_result.json` (`cost_tracker`, a file-size proxy marked `not_billing`)
+as the run's tokens or cost.
 
 ## Resume Logic
 

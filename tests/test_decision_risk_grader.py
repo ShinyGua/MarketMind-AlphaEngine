@@ -344,3 +344,44 @@ def test_responds_to_dissent_field_scanned(tmp_path):
     }), encoding="utf-8")
     r = grader.grade(str(ws), DATE)
     assert any("risk_analyst" in w and "round 2" in w for w in r["warnings"])
+
+
+# ---------- schema v2: structured reasons, forecast coherence ----------
+
+def test_dict_reasons_scan_text_not_evidence_ids(tmp_path):
+    # An evidence id naming "valuation" is not a valuation argument.
+    dec = _clean_decision(0.60)
+    dec["top_reasons"] = [{"text": "Shipments doubled", "direction": "up",
+                           "evidence_ids": ["ev_2026-06-05_valuation_001"]}]
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "low", "role": "reference"})
+    r = grader.grade(str(ws), DATE)
+    assert not any("valuation" in c for c in r["cap_reasons"])
+    assert not any("reference" in w for w in r["warnings"])
+
+
+def test_dict_reason_text_still_trips_the_valuation_warning(tmp_path):
+    dec = _clean_decision(0.60)
+    dec["top_reasons"] = [{"text": "Trades below DCF fair value", "direction": "up",
+                           "evidence_ids": []}]
+    ws = _ws(tmp_path, decision=dec, valuation={"confidence": "medium", "role": "reference"})
+    r = grader.grade(str(ws), DATE)
+    assert any("reference" in w for w in r["warnings"])
+
+
+def test_forecast_label_conflict_warns_only(tmp_path):
+    dec = _clean_decision(0.60)
+    dec.update({"decision": "BUY", "forecast": {"p_outperform": 0.4},
+                "actions": {"if_flat": {"label": "BUY"}, "if_long": {"label": "HOLD"}}})
+    ws = _ws(tmp_path, decision=dec)
+    r = grader.grade(str(ws), DATE)
+    conflicts = [w for w in r["warnings"] if "p_outperform" in w]
+    assert len(conflicts) == 2            # headline + if_flat
+    assert r["pass"] is True              # advisory, never a fail
+
+
+def test_coherent_forecast_no_warning(tmp_path):
+    dec = _clean_decision(0.60)
+    dec.update({"decision": "SELL", "forecast": {"p_outperform": 0.3},
+                "actions": {"if_flat": {"label": "SELL"}, "if_long": {"label": "SELL"}}})
+    ws = _ws(tmp_path, decision=dec)
+    assert not [w for w in grader.grade(str(ws), DATE)["warnings"] if "p_outperform" in w]

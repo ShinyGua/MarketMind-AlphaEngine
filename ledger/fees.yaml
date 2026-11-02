@@ -1,0 +1,54 @@
+# Trading costs for the executable action tracks (ledger/score.py).
+#
+# Statutory items carry a source and the date they were checked. `verified:
+# false` means the rate came from a secondary source (broker schedule, news) or
+# could not be confirmed against the primary document on that date — it is
+# still applied, and every outcome lists which unverified items it used.
+# Commission and slippage are declared ASSUMPTIONS, not market facts.
+# Rates are fractions of traded value unless `per_share` is set.
+
+checked_on: "2026-10-29"
+
+CN:
+  statutory:
+    - {name: stamp_duty, rate: 0.0005, side: sell, verified: true,
+       source: "MOF/STA announcement, halved from 0.1% effective 2023-08-28 (reported by cs.com.cn)",
+       url: "https://cs.com.cn/xwzx/hg/202308/t20230828_6363599.html"}
+    - {name: exchange_handling_fee, rate: 0.0000341, side: both, verified: true,
+       source: "SSE/SZSE: 0.00487% -> 0.00341% each side effective 2023-08-28",
+       url: "https://cs.com.cn/xwzx/hg/202308/t20230828_6363599.html"}
+    - {name: transfer_fee, rate: 0.00001, side: both, verified: false,
+       source: "CSDC 0.001% each side (2022 reduction) - not re-checked against CSDC on checked_on"}
+    - {name: csrc_management_fee, rate: 0.00002, side: both, verified: false,
+       source: "CSRC 0.002% each side - not re-checked against the CSRC schedule on checked_on"}
+  assumptions: {commission: 0.00025, slippage: 0.0005}
+  price_limit: {main: 0.10, chinext_star: 0.20, beijing: 0.30}
+
+HK:
+  statutory:
+    - {name: stamp_duty, rate: 0.001, side: both, verified: false,
+       source: "0.1% each side since 2023-11-17 (broker schedules, FSDC 2024 presentation); IRD not re-checked",
+       url: "https://www.fsdc.org.hk/media/y15n0mgu/240617_ppt_fsdc-stamp-duty-for-ies-e.pdf"}
+    - {name: hkex_trading_fee, rate: 0.0000565, side: both, verified: false,
+       source: "HKEX trading fee 0.00565% (broker schedules)"}
+    - {name: sfc_levy, rate: 0.000027, side: both, verified: false,
+       source: "SFC transaction levy 0.0027% (broker schedules)"}
+    - {name: afrc_levy, rate: 0.0000015, side: both, verified: false,
+       source: "AFRC transaction levy 0.00015% (broker schedules)"}
+    - {name: settlement_fee, rate: 0.000042, side: both, verified: false,
+       source: "HKSCC 0.0042% without min/max from 2025-06-30 (broker notice)"}
+  assumptions: {commission: 0.0003, slippage: 0.0005}
+
+US:
+  statutory:
+    - {name: sec_section_31, rate: 0.0000206, side: sell, verified: true,
+       source: "SEC fee rate advisory: $20.60 per million effective 2026-04-04",
+       url: "https://www.sec.gov/rules-regulations/fee-rate-advisories/2026-2"}
+    - {name: finra_taf, rate: 0.000195, per_share: true, side: sell, verified: false,
+       source: "FINRA TAF $0.000195/share on sales from 2026-01-01 (broker help page; FINRA schedule not confirmed)"}
+  assumptions: {commission: 0.0, slippage: 0.0005}
+
+hedge:
+  borrow_fee_annual: 0.005   # assumption for shorting SPY / 2800.HK
+  instruments: {US: SPY, HK: 2800.HK}
+  max_ratio: 1.0

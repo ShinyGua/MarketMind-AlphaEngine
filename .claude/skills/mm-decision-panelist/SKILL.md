@@ -60,8 +60,11 @@ Round: $ARGUMENTS[3] (1-based integer)
 - `shared_context.chips` — volume & chip structure (量比, VPVR cost distribution,
   profit/trapped ratio, support/resistance, platform state, CN flows 主力/北向/
   融资/龙虎榜/股东户数/解禁). **DIRECTIONAL**: unlike trend_regime (backdrop),
-  macro (context) and intraday (timing-only), chip evidence may carry a stance/
-  vote on its own — cite the `ev_…_chip_*` cards. Respect per-block `data_quality`.
+  macro (context) and intraday (timing-only), chip evidence may push a vote —
+  cite the `ev_…_chip_*` cards. Only **fresh** chip data counts: respect per-block
+  `data_quality` (`stale` and `unavailable` support nothing) and each card's
+  `meta.as_of`. A BUY/SELL resting on chips also needs independent corroboration
+  (see Quality Rules).
 - `shared_context.investor` — the user's horizon (`short`/`swing`/`long`), verbatim
   `edge_hypothesis`, and `position_state`. **Answer THIS investor's question**:
   land your conclusion on their horizon (no 3-year DCF answer to a swing
@@ -137,9 +140,17 @@ rhetorical confidence. The conviction rubric is unchanged.
    convergence grader weights your vote by this number, so a lazy 0.7 distorts
    the panel.
 4. **Choose a risk overlay** (independent of the vote): `none` (no hedge needed),
-   `hedge` (hold the view but pair it with downside protection), `trim` (reduce
-   exposure / take partial profit), or `stop` (size down hard / honor a stop). A
-   BUY with `hedge` and a SELL with `none` are both valid.
+   `hedge` (hold the view but offset market beta), `trim` (halve the position;
+   never opens one), or `stop` (a protective stop-loss: exit on a close below a
+   level fixed now). A BUY with `hedge` and a SELL with `none` are both valid.
+4b. **Give both actions and a forecast.** `action_if_flat` is your call for
+   someone holding nothing (`BUY` = open; `HOLD`/`SELL` = stay out — no shorting
+   is implied); `action_if_long` is your call for someone fully invested
+   (`BUY`/`HOLD` = keep; `SELL` = exit). `vote` stays your call for the
+   investor's declared position (`position_state`). `p_outperform` is your
+   probability that the stock's price return beats its market benchmark's
+   (S&P 500 / CSI 300 / Hang Seng) over the next 20 trading sessions — 0.5 means
+   no edge. It is scored against outcomes: calibrate it, don't echo `conviction`.
 5. **Round > 1:** read `panel_summary_round_{N-1}.json` and the deterministic
    grader output `convergence_round_{N-1}.json` **only** — do NOT read other
    roles' `*_ballot.json` files from prior rounds; your vote must stay
@@ -168,6 +179,9 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
   "round": 1,
   "vote": "BUY|HOLD|SELL",
   "risk_overlay": "none|hedge|trim|stop",
+  "action_if_flat": "BUY|HOLD|SELL",
+  "action_if_long": "BUY|HOLD|SELL",
+  "p_outperform": 0.5,
   "conviction": 0.0,
   "rationale": "<2-4 sentences, evidence-referenced (ev_… ids where possible), from your role's lens>",
   "top_risk": "<the single thing most likely to flip this vote>",
@@ -196,16 +210,22 @@ Write to: `{workspace}/decision/{date}/panel/round_{N}/{role}_ballot.json`
 - A **price-vs-SMA position or a moving-average cross cannot be the sole reason**
   for a BUY or SELL vote — pair it with role-lens evidence (fundamentals,
   catalysts, risk, news, MACD/RS); on its own it is trend color, not a vote driver.
-- **Chip/volume structure IS valid sole grounds for a vote** (`shared_context.chips`,
-  `ev_…_chip_*` cards) — this asymmetry with the SMA and valuation rules is
-  deliberate: chip exchange is the reproducible trace of buying/selling force.
-  Respect `data_quality` — an `unavailable` block supports nothing.
+- **Chip/volume structure is directional evidence** (`shared_context.chips`,
+  `ev_…_chip_*` cards, and any card carrying 融资余额 / 主力资金 / 北向 / 龙虎榜 /
+  股东户数 / 解禁 / 换手率 data) — chip exchange is the reproducible trace of
+  buying/selling force. Until each chip card type passes the out-of-sample study
+  (rule K1): only fresh chip data counts (`stale` and `unavailable` blocks
+  support nothing), and a BUY or SELL vote that rests on chips must also cite at
+  least one **independent** same-direction reason — company fundamentals, a
+  filing, a catalyst, or company-specific news that does not restate the flow.
+  Market, sector, macro, trend, intraday and reference valuation don't count.
 - `main_force_view.stance` must be one of `accumulate`, `absorb`, `mark_up`,
   `distribute`, `avoid` — it is a first-principles read of the game, not your
   vote restated (a SELL vote with `main_force_view: absorb` is a coherent
   "operator accumulating but I won't front-run them" position).
-- `vote` must be exactly `BUY`, `HOLD`, or `SELL`. `risk_overlay` must be one of
-  `none`, `hedge`, `trim`, `stop`. `conviction` is a float in [0, 1].
+- `vote`, `action_if_flat` and `action_if_long` must each be exactly `BUY`,
+  `HOLD`, or `SELL`. `risk_overlay` must be one of `none`, `hedge`, `trim`,
+  `stop`. `conviction` and `p_outperform` are floats in [0, 1].
 - Reference evidence that actually exists in the workspace — no fabrication.
 - Keep the ballot tight: this is a vote with a short justification, not a memo.
   Your full argument already lives in your memo and the thesis map.

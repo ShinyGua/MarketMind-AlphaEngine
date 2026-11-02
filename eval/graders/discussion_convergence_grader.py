@@ -277,13 +277,19 @@ def grade(workspace: str, date: str, rnd: int) -> dict:
         suppressed = "conviction_collapse"
     elif raw_converged and devils_advocate is not None:
         suppressed = "unanimity_challenge"
+    elif raw_converged and agreement_ratio <= 0.5:
+        # The stability term rewards entrenchment: a frozen 2:2 split scores
+        # 0.6*~0.53 + 0.4*1.0 > 0.70. No head-count majority is not consensus.
+        suppressed = "no_majority"
     converged = raw_converged and suppressed is None
 
-    # Stalled: below threshold and barely moving vs the prior round's score.
+    # Stalled: below threshold and barely moving vs the prior round's score —
+    # or a no-majority split where nobody moved (more rounds won't resolve it).
     prev_score = _prev_convergence_score(ws, date, rnd)
     stalled = (not converged and rnd > min_rounds and prev_score is not None
-               and convergence_score < threshold
-               and abs(convergence_score - prev_score) < float(th["stall_epsilon"]))
+               and ((convergence_score < threshold
+                     and abs(convergence_score - prev_score) < float(th["stall_epsilon"]))
+                    or (suppressed == "no_majority" and stance_stability == 1.0)))
 
     if converged:
         exit_, reason = True, "converged"

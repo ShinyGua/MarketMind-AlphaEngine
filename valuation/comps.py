@@ -12,6 +12,9 @@ COMPS_MULTIPLES = ["ev_to_revenue", "ev_to_ebitda", "trailing_pe", "forward_pe",
 # Descriptive metrics shown alongside the multiples for context.
 COMPS_CONTEXT = ["revenue_growth", "profit_margins", "operating_margins"]
 _REV_GROWTH_ADJ_MIN = 0.5
+# A peer median of fewer names is one company's multiple, not a market anchor:
+# HOOD's P/E "median" was XYZ alone (129x) and read as fair value 285, "cheap".
+MIN_PEERS = 3
 _REV_GROWTH_ADJ_MAX = 2.0
 
 
@@ -103,12 +106,13 @@ def build_comps(ticker: str, company: dict, peers: list[dict]) -> dict:
     return {"rows": rows, "benchmarks": benchmarks}
 
 
-def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
+def implied_value_per_share(company: dict, benchmarks: dict, min_peers: int = MIN_PEERS) -> dict:
     """Implied price from applying the peer *median* multiple to company metrics.
 
     Uses forward P/E, EV/EBITDA, and EV/Revenue where the underlying company
     inputs exist. Returns per-share values plus a blended earnings/cash-flow
-    anchor where available.
+    anchor where available. A multiple with fewer than ``min_peers`` usable
+    peer values is skipped and listed in ``thin_multiples`` ({multiple: n}).
     """
     out = {
         "by_pe": None,
@@ -116,13 +120,21 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
         "by_ev_revenue": None,
         "by_ev_revenue_growth_adjusted": None,
         "blended": None,
+        "thin_multiples": {},
     }
+
+    def median(multiple: str):
+        b = benchmarks.get(multiple) or {}
+        n = b.get("n")
+        if b.get("median") is not None and n is not None and n < min_peers:
+            out["thin_multiples"][multiple] = n
+            return None
+        return b.get("median")
 
     # P/E path: median peer P/E × company EPS. EPS ≈ price / company P/E.
     price = company.get("current_price")
     fwd_pe = company.get("forward_pe") or company.get("trailing_pe")
-    peer_pe_median = (benchmarks.get("forward_pe") or {}).get("median") \
-        or (benchmarks.get("trailing_pe") or {}).get("median")
+    peer_pe_median = median("forward_pe") or median("trailing_pe")
     if price and fwd_pe and peer_pe_median and fwd_pe > 0:
         eps = price / fwd_pe
         out["by_pe"] = eps * peer_pe_median
@@ -139,7 +151,7 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
     net_debt = None
     if company.get("total_debt") is not None or company.get("total_cash") is not None:
         net_debt = (company.get("total_debt") or 0.0) - (company.get("total_cash") or 0.0)
-    peer_ev_ebitda_median = (benchmarks.get("ev_to_ebitda") or {}).get("median")
+    peer_ev_ebitda_median = median("ev_to_ebitda")
     if not ev_degenerate and ebitda and shares and peer_ev_ebitda_median and net_debt is not None:
         implied_ev = peer_ev_ebitda_median * ebitda
         out["by_ev_ebitda"] = (implied_ev - net_debt) / shares
@@ -147,12 +159,13 @@ def implied_value_per_share(company: dict, benchmarks: dict) -> dict:
     # EV/Revenue path: useful for high-growth or loss-making companies where
     # earnings and FCFF anchors are structurally unavailable.
     revenue = company.get("total_revenue")
-    peer_ev_rev_median = (benchmarks.get("ev_to_revenue") or {}).get("median")
+    peer_ev_rev_median = median("ev_to_revenue")
     if not ev_degenerate and revenue and shares and peer_ev_rev_median and net_debt is not None:
         implied_ev = peer_ev_rev_median * revenue
         out["by_ev_revenue"] = (implied_ev - net_debt) / shares
 
-        peer_growth = (benchmarks.get("revenue_growth") or {}).get("median")
+        # the growth median scales the anchor up to 2x, so it needs the same peer floor
+        peer_growth = median("revenue_growth")
         company_growth = company.get("revenue_growth")
         if company_growth and peer_growth and peer_growth > 0:
             adj = company_growth / peer_growth

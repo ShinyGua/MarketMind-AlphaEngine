@@ -15,7 +15,7 @@ RUN_LOG_PATH = PROJECT_ROOT / "logs" / "run_log.jsonl"
 
 import sys as _sys
 _sys.path.insert(0, str(PROJECT_ROOT / "mcp"))
-from shared.contracts import RELEASE_PASSED, RELEASE_WARNING, RELEASE_FAILED
+from shared.contracts import RELEASE_BLOCKED, RELEASE_PASSED, RELEASE_WARNING, RELEASE_FAILED
 
 
 def load_runs(path: Path) -> list[dict]:
@@ -70,6 +70,10 @@ def pipeline_health(runs: list[dict]) -> dict:
         if r["release_status"] in (RELEASE_PASSED, RELEASE_WARNING)
     )
 
+    # Blocked = the pre-release gate stopped the decision before export: neither
+    # a success nor a crash, so it is counted on its own.
+    blocked = sum(1 for r in has_release if r["release_status"] == RELEASE_BLOCKED)
+
     # Legacy fallback for entries without release_status
     legacy = [r for r in runs if r.get("release_status") is None]
     legacy_ok = sum(1 for r in legacy if r.get("success", r.get("all_graders_pass", False)))
@@ -89,6 +93,8 @@ def pipeline_health(runs: list[dict]) -> dict:
         "strict_success_rate": safe_pct(strict_ok + legacy_ok, total),
         "operational_success_rate": safe_pct(operational_ok + legacy_ok, total),
         "success_rate": safe_pct(strict_ok + legacy_ok, total),  # backward compat
+        "blocked_runs": blocked,
+        "blocked_rate": safe_pct(blocked, total),
         "avg_duration_s": safe_mean(durations),
         "avg_review_iterations": safe_mean(iters),
         "stage_avg_duration": {k: safe_mean(v) for k, v in sorted(stage_totals.items())},
@@ -180,10 +186,17 @@ def cost_analytics(runs: list[dict]) -> dict:
         if isinstance(c, (int, float)):
             costs.append(float(c))
 
+    # API-reported usage (eval/usage_telemetry.py -> run_log usage_tokens): the
+    # real token counts; the byte-proxy figures above are not spend.
+    usage = [r["usage_tokens"] for r in runs if isinstance(r.get("usage_tokens"), dict)]
+    actual = {f"avg_{k}_tokens": safe_mean([u.get(k) or 0 for u in usage])
+              for k in ("output", "cache_read", "cache_write", "input")}
     return {
         "avg_tokens_per_run": safe_mean(tokens),
         "avg_cost_per_run": safe_mean(costs),
         "total_cost": round(sum(costs), 4) if costs else 0.0,
+        "runs_with_usage": len(usage),
+        **actual,
     }
 
 
@@ -248,11 +261,20 @@ def format_markdown(m: dict) -> str:
     lines.append(_md_table(["Metric", "Value"], da_rows))
 
     lines.append("\n## Cost Analytics\n")
-    lines.append(_md_table(["Metric", "Value"], [
-        ["Avg tokens/run", f"{ca['avg_tokens_per_run']:.0f}"],
-        ["Avg cost/run ($)", f"{ca['avg_cost_per_run']:.4f}"],
-        ["Total cost ($)", f"{ca['total_cost']:.4f}"],
-    ]))
+    rows = []
+    if ca.get("runs_with_usage"):
+        n = ca["runs_with_usage"]
+        rows += [[f"Avg {label} tokens/run (API-reported, {n} run(s))", f"{ca[key]:.0f}"]
+                 for label, key in (("output", "avg_output_tokens"),
+                                    ("cache-read", "avg_cache_read_tokens"),
+                                    ("cache-write", "avg_cache_write_tokens"),
+                                    ("input", "avg_input_tokens"))]
+    rows += [
+        ["Avg byte-proxy tokens/run (not billing)", f"{ca['avg_tokens_per_run']:.0f}"],
+        ["Avg byte-proxy 'cost'/run ($, not billing)", f"{ca['avg_cost_per_run']:.4f}"],
+        ["Total byte-proxy 'cost' ($, not billing)", f"{ca['total_cost']:.4f}"],
+    ]
+    lines.append(_md_table(["Metric", "Value"], rows))
 
     return "\n".join(lines)
 

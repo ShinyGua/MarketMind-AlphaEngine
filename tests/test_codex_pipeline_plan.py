@@ -56,6 +56,10 @@ def test_dry_run_plan_covers_all_stages():
     chip_idx = next(i for i, c in enumerate(norm_calls) if "compute_chip_structure" in c)
     cards_idx = next(i for i, c in enumerate(norm_calls) if "chip_evidence_cards" in c)
     assert chip_idx < cards_idx < dedup_idx, "chip structure/cards must run before dedup"
+    # pre-release gate runs inside decide, before export renders anything
+    assert "eval/pre_release_gate.py" in flat, "decide stage missing the pre-release gate"
+    gate_idx = flat.index("eval/pre_release_gate.py")
+    assert gate_idx < flat.index("templates/render_pdf.py")
     # LLM stages issued as codex exec
     assert "codex exec" in flat
     for skill in ("mm-company-analyst", "mm-report-writer", "mm-decision-maker",

@@ -23,7 +23,7 @@ The BUY/HOLD/SELL output is a **research view for human review, not investment a
 
 Workspace path: $ARGUMENTS[0]
 Run date: $ARGUMENTS[1] (YYYY-MM-DD)
-Mode: $ARGUMENTS[2] (optional — `tally` for a per-round panel tally; absent = final decision)
+Mode: $ARGUMENTS[2] (optional — `tally` for a per-round panel tally; `revise` to fix a decision the pre-release gate blocked; absent = final decision)
 Round: $ARGUMENTS[3] (only in `tally` mode — 1-based integer)
 
 **All paths below use `{date}` = $ARGUMENTS[1].**
@@ -40,6 +40,9 @@ You are the **chair of the decision panel**. The panel runs in two roles:
   now also reading the panel artifacts. When the panel is disabled
   (`decision.panel.enabled: false`) there are no panel artifacts and you simply
   decide from the thesis map as before.
+- **Mode C — `revise` (`$ARGUMENTS[2] == "revise"`):** the deterministic
+  pre-release gate (`eval/pre_release_gate.py`) blocked your final decision.
+  Jump to **Mode C** at the end of this document.
 
 ## Mode A: Per-round Panel Tally (`tally`)
 
@@ -161,25 +164,60 @@ Score confidence from 0.0 to 1.0:
 - 0.4-0.6: Low conviction, balanced evidence
 - Below 0.4: Very low conviction — should probably be HOLD
 
-### 4. Write Final Decision
+### 4. Two Actions and a Forecast
+
+The decision answers two investors at once, and states a forecast separately
+from the action:
+
+- **`actions.if_flat`** — for someone holding no position: `BUY` = open a
+  position; `HOLD` or `SELL` = stay out (long-only: no short is implied).
+- **`actions.if_long`** — for someone already fully invested: `BUY` or `HOLD` =
+  keep it; `SELL` = exit.
+- Each action carries the `overlay` (`none|hedge|trim|stop`) that applies when a
+  position is held. `trim` halves the position and never opens one; `hedge`
+  offsets market beta; `stop` is a **protective stop-loss** (exit on a close
+  below a level fixed now) — not "size down hard".
+- **`forecast.p_outperform`** — your probability that the stock's **price return
+  beats its market benchmark's price return over the next 20 trading sessions**
+  (US: S&P 500, CN: CSI 300, HK: Hang Seng). 0.5 = no edge either way. It is
+  scored against what happens, so calibrate it; it is not `confidence`. A BUY
+  with `p_outperform` below 0.5, or a SELL above 0.5, needs an explicit reason in
+  `decision_summary` (the decision-risk grader warns on it).
+- **`decision`** (the headline label) is the action for the investor's declared
+  position (`shared_context.investor.position_state`: `none` → `if_flat`,
+  `holding`/`adding` → `if_long`). Write it consistently; the gate re-derives it
+  from `actions` and the overlay into the legacy `risk_overlay` field.
+
+### 5. Write Final Decision
 
 Write to: `{workspace}/decision/{date}/final_decision.json`
 
 ```json
 {
+  "schema_version": 2,
   "decision": "BUY|HOLD|SELL",
   "risk_overlay": "none|hedge|trim|stop",
+  "actions": {
+    "if_flat": {"label": "BUY|HOLD|SELL", "overlay": "none|hedge|trim|stop"},
+    "if_long": {"label": "BUY|HOLD|SELL", "overlay": "none|hedge|trim|stop"}
+  },
+  "forecast": {
+    "p_outperform": 0.5,
+    "benchmark": "SP500|CSI300|HSI",
+    "horizon_sessions": 20,
+    "excess_quantiles": {"p10": -0.08, "p50": 0.0, "p90": 0.08}
+  },
   "confidence": 0.0,
   "horizon": "1d|1w|1m|3m",
   "decision_summary": "<2-3 sentence explanation of the decision>",
   "top_reasons": [
-    "<reason 1 with evidence reference>",
-    "<reason 2>",
-    "<reason 3>"
+    {"text": "<reason 1, citing its evidence>", "evidence_ids": ["ev_2026-03-20_company_001"], "direction": "up|down|neutral"},
+    {"text": "<reason 2>", "evidence_ids": ["..."], "direction": "up|down|neutral"},
+    {"text": "<reason 3>", "evidence_ids": ["..."], "direction": "up|down|neutral"}
   ],
   "supporting_evidence_ids": [
-    "ev_20260320_001",
-    "ev_20260320_008"
+    "ev_2026-03-20_company_001",
+    "ev_2026-03-20_chip_002"
   ],
   "key_risks": [
     "<risk 1 that could invalidate the thesis>",
@@ -210,17 +248,32 @@ Write to: `{workspace}/decision/{date}/final_decision.json`
 }
 ```
 
-**`risk_overlay`** is the panel's hedge stance — independent of the BUY/HOLD/SELL
-label. `none` = directional view, no hedge; `hedge` = hold the view with downside
-protection; `trim` = reduce exposure / take partial profit; `stop` = size down
-hard. Set it from the panel's `overlay_tally` consensus (or your own read when the
-panel is disabled).
+**`top_reasons`** are structured. `evidence_ids` lists the card ids that reason
+rests on (exact ids from the evidence cards — the gate checks each one exists;
+ids written only inside `text` are not checked and do not count). `direction`
+is the way the reason pushes the stock versus its benchmark: `up`, `down`, or
+`neutral` (a balancing or timing point). Every BUY or SELL — headline or either
+action — needs at least one reason pointing its way (`up` / `down`), and a
+`neutral` reason that cites chip evidence still counts toward rule K1: tag
+honestly, the gate blocks a tag that would dodge the rule. `excess_quantiles`
+is optional — omit it rather than invent a spread you cannot support.
+
+**`risk_overlay`** (legacy, kept for the PDF) is the overlay of the headline
+action. Set overlays from the panel's `overlay_tally` consensus (or your own read
+when the panel is disabled).
 
 **`panel`** mirrors the panel loop: `rounds_run` and `final_tally` from the last
 `panel_summary_round_*.json`, `convergence_score`/`exit_reason` from the last
 `convergence_round_*.json`, and `retained_dissent` listing any minority view that
 did not converge. **Omit the `panel` block entirely when the panel is disabled**
 (`decision.panel.enabled: false`) — in that case the decision is single-shot.
+
+**The pre-release gate.** After you write the file, `eval/pre_release_gate.py`
+checks it deterministically before anything is exported: schema, that every
+cited id exists, that no cited chip card is stale or undated, that no cited
+card was published after issuance, and Decision Rule 12. A blocked decision
+comes back to you once in `revise` mode; if it is still blocked, the run is
+released as **blocked** and nothing is exported.
 
 ## Decision Rules
 
@@ -235,12 +288,48 @@ did not converge. **Omit the `panel` block entirely when the panel is disabled**
 9. **Panel-Faithful** (when the panel ran): the final label must reflect the panel's **conviction-weighted** lean, not a raw head-count, and not a split-the-difference HOLD. A retained dissenter with the strongest evidence can outweigh a low-conviction majority. Never silently drop a dissent — carry it into `key_risks`/`disconfirming_signals`. A `max_rounds` exit (unconverged) should temper confidence and be named in `debate_alignment`
 10. **Macro Is Context, Not Trigger**: the macro regime (`shared_context.macro_regime`) may shape the `risk_overlay` framing (e.g. an elevated-VIX / wide-credit regime argues for `hedge` over `none`) and the confidence narrative, but an adverse or favorable regime never by itself flips the label or caps conviction — same precedent as valuation (Rule 7)
 11. **Intraday Is Timing-Only**: use `shared_context.intraday` (1h/4h RSI/MACD, swing levels, `timing_state`) ONLY to frame staged entry/exit price zones in `stance_notes`/`decision_summary` — e.g. "4h RSI 78 near the swing high: extended; stage entries, first lot toward the lower zone". When `intraday.available` is false, frame zones from the chip support/resistance levels and the daily ATR instead (`quant_summary latest_close ± 1×atr_14`). Intraday indicators must NEVER appear in `top_reasons` or as a reason to flip BUY/HOLD/SELL or change conviction — the decision-risk grader flags such citations
-12. **Chips Are Directional**: `shared_context.chips` (volume regime, chip distribution, CN flows) is **first-class directional evidence** — a chip-grounded argument (e.g. sustained main-force accumulation with a concentrating holder base, or a heavy unlock calendar over trapped supply) MAY stand in `top_reasons` and MAY carry the label, exactly as a fundamentals argument would. This is a deliberate asymmetry with trend_regime (backdrop), macro (context), intraday (timing-only) and valuation (supports-never-forces): chip exchange is the reproducible trace of actual buying/selling force. Respect `data_quality` — blocks marked `unavailable` support nothing. Derive `main_force_read` from the ballots' `main_force_view` fields plus the chip evidence; when they disagree or the data is thin, say `unclear` rather than forcing a read
+12. **Chips Are Directional — Fresh and Corroborated (rule K1)**: `shared_context.chips` (volume regime, chip distribution, CN flows) and chip cards (`ev_…_chip_*`, and any card carrying chip/flow data — 融资余额, 主力资金, 北向, 龙虎榜, 股东户数, 解禁, 换手率) stay **directional evidence**: a chip-grounded argument may stand in `top_reasons` and push the label. Two conditions apply until each chip card type passes the deferred out-of-sample study: (a) **fresh** — a cited chip card must carry its observation date (`meta.as_of`) within its block's cadence; blocks marked `unavailable` or `stale` support nothing, for any label, overlay or `main_force_read`; (b) **corroborated** — a BUY or SELL whose same-direction or neutral reasons cite chip evidence needs **at least one same-direction reason citing independent, dated evidence**: a company/fundamental card, an SEC/exchange filing, a catalyst, or company-specific news that does not restate the same flow, with a `published_at` date. Market, sector, macro, trend, intraday and CN/HK reference valuation never count as independent. Do not hide an uncorroborated chip view behind HOLD — if the chips are the only directional evidence, say so plainly and let the label reflect the evidence as a whole. Derive `main_force_read` from the ballots' `main_force_view` fields plus fresh chip evidence; when they disagree or the data is thin or stale, say `unclear` rather than forcing a read
 
 ## Quality Rules
 
 - The decision must be self-contained — a reader should understand the logic without reading the full report
 - At least 3 top_reasons, 3 key_risks, and 2 disconfirming_signals
-- supporting_evidence_ids must reference actual evidence card IDs from the workspace
+- `top_reasons[].evidence_ids` and `supporting_evidence_ids` must reference actual evidence card IDs from the workspace
 - Confidence must be calibrated — do not default to high confidence
 - stance_notes should be substantive, not boilerplate
+
+## Mode C: Revise a Gate-Blocked Decision (`revise`)
+
+The pre-release gate blocked `final_decision.json`. Read:
+
+- `{workspace}/decision/{date}/pre_release_gate.json` — the gate's `errors`
+  (each with a `check` name and a message) and `warnings`
+- `{workspace}/decision/{date}/final_decision.pre_gate.json` — your blocked
+  decision, preserved as written
+- the same inputs as final mode
+
+Fix **only** what the errors name, then rewrite `final_decision.json`:
+
+- `schema` — supply the missing or malformed v2 fields.
+- `unresolved_id` — cite only ids that exist in `normalized/{date}/evidence_cards/`.
+- `stale_chip` / `undated_chip` — drop the stale or undated chip card from every
+  reason; if a reason has no other support, remove it.
+- `future_card` — remove the card; it was published after the decision.
+- `k1_uncorroborated` — either cite independent, same-direction evidence that
+  genuinely supports the reason (never pad with an id that does not), or change
+  the call: the label must follow the evidence that remains. Changing to HOLD is
+  correct only if the remaining evidence is genuinely balanced.
+
+Add a `gate_revision` block:
+
+```json
+"gate_revision": {
+  "original_decision": "BUY|HOLD|SELL",
+  "gate_errors": ["<check>: <message>", "..."],
+  "changes": "<what you changed and why, one or two sentences>"
+}
+```
+
+If the fix changes the label away from the panel's conviction-weighted lean,
+say so in `debate_alignment`. Do not touch the panel artifacts. The gate runs
+again; a second block releases the run as blocked.

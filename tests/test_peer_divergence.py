@@ -95,3 +95,17 @@ def test_peer_grid_skips_tiny_cohort(tmp_path):
     out = tmp_path / "peer_grid.svg"
     charts.generate_peer_grid("T", {"T": _series()}, str(out))
     assert not out.exists()
+
+
+def test_rank_5d_states_its_denominator_and_counts_the_target():
+    members = [{"ticker": "HOOD", "return_5d_pct": -5.17}, {"ticker": "BULL", "return_5d_pct": -9.81}] + \
+              [{"ticker": t, "return_5d_pct": r} for t, r in
+               (("COIN", -5.0), ("DKNG", -1.0), ("ETOR", -3.8), ("IBKR", -0.6),
+                ("SCHW", -2.1), ("SOFI", 19.2), ("XYZ", -2.6))]
+    r = pdiv.rank_5d(members, "HOOD")
+    assert (r["rank"], r["of"], r["worse"]) == (8, 9, ["BULL"])         # 8th of 9, not "last of 8"
+
+
+def test_rank_5d_lands_in_the_artifact(tmp_path):
+    art = pdiv.run(_mk_ws(tmp_path), "2026-07-16")
+    assert art["rank_5d"]["of"] == 4 and 1 <= art["rank_5d"]["rank"] <= 4

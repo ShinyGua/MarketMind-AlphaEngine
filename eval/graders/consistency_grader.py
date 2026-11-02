@@ -193,10 +193,18 @@ def grade(workspace: str, date: str) -> dict:
     if isinstance(panel, dict):
         tally = panel.get("final_tally") or {}
         if isinstance(tally, dict) and any(isinstance(v, (int, float)) for v in tally.values()):
-            panel_majority = max(tally, key=lambda k: tally.get(k, 0))
+            top = max(tally.get(k, 0) for k in tally)
+            leaders = [k for k in tally if tally.get(k, 0) == top]
+            # A head-count tie has no majority; max() would pick by dict order.
+            panel_majority = leaders[0] if len(leaders) == 1 else None
             result["panel_majority"] = panel_majority
             result["panel_exit_reason"] = panel.get("exit_reason")
-            if panel_majority and decision_label.upper() != str(panel_majority).upper():
+            if panel_majority is None:
+                result["details"].append(
+                    f"NOTE: panel vote tied between {'/'.join(leaders)} — no head-count "
+                    f"majority; decision {decision_label} rests on the chair's tie-break"
+                )
+            elif decision_label.upper() != str(panel_majority).upper():
                 result["details"].append(
                     f"NOTE: decision {decision_label} diverges from panel vote majority "
                     f"{panel_majority} — confirm it is a conviction-weighted override, not an error"

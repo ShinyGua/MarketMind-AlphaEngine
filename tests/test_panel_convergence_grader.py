@@ -185,6 +185,21 @@ def test_stalled_below_threshold_exits_with_unresolved_dissent(tmp_path):
     assert r["unresolved_dissent"] is True
 
 
+def test_frozen_two_two_split_stalls_instead_of_converging(tmp_path):
+    # 300308 2026-10-22: stability=1.0 lifted a 2:2 split to 0.719 "converged".
+    ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.70})
+    for rnd, (s, h) in ((1, (0.66, 0.55)), (2, (0.58, 0.51))):
+        _ballot(ws, rnd, "chips", "SELL", s)
+        _ballot(ws, rnd, "risk", "SELL", s)
+        _ballot(ws, rnd, "company", "HOLD", h)
+        _ballot(ws, rnd, "market", "HOLD", h)
+    _prev_convergence(ws, 1, 0.54)
+    r = grader.grade(str(ws), DATE, 2)
+    assert r["convergence_score"] >= 0.70
+    assert r["exit"] is True and r["exit_reason"] == "stalled"
+    assert r["unresolved_dissent"] is True
+
+
 def test_uncited_flip_carries_half_conviction(tmp_path):
     ws = _ws(tmp_path, {"min_rounds": 1, "max_rounds": 3, "convergence_threshold": 0.99})
     _ballot(ws, 1, "a", "BUY", 0.6)

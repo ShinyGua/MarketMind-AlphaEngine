@@ -1,0 +1,54 @@
+{
+  "protocol": "marketmind-outcome-scoring",
+  "version": 1,
+  "frozen_on": "2026-10-29",
+  "status_of_history": "Decisions issued before the first sealed decision record have no verified issuance time. They are scored only descriptively (ledger/backfill.py) and never enter the evaluation below.",
+  "forecast": {
+    "field": "forecast.p_outperform",
+    "event": "stock price return minus benchmark price return over the horizon is greater than zero",
+    "horizons_sessions": {"primary": 20, "secondary": [5, 60]},
+    "reference": "the first exchange session close strictly after issued_at (the ledger's own clock); the horizon endpoint is that many benchmark sessions later",
+    "sessions": "the benchmark index's own trading days; never forward-fill a missing close — a missing stock or benchmark close at an endpoint makes that outcome unscorable",
+    "benchmarks": {
+      "US": {"primary": "FRED SP500 (S&P 500 price index, keyless fredgraph.csv)", "cross_check": "SPY via api.nasdaq.com, labelled as an ETF price return"},
+      "CN": {"primary": "CSI 300 price index (Sina sh000300)"},
+      "HK": {"primary": "Hang Seng price index (Sina HSI)"}
+    },
+    "price_basis": "price return versus price return; stock closes as traded, adjusted only for verified splits and bonus shares; cash dividends excluded on both sides; windows with an unverified corporate action are flagged",
+    "metrics": ["Brier score", "log loss", "reliability by probability bin", "quantile coverage of excess_quantiles when given"],
+    "comparators": ["constant 0.5", "base rate of outperformance from forecasts already matured at issuance (0.5 until any have matured)"],
+    "aggregation_scored": ["chair forecast", "equal-weight mean of final-round ballots", "conviction-weighted mean of final-round ballots"]
+  },
+  "actions": {
+    "tracks": {
+      "if_flat": "starting exposure 0: BUY opens a full position; HOLD and SELL stay out (long-only, no short)",
+      "if_long": "starting exposure 1: BUY and HOLD keep it (no leverage); SELL exits"
+    },
+    "overlays": {
+      "trim": "exposure becomes 0.5 x current; never opens or adds",
+      "hedge_US_HK": "short leg of exposure x max(0, beta60) in SPY (US) or 2800.HK (HK), capped at 1.0 x exposure, beta from 60 daily returns before issuance; unavailable if beta cannot be estimated",
+      "hedge_CN": "hedge_mapped_to_trim: exposure x (1 - 0.5 x clip(beta60 vs CSI 300, 0, 1)); a partial exposure cut, not an economic hedge",
+      "stop": "level frozen at issuance = reference close - 2 x ATR14; triggered by a later close below the level; filled at the next eligible open, gaps included; no stop or hedge at zero exposure"
+    },
+    "execution": "first eligible open after issued_at; CN: no fill at an open locked at the board's price limit (main board 10%, ChiNext/STAR 20%, ST 5%), retry next session; suspended days are skipped; CN T+1 (no same-day exit)",
+    "costs": "see ledger/fees.yaml — statutory taxes and levies verified from primary sources with dates; commission and slippage are declared assumptions; dividends are not included in v1 and outcomes are flagged accordingly",
+    "reported": "net return and maximum drawdown per track at 5/20/60 sessions versus stock buy-and-hold, benchmark buy-and-hold and the same-start do-nothing policy; overlapping episodes are never compounded as independent trades"
+  },
+  "inference": {
+    "weights": "each ticker weighs equally in point estimates; calls and distinct tickers are both reported",
+    "intervals": "ticker-clustered bootstrap, with a date-block sensitivity check",
+    "missing": "missing or immature outcomes stay explicit, never zero-filled"
+  },
+  "review_points": [
+    {"matured_primary_forecasts": 30, "min_tickers": 10, "allowed_claims": "descriptive only"},
+    {"matured_primary_forecasts": 60, "min_tickers": 15, "allowed_claims": "first test of Brier skill versus the lagged base rate"},
+    {"matured_primary_forecasts": 100, "min_tickers": 15, "allowed_claims": "calibration claim, or withdrawal of p_outperform as a calibrated probability"}
+  ],
+  "default_verdict": "inconclusive — below a review point nothing is claimed and nothing is killed; a wide interval is inconclusive, not evidence of no effect",
+  "not_allowed": [
+    "tuning prompts, mandates or role weights to realised returns of these decisions",
+    "HOLD-band hit rates as a correctness measure",
+    "byte-based cost estimates as spend",
+    "reconstructing a missing forecast or issuance time from outcomes"
+  ]
+}

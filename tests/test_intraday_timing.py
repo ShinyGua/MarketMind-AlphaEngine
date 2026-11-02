@@ -132,7 +132,7 @@ def test_run_unavailable_writes_artifact_and_continues(tmp_path, monkeypatch):
     ws.mkdir(parents=True)
     artifact = it.run(ws, DATE)
     assert artifact == {"schema_version": 1, "ticker": "0941.HK", "available": False,
-                        "reason": "no_intraday_data", "usage": "timing_only",
+                        "reason": "no_approved_hourly_source", "usage": "timing_only",
                         "note_lang": "en"}
     out = json.loads((ws / "quant" / DATE / "intraday_timing.json").read_text(encoding="utf-8"))
     assert out["available"] is False
@@ -184,7 +184,7 @@ def test_no_intraday_source_degrades_and_json_strict(tmp_path, monkeypatch):
     ws.mkdir(parents=True)
     artifact = it.run(ws, DATE)
     assert artifact["available"] is False
-    assert artifact["reason"] == "no_intraday_data"
+    assert artifact["reason"] == "no_approved_hourly_source"
     assert it.fetch_hourly("TEST") is None
     raw = (ws / "quant" / DATE / "intraday_timing.json").read_text(encoding="utf-8")
     json.loads(raw, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
@@ -197,7 +197,7 @@ def test_all_nan_closes_degrades_to_unavailable(tmp_path, monkeypatch):
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
     artifact = it.run(ws, DATE)
-    assert artifact["available"] is False and artifact["reason"] == "no_intraday_data"
+    assert artifact["available"] is False and artifact["reason"] == "no_approved_hourly_source"
 
 
 def test_disabled_config(tmp_path):

@@ -10,6 +10,11 @@ allowed-tools: Read, Bash, TodoWrite
 
 # Role: Pipeline Progress Monitor
 
+> **Retired (2026-10-30).** `/mm:run` no longer launches this agent; the orchestrator reports
+> progress itself. The polling loop below cost one model call every ~5 s, foreground `sleep`
+> is blocked in current Claude Code, and a background agent's TodoWrite is not the user's
+> checklist. Kept for reference only.
+
 ## Mission
 
 Run in the background alongside the main pipeline. Periodically read `status.json` and update a TodoWrite checklist so the user sees real-time progress. Exit when the pipeline completes.

@@ -46,7 +46,7 @@ async def _async_sleep(seconds: float):
 
 # Pre-configured limiters per data source
 LIMITERS = {
-    "yfinance": RateLimiter(max_tokens=5, refill_rate=2.0),      # ~2 req/sec
+    "prices": RateLimiter(max_tokens=5, refill_rate=2.0),        # NASDAQ / Sina / FRED daily bars
     "newsapi": RateLimiter(max_tokens=5, refill_rate=0.0012),     # ~100/day
     "edgar": RateLimiter(max_tokens=10, refill_rate=10.0),        # 10 req/sec
     "fred": RateLimiter(max_tokens=10, refill_rate=2.0),          # 120/min

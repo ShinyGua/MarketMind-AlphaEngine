@@ -1,6 +1,6 @@
 ---
 name: mm-sector-desk
-description: Collects sector news, peer stock data, and industry context via NewsAPI/web search and yfinance
+description: Collects sector news, peer stock data, and industry context via NewsAPI/web search and the approved price router (NASDAQ, akshare Sina)
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -25,7 +25,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 This skill uses the **market-data** MCP server for all external data fetching. Prefer MCP tools when available; fall back to inline Python if not.
 
-- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_price_history` — daily OHLCV from approved sources (NASDAQ / akshare Sina / FRED); never Yahoo
 - `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
 
 ## Inputs
@@ -65,12 +65,12 @@ Save to `{workspace}/raw/{date}/news/sector_news.json`.
 
 **Indicator warm-up**: Fetch **6 months** (`period='6mo'`) of daily data for peers and sector ETF, to provide warm-up for technical indicator computation.
 
-**Yahoo/yfinance is NOT used anywhere in this pipeline** — peer prices come from
-the public NASDAQ API via the deterministic collector. For each entry in
-`peer_set.json`:
+**Yahoo is NOT used anywhere in this pipeline** — peer prices come from the
+deterministic price router (NASDAQ API for US peers, akshare Sina for CN/HK
+peers such as `000651.SZ` or `0700.HK`). For each entry in `peer_set.json`:
 
 ```bash
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {PEER} \
+.venv/bin/python3 scripts/price_router.py '{PEER}' \
     --out {workspace}/raw/{date}/prices/peer_{PEER}.csv --months 12 --end {date}
 ```
 
@@ -81,7 +81,7 @@ peer rather than aborting.
 ### 3. Fetch Sector ETF Data
 
 ```bash
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {SECTOR_ETF} --assetclass etf \
+.venv/bin/python3 scripts/price_router.py '{SECTOR_ETF}' \
     --out {workspace}/raw/{date}/prices/sector_etf.csv --months 12 --end {date}
 ```
 
@@ -114,9 +114,23 @@ Evidence card schema:
   "materiality_score": 0.0,
   "sentiment": "positive|negative|neutral",
   "topic_tags": ["sector", "<industry>"],
-  "time_horizon": "daily"
+  "time_horizon": "daily",
+  "as_of": "<YYYY-MM-DD the data describes — data cards only; omit for news>",
+  "lineage": {"dataset": "<source dataset>", "block": "<chip block, if chip/flow data>"}
 }
 ```
+
+**Dating and lineage (required for data cards).** `published_at` is when the
+item was published. For a card that reports a *data observation* (a margin
+balance, a fund-flow figure, a price level, a holder count), also give
+`as_of` — the date the number describes (e.g. `"as_of": "2026-10-21"` for
+"融资余额 as of 10-21" published on 10-22) — and `lineage`, naming the dataset
+and, for chip/flow data, the block:
+`"lineage": {"dataset": "akshare:stock_margin_detail_szse", "block": "margin"}`.
+Chip/flow data (融资余额 / 主力资金 / 北向 / 龙虎榜 / 股东户数 / 解禁 / 换手率)
+must also carry the `chips` topic tag. The pre-release gate treats such a card
+as chip evidence: undated or stale, it supports nothing, and it can never be
+the independent corroboration a chip-grounded BUY/SELL needs.
 
 When scoring materiality, consider relevance to the target company specifically, not just the sector in general.
 

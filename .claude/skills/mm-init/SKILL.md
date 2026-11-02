@@ -95,7 +95,7 @@ user may skip answering.
 
 ### Step 5: Enrich Company Details (Optional)
 
-**Yahoo/yfinance is NOT used anywhere in this pipeline.** For a US name, get the
+**Yahoo is NOT used anywhere in this pipeline.** For a US name, get the
 live quote and exchange from the NASDAQ API:
 
 ```bash
@@ -106,7 +106,7 @@ Sector, industry, currency and country come from the Step 2 WebSearch results,
 which are sufficient on their own. If neither source resolves a field, leave it
 empty rather than guessing — the resolver stage fills the profile properly.
 
-If yfinance fails, use the web search results — they are sufficient.
+If the NASDAQ call fails, use the web search results — they are sufficient.
 
 ### Step 6: Determine Market Profile
 

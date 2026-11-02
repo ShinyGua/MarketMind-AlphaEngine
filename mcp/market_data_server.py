@@ -1,13 +1,15 @@
 """MarketMind MCP server — wraps all external data source calls.
 
 Exposes seven tools over stdio:
-  get_price_history   — stock/index prices via yfinance
+  get_price_history   — daily OHLCV via scripts/price_router.py (NASDAQ, akshare Sina, FRED)
   get_news            — headlines via NewsAPI
   get_filings         — SEC EDGAR full-text search
   get_macro_series    — FRED economic series
-  get_company_info    — company profile via yfinance
-  get_fundamentals    — valuation ratios + financial statements via yfinance
-  get_earnings_calendar — earnings dates via yfinance
+  get_company_info    — explicit "unavailable" (no approved profile source)
+  get_fundamentals    — US: SEC EDGAR XBRL; CN/HK: explicit "unavailable"
+  get_earnings_calendar — US: NASDAQ estimated earnings date; CN/HK: "unavailable"
+
+Yahoo/yfinance is not used anywhere — not as a source and not as a fallback.
 """
 
 from __future__ import annotations
@@ -103,8 +105,10 @@ TOOLS = [
     mcp.types.Tool(
         name="get_price_history",
         description=(
-            "Fetch OHLCV price history for one or more tickers via yfinance. "
-            "Returns date-indexed arrays of open/high/low/close/volume."
+            "Fetch daily OHLCV history from approved sources (US: api.nasdaq.com; "
+            "CN/HK stocks and indices: akshare Sina; ^VIX, BTC-USD, FX: FRED, "
+            "close-only). Prices are as traded (unadjusted). Intraday intervals "
+            "are unavailable; 1wk/1mo are resampled from daily bars."
         ),
         inputSchema={
             "type": "object",
@@ -203,7 +207,8 @@ TOOLS = [
     ),
     mcp.types.Tool(
         name="get_company_info",
-        description="Fetch company profile (sector, industry, market cap, etc.) via yfinance.",
+        description=("Company profile. No approved source exists, so this returns an "
+                     "explicit 'unavailable' with where to look instead."),
         inputSchema={
             "type": "object",
             "properties": {
@@ -215,9 +220,9 @@ TOOLS = [
     mcp.types.Tool(
         name="get_fundamentals",
         description=(
-            "Fetch valuation ratios (PE, EV/EBITDA, EV/Rev, margins, growth, ROE, "
-            "beta) and recent annual financial statements (revenue, EBIT, D&A, "
-            "capex, tax) for a ticker via yfinance. Used to build DCF and comps."
+            "Fetch valuation ratios and recent annual statements (revenue, EBIT, "
+            "D&A, capex, tax) for a US ticker from SEC EDGAR XBRL. CN/HK names "
+            "return an explicit 'unavailable'."
         ),
         inputSchema={
             "type": "object",
@@ -229,7 +234,8 @@ TOOLS = [
     ),
     mcp.types.Tool(
         name="get_earnings_calendar",
-        description="Fetch upcoming and recent earnings dates for a ticker via yfinance.",
+        description=("Next earnings date for a US ticker from NASDAQ (labelled "
+                     "'estimated' until the company announces it). CN/HK: 'unavailable'."),
         inputSchema={
             "type": "object",
             "properties": {
@@ -252,68 +258,119 @@ async def list_tools() -> list[mcp.types.Tool]:
 
 _EMPTY_OHLCV = {"dates": [], "open": [], "high": [], "low": [], "close": [], "volume": []}
 
+# Calendar months fetched per requested period (a little slack for holidays).
+_PERIOD_MONTHS = {"1d": 0.3, "5d": 0.5, "1mo": 1.2, "3mo": 3.2, "6mo": 6.2, "1y": 12.2, "2y": 24.2}
+_PRICE_CALL_TIMEOUT_S = 60
+_SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 
-def _ohlcv_from_frame(frame, pd) -> dict:
-    """Extract an OHLCV dict from a single-level (Open/High/Low/Close/Volume) frame.
-    Missing columns degrade to all-None rather than raising."""
-    n = len(frame.index)
 
-    def col(name):
-        return frame[name] if name in frame.columns else [None] * n
+def _scripts_on_path() -> None:
+    if _SCRIPTS not in sys.path:
+        sys.path.insert(0, _SCRIPTS)
+
+
+def _ohlcv_from_rows(rows: list[dict]) -> dict:
+    """price_router rows -> the tool's column arrays. Close-only series keep None
+    for open/high/low rather than inventing values."""
+    def r2(v):
+        return round(float(v), 2) if v is not None else None
 
     return {
-        "dates": [d.isoformat() for d in frame.index],
-        "open": [round(float(v), 2) if pd.notna(v) else None for v in col("Open")],
-        "high": [round(float(v), 2) if pd.notna(v) else None for v in col("High")],
-        "low": [round(float(v), 2) if pd.notna(v) else None for v in col("Low")],
-        "close": [round(float(v), 2) if pd.notna(v) else None for v in col("Close")],
-        "volume": [int(v) if pd.notna(v) else None for v in col("Volume")],
+        "dates": [r["Date"] for r in rows],
+        "open": [r2(r.get("Open")) for r in rows],
+        "high": [r2(r.get("High")) for r in rows],
+        "low": [r2(r.get("Low")) for r in rows],
+        "close": [r2(r.get("Close")) for r in rows],
+        "volume": [int(r["Volume"]) if r.get("Volume") is not None else None for r in rows],
     }
 
 
+def _pick(fn, a, b):
+    """max/min over the non-None values; None when both are missing."""
+    vals = [v for v in (a, b) if v is not None]
+    return fn(vals) if vals else None
+
+
+def _resample(rows: list[dict], interval: str) -> list[dict]:
+    """Aggregate daily rows into weekly (ISO week) or monthly bars, dated by the
+    bucket's last trading day."""
+    from datetime import date as _d
+
+    def key(ds: str):
+        d = _d.fromisoformat(ds)
+        return d.isocalendar()[:2] if interval == "1wk" else (d.year, d.month)
+
+    out: list[dict] = []
+    for r in rows:
+        if out and key(out[-1]["_last"]) == key(r["Date"]):
+            b = out[-1]
+            b["High"] = _pick(max, b["High"], r.get("High"))
+            b["Low"] = _pick(min, b["Low"], r.get("Low"))
+            b["Close"] = r["Close"]
+            b["Volume"] = (b["Volume"] or 0) + (r.get("Volume") or 0)
+            b["_last"] = b["Date"] = r["Date"]
+        else:
+            out.append({**r, "_last": r["Date"]})
+    for b in out:
+        b.pop("_last", None)
+    return out
+
+
 async def _get_price_history(arguments: dict) -> list[mcp.types.TextContent]:
-    import yfinance as yf
-    import pandas as pd
+    """Daily bars from approved sources via scripts/price_router.py (no Yahoo).
+
+    Each symbol is fetched independently: one failure yields an empty series plus
+    an entry in ``errors`` and never aborts the others. Only daily bars exist
+    upstream; 1wk/1mo are resampled and intraday intervals are reported
+    unavailable rather than approximated.
+    """
+    import asyncio
+
+    _scripts_on_path()
+    from price_router import fetch_any
 
     tickers = arguments["tickers"]
     if isinstance(tickers, str):
         tickers = [tickers]
-    period = arguments["period"]
-    interval = arguments["interval"]
+    period = arguments.get("period", "1y")
+    interval = arguments.get("interval", "1d")
 
-    await LIMITERS["yfinance"].acquire()
+    if interval not in ("1d", "1wk", "1mo"):
+        reason = f"interval {interval} unavailable: approved sources provide daily bars only"
+        return _ok({
+            "data": {t: dict(_EMPTY_OHLCV) for t in tickers},
+            "errors": {t: reason for t in tickers},
+            "metadata": {"fetched_at": _ISO_NOW(), "count": 0, "unavailable": True},
+        })
 
-    df = yf.download(
-        tickers,
-        period=period,
-        interval=interval,
-        group_by="ticker",
-        progress=False,
-        threads=True,
-    )
-
+    months = _PERIOD_MONTHS.get(period, 12.2)
+    loop = asyncio.get_running_loop()
     data: dict[str, dict] = {}
-
-    # yfinance with group_by="ticker" returns MultiIndex columns (ticker, field)
-    # even for ONE ticker, so always select the ticker's sub-frame when MultiIndex
-    # before reading Open/High/…; a flat frame (older yfinance / single string) is
-    # used as-is. This unifies single- and multi-ticker and avoids KeyError: 'Open'.
-    multi = isinstance(df.columns, pd.MultiIndex)
+    sources: dict[str, dict] = {}
+    errors: dict[str, str] = {}
     for ticker in tickers:
-        if df is None or df.empty:
-            data[ticker] = dict(_EMPTY_OHLCV)
-            continue
+        await LIMITERS["prices"].acquire()
         try:
-            sub = df[ticker] if multi else df
-        except KeyError:
+            rows, prov = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda t=ticker: fetch_any(t, months=months)),
+                timeout=_PRICE_CALL_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - isolate per symbol
             data[ticker] = dict(_EMPTY_OHLCV)
+            errors[ticker] = (str(exc) or type(exc).__name__)[:200]
             continue
-        data[ticker] = dict(_EMPTY_OHLCV) if sub.empty else _ohlcv_from_frame(sub, pd)
+        if period in ("1d", "5d"):
+            rows = rows[-(1 if period == "1d" else 5):]
+        if interval != "1d":
+            rows = _resample(rows, interval)
+        data[ticker] = _ohlcv_from_rows(rows)
+        sources[ticker] = prov
 
     total = sum(len(v["dates"]) for v in data.values())
     return _ok({
         "data": data,
-        "metadata": {"fetched_at": _ISO_NOW(), "count": total},
+        "errors": errors,
+        "metadata": {"fetched_at": _ISO_NOW(), "count": total, "sources": sources,
+                     "adjusted": False},
     })
 
 
@@ -526,201 +583,103 @@ async def _get_macro_series(arguments: dict) -> list[mcp.types.TextContent]:
     })
 
 
-async def _get_company_info(arguments: dict) -> list[mcp.types.TextContent]:
-    import yfinance as yf
-
-    ticker = arguments["ticker"]
-
-    await LIMITERS["yfinance"].acquire()
-
-    info = yf.Ticker(ticker).info
-
-    _FIELDS = [
-        "shortName", "longName", "exchange", "sector", "industry",
-        "marketCap", "currency", "country", "website",
-        "longBusinessSummary", "fullTimeEmployees",
-    ]
-    _KEY_MAP = {
-        "shortName": "name",
-        "longName": "long_name",
-        "exchange": "exchange",
-        "sector": "sector",
-        "industry": "industry",
-        "marketCap": "market_cap",
-        "currency": "currency",
-        "country": "country",
-        "website": "website",
-        "longBusinessSummary": "description",
-        "fullTimeEmployees": "full_time_employees",
-    }
-
-    result = {}
-    for yf_key in _FIELDS:
-        out_key = _KEY_MAP[yf_key]
-        val = info.get(yf_key)
-        result[out_key] = val
-
-    result["ticker"] = ticker
-    result["metadata"] = {"source": "yfinance", "fetched_at": _ISO_NOW()}
-
-    return _ok(result)
-
-
-async def _get_earnings_calendar(arguments: dict) -> list[mcp.types.TextContent]:
-    import yfinance as yf
-
-    ticker = arguments["ticker"]
-
-    await LIMITERS["yfinance"].acquire()
-
-    t = yf.Ticker(ticker)
-
-    # .calendar may be a dict or DataFrame depending on yfinance version
-    next_earnings_date = None
-    try:
-        cal = t.calendar
-        if isinstance(cal, dict):
-            ed = cal.get("Earnings Date")
-            if ed:
-                next_earnings_date = ed[0].isoformat() if hasattr(ed[0], "isoformat") else str(ed[0])
-        elif hasattr(cal, "iloc"):
-            # DataFrame
-            if "Earnings Date" in cal.index:
-                val = cal.loc["Earnings Date"].iloc[0]
-                next_earnings_date = val.isoformat() if hasattr(val, "isoformat") else str(val)
-    except Exception:
-        pass
-
-    # .earnings_dates — a DataFrame of historical/upcoming dates
-    earnings_dates: list[str] = []
-    try:
-        ed_df = t.earnings_dates
-        if ed_df is not None and not ed_df.empty:
-            earnings_dates = [d.isoformat() for d in ed_df.index[:20]]
-    except Exception:
-        pass
-
+def _unavailable(tool: str, ticker: str, reason: str, use_instead: str) -> list[mcp.types.TextContent]:
+    """Explicit 'no approved source' answer — never a silent Yahoo fallback."""
     return _ok({
-        "next_earnings_date": next_earnings_date,
-        "earnings_dates": earnings_dates,
-        "metadata": {"source": "yfinance", "ticker": ticker, "fetched_at": _ISO_NOW()},
+        "ticker": ticker,
+        "unavailable": True,
+        "reason": reason,
+        "use_instead": use_instead,
+        "metadata": {"tool": tool, "fetched_at": _ISO_NOW()},
     })
 
 
-# ── fundamentals helpers ──────────────────────────────────────────────────
-
-# yfinance statement row labels vary across versions/tickers; try each candidate.
-_STATEMENT_ROWS = {
-    "revenue": ["Total Revenue", "TotalRevenue", "Operating Revenue"],
-    "ebit": ["EBIT", "Operating Income", "OperatingIncome", "Total Operating Income As Reported"],
-    "pretax_income": ["Pretax Income", "PretaxIncome", "Income Before Tax"],
-    "tax_provision": ["Tax Provision", "TaxProvision", "Income Tax Expense"],
-    "net_income": ["Net Income", "NetIncome", "Net Income Common Stockholders"],
-}
-_CASHFLOW_ROWS = {
-    "operating_cash_flow": ["Operating Cash Flow", "Total Cash From Operating Activities",
-                             "Cash Flow From Continuing Operating Activities"],
-    "capex": ["Capital Expenditure", "Capital Expenditures", "Purchase Of PPE"],
-    "dep_amort": ["Depreciation And Amortization", "Depreciation Amortization Depletion",
-                  "Depreciation", "Reconciled Depreciation"],
-}
+def _is_us_listing(ticker: str) -> bool:
+    _scripts_on_path()
+    from fetch_prices_nasdaq import FetchError
+    from price_router import classify
+    try:
+        return classify(ticker)[0] == "nasdaq"
+    except FetchError:
+        return False
 
 
-def _extract_rows(df, row_map: dict) -> list[dict]:
-    """Pull the most recent annual columns from a yfinance statement DataFrame.
+async def _get_company_info(arguments: dict) -> list[mcp.types.TextContent]:
+    """No approved source carries a full company profile (sector, market cap,
+    description) for every market, so this tool answers explicitly."""
+    return _unavailable(
+        "get_company_info", arguments["ticker"],
+        "no approved company-profile source (Yahoo is not used)",
+        "US: scripts/nasdaq_fetch.py (quote + exchange) and get_filings (EDGAR); "
+        "CN/HK: exchange website or web search with provenance")
 
-    Returns a list of per-year dicts, newest first, with the keys in row_map.
-    Missing rows/values come back as None rather than raising.
-    """
-    if df is None or not hasattr(df, "columns") or df.empty:
-        return []
 
-    def find_row(candidates):
-        for name in candidates:
-            if name in df.index:
-                return df.loc[name]
-        return None
+async def _get_earnings_calendar(arguments: dict) -> list[mcp.types.TextContent]:
+    """US: NASDAQ's analyst earnings-date endpoint. The date is an *estimate*
+    (Zacks, derived from past reporting dates) until the company announces it,
+    and is labelled so. CN/HK: explicit unavailable."""
+    import asyncio
+    import re
+    import urllib.request
 
-    series = {key: find_row(cands) for key, cands in row_map.items()}
+    ticker = arguments["ticker"]
+    if not _is_us_listing(ticker):
+        return _unavailable(
+            "get_earnings_calendar", ticker,
+            "no approved earnings-calendar source for this market",
+            "CN: akshare stock_report_disclosure (scheduled disclosure dates); "
+            "HK: exchange announcements / web search")
 
-    out = []
-    for col in df.columns[:4]:  # most recent up to 4 fiscal years
-        year = col.year if hasattr(col, "year") else str(col)
-        entry = {"period": str(year)}
-        for key, s in series.items():
-            val = None
-            if s is not None:
-                try:
-                    raw = s.get(col)
-                    if raw is not None and not (isinstance(raw, float) and raw != raw):
-                        val = float(raw)
-                except Exception:
-                    val = None
-            entry[key] = val
-        out.append(entry)
-    return out
+    _scripts_on_path()
+    from fetch_prices_nasdaq import HEADERS
+
+    url = f"https://api.nasdaq.com/api/analyst/{ticker.strip().upper()}/earnings-date"
+
+    def fetch() -> dict:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    await LIMITERS["prices"].acquire()
+    payload = await asyncio.get_running_loop().run_in_executor(None, fetch)
+    data = payload.get("data") or {}
+    text = " ".join(str(data.get(k) or "") for k in ("announcement", "reportText"))
+    next_date = None
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", data.get("reportText") or "")
+    if m:
+        next_date = f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    status = "estimated" if "estimated" in text.lower() else "announced"
+    return _ok({
+        "next_earnings_date": next_date,
+        "status": status if next_date else "unknown",
+        "source_text": (data.get("announcement") or "")[:200],
+        "earnings_dates": [],
+        "metadata": {"source": "api.nasdaq.com/analyst/earnings-date", "ticker": ticker,
+                     "fetched_at": _ISO_NOW()},
+    })
 
 
 async def _get_fundamentals(arguments: dict) -> list[mcp.types.TextContent]:
-    import yfinance as yf
+    """US: SEC EDGAR XBRL via scripts/fetch_fundamentals_edgar.build() — the same
+    metrics / income_statement / cash_flow shape this tool always returned.
+    CN/HK: explicit unavailable."""
+    import asyncio
 
     ticker = arguments["ticker"]
+    if not _is_us_listing(ticker):
+        return _unavailable(
+            "get_fundamentals", ticker,
+            "no approved fundamentals source wired for this market",
+            "CN: akshare stock_financial_abstract / stock_financial_report_sina; "
+            "HK: company filings via web search")
 
-    await LIMITERS["yfinance"].acquire()
+    _scripts_on_path()
+    from fetch_fundamentals_edgar import build
 
-    t = yf.Ticker(ticker)
-    info = t.info or {}
-
-    # Valuation ratios + key metrics straight from .info
-    _INFO_FIELDS = {
-        "quoteType": "quote_type",
-        "currency": "currency",
-        "marketCap": "market_cap",
-        "enterpriseValue": "enterprise_value",
-        "trailingPE": "trailing_pe",
-        "forwardPE": "forward_pe",
-        "priceToBook": "price_to_book",
-        "enterpriseToRevenue": "ev_to_revenue",
-        "enterpriseToEbitda": "ev_to_ebitda",
-        "profitMargins": "profit_margins",
-        "operatingMargins": "operating_margins",
-        "grossMargins": "gross_margins",
-        "revenueGrowth": "revenue_growth",
-        "earningsGrowth": "earnings_growth",
-        "returnOnEquity": "return_on_equity",
-        "freeCashflow": "free_cashflow",
-        "operatingCashflow": "operating_cashflow",
-        "totalCash": "total_cash",
-        "totalDebt": "total_debt",
-        "totalRevenue": "total_revenue",
-        "ebitda": "ebitda",
-        "sharesOutstanding": "shares_outstanding",
-        "beta": "beta",
-        "currentPrice": "current_price",
-    }
-    metrics = {}
-    for yf_key, out_key in _INFO_FIELDS.items():
-        metrics[out_key] = info.get(yf_key)
-
-    # Annual financial statements (best-effort; may be empty for funds/ETFs).
-    income_statement = []
-    cash_flow = []
-    try:
-        income_statement = _extract_rows(t.financials, _STATEMENT_ROWS)
-    except Exception:
-        income_statement = []
-    try:
-        cash_flow = _extract_rows(t.cashflow, _CASHFLOW_ROWS)
-    except Exception:
-        cash_flow = []
-
-    result = {
-        "ticker": ticker,
-        "metrics": metrics,
-        "income_statement": income_statement,  # newest first
-        "cash_flow": cash_flow,                # newest first
-        "metadata": {"source": "yfinance", "fetched_at": _ISO_NOW()},
-    }
+    await LIMITERS["edgar"].acquire()
+    result = await asyncio.wait_for(
+        asyncio.get_running_loop().run_in_executor(None, lambda: build(ticker)),
+        timeout=120)
     return _ok(_round_floats(result, 4))
 
 

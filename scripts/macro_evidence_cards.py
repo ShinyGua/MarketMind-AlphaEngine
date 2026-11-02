@@ -150,7 +150,9 @@ def build_cards(regime: dict, date: str, lang: str) -> list[dict]:
             "id": f"ev_{date}_macro_{n:03d}",
             "desk": "macro",
             "source_type": "macro_series",
-            "source_name": "FRED" if quality == "fred" else "yfinance",
+            # Keyed API and keyless fredgraph CSV are both FRED. "proxy" quality
+            # only survives in legacy (Yahoo-era) regime artifacts.
+            "source_name": "FRED" if quality == "fred" else "legacy proxy",
             "url": None,
             "published_at": date,
             "ticker": "MARKET",

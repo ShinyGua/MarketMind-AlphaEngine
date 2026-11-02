@@ -51,11 +51,11 @@ workspace:
 # --- Data Sources (free-tier APIs) ---
 data_sources:
   price:
-    provider: yfinance          # yfinance (free)
+    provider: price_router      # scripts/price_router.py: NASDAQ (US), akshare Sina (CN/HK), FRED close-only (^VIX, BTC-USD, FX). No Yahoo.
     horizons:
       short:
         period: 5d
-        interval: 1h
+        interval: 1d              # no approved intraday source; daily bars only
       medium:
         period: 3mo
         interval: 1d
@@ -94,13 +94,6 @@ data_sources:
       - DTWEXBGS                # Trade-weighted broad USD index
       - BAMLH0A0HYM2            # ICE BofA HY credit spread (OAS)
       - VIXCLS                  # VIX
-    yf_proxies:                 # keyless self-degrade map (CPI/FedFunds/HY have no proxy → inputs_missing)
-      DGS2: ^IRX                # 13-week bill — approximate, flagged data_quality: proxy
-      DGS5: ^FVX
-      DGS10: ^TNX
-      DGS30: ^TYX
-      DTWEXBGS: DX-Y.NYB
-      VIXCLS: ^VIX
     lookback_months: 16         # >= 13 monthly CPI obs for YoY even during the pre-release window (CPI lags ~6wk) + 1y VIX percentile
 
   cn_chips:
@@ -173,7 +166,7 @@ quant:
   # never a reason to flip a BUY/HOLD/SELL vote or change conviction.
   intraday:
     enabled: true
-    period: 90d                 # yfinance 1h lookback (free tier allows ~730d)
+    period: 90d                 # 1h lookback for a future hourly adapter; none is approved today (artifact: available=false)
     interval: 1h
     resample: 4h                # naive clock bins, not exchange-session aligned
     rsi_window: 14
@@ -183,10 +176,11 @@ quant:
   # scripts/collect_cn_chips.py + scripts/chip_evidence_cards.py — deterministic).
   # DIRECTIONAL: unlike macro (context), intraday (timing-only) and trend_regime
   # (context-only), chip/volume structure is first-class stance evidence —
-  # analysts and panelists may ground a stance or vote in it.
+  # analysts and panelists may ground a stance or vote in it — when fresh, and a
+  # BUY/SELL resting on it needs independent corroboration (rule K1).
   chips:
     enabled: true
-    history_period: 400d        # yfinance daily fetch when the raw CSV is thin
+    history_period: 400d        # price_router daily fetch when the raw CSV is thin
     chip_window_days: 120       # VPVR volume-at-price window
     histogram_bins: 40
     swing_pivot_window: 5
@@ -199,7 +193,7 @@ quant:
 
 # --- Valuation (Scenario DCF + Comps) ---
 # Computed in Stage 6 by mm-valuation-engine (valuation/run_valuation.py).
-# Free-tier: inputs come from yfinance fundamentals collected by the company desk.
+# Free-tier: inputs come from SEC EDGAR fundamentals (US) collected by the company desk.
 # Non-equity instruments (ETF/fund/index) are auto-skipped (applicable=false);
 # sparse data degrades to confidence=low rather than failing.
 valuation:
@@ -242,6 +236,7 @@ valuation:
   # candidate and as the upper tail of fair_value_range (its bull scenario).
   dcf_comps_divergence_cap: 2.0     # null to disable; DCF > 2.0× comps → excluded
   dcf_comps_divergence_weight: 0.35 # DEPRECATED/legacy: ignored under the exclude path
+  comps_min_peers: 3               # a comps median from fewer usable peers never anchors fair value
   # --- deterministic, fundamentals-driven growth selection (select_growth) ---
   cagr_years: 3                   # revenue-CAGR window for growth selection
   growth_divergence_ratio: 2.0    # CAGR vs trailing ratio (both positive) → confidence downgrade

@@ -197,3 +197,81 @@ def test_cards_ignore_unavailable_blocks():
     chip = _chip_fixture(cn_flows={"holder_count": {
         "data_quality": "unavailable", "reason": "ConnectionError"}})
     assert cards.material_observations(chip) == []
+
+
+def test_build_records_last_bar_and_cuts_future_bars(tmp_path, monkeypatch):
+    monkeypatch.setattr(chips, "fetch_daily", lambda *a, **k: None)
+    ws = _mk_workspace(tmp_path, _df(n=130), date="2026-07-15")
+    # The fixture CSV runs to 07-16; a 07-15 run must not see the later bar.
+    artifact = chips.build(ws, "2026-07-15", dict(chips.DEFAULTS))
+    assert artifact["last_bar_date"] == "2026-07-15"
+    assert artifact["dropped_partial_row"] is False
+
+
+def test_unfinished_run_date_bar_is_dropped(tmp_path, monkeypatch):
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(chips, "fetch_daily", lambda *a, **k: None)
+    ws = _mk_workspace(tmp_path, _df(n=130))
+    csv = ws / "raw" / "2026-07-16" / "prices" / "600000_3mo.csv"
+    # Written at 11:00 Beijing on the run date: the 07-16 bar is a partial session.
+    t = datetime(2026, 7, 16, 11, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+    os.utime(csv, (t, t))
+    artifact = chips.build(ws, "2026-07-16", dict(chips.DEFAULTS))
+    assert artifact["dropped_partial_row"] is True
+    assert artifact["last_bar_date"] == "2026-07-15"
+
+
+def test_stale_block_makes_no_card():
+    chip = _chip_fixture(cn_flows={"northbound": {
+        "data_quality": "stale", "as_of": "2024-08-16", "lag_sessions": 500,
+        "reason": "as_of 2024-08-16 is 500 sessions before 2026-07-15 (limit 2)"}})
+    assert cards.material_observations(chip) == []
+
+
+def test_cards_carry_observation_date_and_lineage():
+    chip = _chip_fixture(
+        last_bar_date="2026-07-15", source="raw_csv",
+        chip_distribution={"profit_ratio": 0.05, "window_days": 120},
+        cn_flows={"holder_count": {
+            "data_quality": "akshare", "trend": "concentrating", "as_of": "2026-06-30",
+            "cadence": "quarterly_report", "acquired_at": "2026-07-16T03:00:00+00:00",
+            "source": "stock_zh_a_gdhs_detail_em",
+            "latest": {"as_of": "2026-06-30", "holders": 25000, "change_pct": -4.2}}})
+    built = {c["meta"]["lineage"]["block"]: c for c in cards.build_cards(chip, "600000", "2026-07-16", "en")}
+    holder = built["holder_count"]
+    assert holder["published_at"] == "2026-06-30"          # the observation, not the run date
+    assert holder["meta"]["as_of"] == "2026-06-30"
+    assert holder["meta"]["lineage"]["dataset"] == "akshare:stock_zh_a_gdhs_detail_em"
+    assert holder["meta"]["family"] == "chip" and holder["meta"]["generator"] == "chip_evidence_cards"
+    price = built["price_structure"]
+    assert price["meta"]["as_of"] == "2026-07-15" and price["meta"]["lineage"]["dataset"] == "raw_csv"
+
+
+def test_rerun_purges_only_its_own_cards(tmp_path):
+    ws = tmp_path / "600000"
+    date = "2026-07-16"
+    quant = ws / "quant" / date
+    quant.mkdir(parents=True)
+    chip = _chip_fixture(last_bar_date="2026-07-16",
+                         chip_distribution={"profit_ratio": 0.05, "window_days": 120})
+    (quant / "chip_structure.json").write_text(json.dumps(chip))
+    out = ws / "normalized" / date / "evidence_cards"
+    out.mkdir(parents=True)
+    legacy = {"id": f"ev_{date}_chip_002", "desk": "chips", "source_type": "chip_structure",
+              "source_name": "raw_csv", "url": None, "published_at": date, "ticker": "600000",
+              "title": "old", "summary": "", "why_it_matters": "", "materiality_score": 0.6,
+              "sentiment": "neutral", "topic_tags": ["chips"], "time_horizon": "daily",
+              "usage": "directional"}
+    handmade = {**legacy, "id": f"ev_{date}_chip_001", "title": "hand-written",
+                "data_quality": "akshare", "raw_file": "raw/x.json"}
+    (out / f"{legacy['id']}.json").write_text(json.dumps(legacy))
+    (out / f"{handmade['id']}.json").write_text(json.dumps(handmade))
+
+    written = cards.run(ws, date)
+    assert json.loads((out / f"ev_{date}_chip_001.json").read_text())["title"] == "hand-written"
+    assert [c["id"] for c in written] == [f"ev_{date}_chip_002"]   # skipped the reserved 001
+    assert json.loads((out / f"ev_{date}_chip_002.json").read_text())["meta"]["generator"] \
+        == "chip_evidence_cards"

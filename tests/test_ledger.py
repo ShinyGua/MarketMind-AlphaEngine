@@ -1,0 +1,454 @@
+"""Tests for the decision ledger: store, seal, stamps."""
+import hashlib
+import json
+import multiprocessing
+import sys
+import tarfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from ledger import seal, stamp, store  # noqa: E402
+
+DATE = "2026-10-22"
+
+
+@pytest.fixture
+def root(tmp_path, monkeypatch):
+    # No test may reach the public OpenTimestamps calendars.
+    monkeypatch.setattr(stamp, "ots_binary", lambda: None)
+    return tmp_path / "MarketMindData"
+
+
+def _init(root):
+    rec = store.append(root, "protocol", {"protocol": {"version": 1}})
+    return rec
+
+
+# ---------- store ----------
+
+def test_canonical_bytes_are_stable():
+    a = store.canonical({"b": 1, "a": "中", "c": [1, {"y": 2, "x": 1}]})
+    b = store.canonical({"c": [1, {"x": 1, "y": 2}], "a": "中", "b": 1})
+    assert a == b == '{"a":"中","b":1,"c":[1,{"x":1,"y":2}]}'.encode()
+
+
+def test_protocol_must_come_first(root):
+    with pytest.raises(store.LedgerError, match="protocol"):
+        store.append(root, "decision", {"x": 1})
+
+
+def test_chain_links_and_verifies(root):
+    _init(root)
+    r2 = store.append(root, "decision", {"id": "a"})
+    r3 = store.append(root, "outcome", {"id": "a", "excess": 0.01})
+    assert r2["prev_hash"] == store.read(root)[0]["hash"] and r3["prev_hash"] == r2["hash"]
+    v = store.verify(root)
+    assert v["ok"] and v["count"] == 3 and v["head"] == r3["hash"]
+
+
+def _lines(root):
+    return store.ledger_path(root).read_text().splitlines()
+
+
+def test_edited_record_is_detected(root):
+    _init(root)
+    store.append(root, "decision", {"label": "HOLD"})
+    lines = _lines(root)
+    lines[1] = lines[1].replace("HOLD", "BUY")
+    store.ledger_path(root).write_text("\n".join(lines) + "\n")
+    assert any("hash mismatch" in e for e in store.verify(root)["errors"])
+
+
+def test_dropped_and_reordered_records_are_detected(root):
+    _init(root)
+    for i in range(3):
+        store.append(root, "decision", {"i": i})
+    lines = _lines(root)
+    store.ledger_path(root).write_text("\n".join([lines[0], lines[2], lines[1], lines[3]]) + "\n")
+    errs = store.verify(root)["errors"]
+    assert any("seq" in e for e in errs) and any("prev_hash" in e for e in errs)
+    store.ledger_path(root).write_text("\n".join([lines[0], lines[1], lines[3]]) + "\n")
+    assert not store.verify(root)["ok"]
+
+
+def test_truncated_tail_is_detected_and_blocks_appends(root):
+    _init(root)
+    store.append(root, "decision", {"i": 1})
+    raw = store.ledger_path(root).read_bytes()
+    store.ledger_path(root).write_bytes(raw[:-20])
+    assert any("partial record" in e for e in store.verify(root)["errors"])
+    with pytest.raises(store.LedgerError, match="partial"):
+        store.append(root, "decision", {"i": 2})
+
+
+def test_icloud_roots_are_refused():
+    with pytest.raises(store.LedgerError, match="iCloud"):
+        store.check_root(Path.home() / "Documents" / "MarketMindData")
+
+
+def _worker(args):
+    root, n = args
+    for i in range(n):
+        store.append(Path(root), "decision", {"pid": multiprocessing.current_process().name, "i": i})
+
+
+def test_concurrent_appends_keep_one_chain(root):
+    _init(root)
+    ctx = multiprocessing.get_context("fork")
+    with ctx.Pool(4) as pool:
+        pool.map(_worker, [(str(root), 10)] * 4)
+    v = store.verify(root)
+    assert v["ok"], v["errors"]
+    assert v["count"] == 41
+    assert [r["seq"] for r in store.read(root)] == list(range(1, 42))
+
+
+# ---------- seal ----------
+
+CARD = "ev_2026-10-22_company_002"
+
+def _workspace(tmp_path, gate_status="passed", edit_after=False):
+    ws = tmp_path / "300308"
+    d = ws / "decision" / DATE
+    (d / "panel" / "round_1").mkdir(parents=True)
+    (d / "panel" / "round_2").mkdir(parents=True)
+    for role, vote, conv, p in (("company_analyst", "HOLD", 0.6, 0.45),
+                                ("chips_analyst", "SELL", 0.8, 0.35),
+                                ("risk_analyst", "SELL", 0.4, 0.40)):
+        (d / "panel" / "round_2" / f"{role}_ballot.json").write_text(json.dumps(
+            {"role": role, "round": 2, "vote": vote, "conviction": conv, "risk_overlay": "none",
+             "action_if_flat": "HOLD", "action_if_long": vote, "p_outperform": p}))
+    (d / "panel" / "round_1" / "company_analyst_ballot.json").write_text('{"vote": "BUY"}')
+    dec = {"schema_version": 2, "decision": "HOLD", "risk_overlay": "none",
+           "actions": {"if_flat": {"label": "HOLD", "overlay": "none"},
+                       "if_long": {"label": "SELL", "overlay": "none"}},
+           "forecast": {"p_outperform": 0.4, "benchmark": "CSI300", "horizon_sessions": 20},
+           "confidence": 0.5, "derived_fields": {"position_state": "none", "track": "if_flat"},
+           "top_reasons": [{"text": "Gross margin compressed", "evidence_ids": [CARD],
+                            "direction": "down"}]}
+    cards = ws / "normalized" / DATE / "evidence_cards"
+    cards.mkdir(parents=True)
+    (cards / f"{CARD}.json").write_text(json.dumps(
+        {"id": CARD, "desk": "company", "source_type": "news", "ticker": "300308",
+         "title": "Gross margin compressed to 38%", "published_at": "2026-10-21",
+         "sentiment": "negative"}))
+    (d / "final_decision.json").write_text(json.dumps(dec))
+    sha = hashlib.sha256((d / "final_decision.json").read_bytes()).hexdigest()
+    (d / "pre_release_gate.json").write_text(json.dumps(
+        {"status": gate_status, "decision_sha256": sha, "warnings": [],
+         "issued_at": "2026-10-22T09:00:00+00:00"}))
+    if edit_after:
+        (d / "final_decision.json").write_text(json.dumps({**dec, "confidence": 0.9}))
+    (ws / "raw" / DATE / "prices").mkdir(parents=True)
+    (ws / "raw" / DATE / "prices" / "300308_3mo.csv").write_text("Date,Close\n2026-10-21,646.77\n")
+    (ws / "profile").mkdir()
+    (ws / "profile" / "company_profile.json").write_text(json.dumps(
+        {"yf_ticker": "300308.SZ", "market_profile": "CN", "exchange": "SZSE"}))
+    return ws
+
+
+NOW = datetime(2026, 10, 22, 9, 0, 0, tzinfo=timezone.utc)
+
+
+def test_seal_refuses_without_protocol(tmp_path, root):
+    with pytest.raises(store.LedgerError, match="protocol"):
+        seal.seal(_workspace(tmp_path), DATE, root, now=NOW, stamp_binary=None)
+
+
+@pytest.mark.parametrize("status,edit", [("blocked", False), ("passed", True)])
+def test_seal_refuses_blocked_or_edited(tmp_path, root, status, edit):
+    seal.init(root)
+    with pytest.raises(store.LedgerError, match="gate status"):
+        seal.seal(_workspace(tmp_path, status, edit), DATE, root, now=NOW, stamp_binary=None)
+
+
+def test_seal_records_everything_needed_to_score(tmp_path, root):
+    seal.init(root)
+    ws = _workspace(tmp_path)
+    receipt = seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    rec = store.read(root)[receipt["seq"] - 1]
+    body = rec["body"]
+    assert rec["type"] == "decision" and body["issued_at"] == "2026-10-22T09:00:00+00:00"
+    assert body["decision_id"] == "300308_2026-10-22_20261022T090000Z"
+    assert body["symbol"] == "300308.SZ" and body["market"] == "CN"
+    assert body["actions"]["if_long"]["label"] == "SELL"
+    assert body["forecast"]["p_outperform"] == 0.4
+    # final round only, both tallies from the same ballots
+    assert body["tallies"]["n_ballots"] == 3
+    assert body["tallies"]["head_count"] == {"BUY": 0, "HOLD": 1, "SELL": 2}
+    assert body["tallies"]["conviction_weighted"]["SELL"] == 1.2
+    assert body["tallies"]["p_outperform_equal_weight"] == 0.4
+    assert body["tallies"]["p_outperform_conviction_weighted"] == round((0.27 + 0.28 + 0.16) / 1.8, 4)
+    man = json.loads((root / "manifests" / body["manifest_file"]).read_text())
+    assert "raw/2026-10-22/prices/300308_3mo.csv" in man["files"]
+    assert "decision/2026-10-22/final_decision.json" in man["files"]
+    assert "profile/company_profile.json" in man["files"]
+    arc = root / "archive" / body["archive_file"]
+    assert hashlib.sha256(arc.read_bytes()).hexdigest() == body["archive_sha256"]
+    with tarfile.open(arc) as tar:     # the archive holds exactly the manifest's bytes
+        assert {m.name.split("/", 1)[1]: hashlib.sha256(tar.extractfile(m).read()).hexdigest()
+                for m in tar.getmembers()} == man["files"]
+    assert man["files"]["decision/2026-10-22/final_decision.json"] == body["gate"]["decision_sha256"]
+    assert json.loads((ws / "decision" / DATE / "ledger_receipt.json").read_text())["seq"] == rec["seq"]
+    assert store.verify(root)["ok"]
+
+
+def test_blocked_release_is_recorded_not_sealed(tmp_path, root):
+    seal.init(root)
+    ws = _workspace(tmp_path, "blocked")
+    rec = seal.record_block(ws, DATE, root)
+    assert rec["type"] == "gate_block" and rec["body"]["ticker"] == "300308"
+
+
+def test_seal_rechecks_the_decision_instead_of_trusting_the_verdict(tmp_path, root):
+    """A planted {"status": "passed", sha} does not get a failing decision sealed."""
+    seal.init(root)
+    ws = _workspace(tmp_path)
+    d = ws / "decision" / DATE
+    dec = json.loads((d / "final_decision.json").read_text())
+    dec["top_reasons"][0]["direction"] = "up"        # the SELL now has no 'down' reason
+    (d / "final_decision.json").write_text(json.dumps(dec))
+    sha = hashlib.sha256((d / "final_decision.json").read_bytes()).hexdigest()
+    (d / "pre_release_gate.json").write_text(json.dumps(
+        {"status": "passed", "decision_sha256": sha, "issued_at": "2026-10-22T09:00:00+00:00"}))
+    with pytest.raises(store.LedgerError, match="no_supporting_reason"):
+        seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    assert [r["type"] for r in store.read(root) if r["type"] != "stamp"] == ["protocol"]
+
+
+def test_a_run_date_is_sealed_once(tmp_path, root):
+    seal.init(root)
+    ws = _workspace(tmp_path)
+    seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    with pytest.raises(store.LedgerError, match="already has a release outcome"):
+        seal.seal(ws, DATE, root, now=NOW.replace(minute=5), stamp_binary=None)
+    with pytest.raises(store.LedgerError, match="passed this decision"):
+        seal.record_block(ws, DATE, root)
+    assert [r["type"] for r in store.read(root) if r["type"] != "stamp"] == ["protocol", "decision"]
+    assert seal.outcome(ws, DATE, root)["type"] == "decision"
+
+
+def test_a_blocked_run_date_cannot_be_sealed_later(tmp_path, root):
+    seal.init(root)
+    seal.record_block(_workspace(tmp_path / "a", "blocked"), DATE, root)
+    with pytest.raises(store.LedgerError, match="already has a release outcome"):
+        seal.seal(_workspace(tmp_path / "b"), DATE, root, now=NOW, stamp_binary=None)
+
+
+def _conflicting_append(args):
+    root, n = args
+    try:
+        store.append(Path(root), "decision", {"ticker": "300308", "run_date": DATE, "n": n},
+                     conflicts=lambda r: r["type"] == "decision")
+        return 1
+    except store.LedgerError:
+        return 0
+
+
+def test_conflict_check_and_append_are_one_step(root):
+    """Concurrent seals of one run date: the check runs under the append's lock."""
+    _init(root)
+    ctx = multiprocessing.get_context("fork")
+    with ctx.Pool(6) as pool:
+        assert sum(pool.map(_conflicting_append, [(str(root), n) for n in range(12)])) == 1
+    assert store.verify(root)["ok"]
+
+
+def test_read_splits_records_on_newline_only(root):
+    """A ballot field holding U+2028 / U+0085 must not split its record on read."""
+    _init(root)
+    store.append(root, "decision", {"text": "line\u2028separator\u0085next\u2029para"})
+    assert store.verify(root)["ok"]
+    assert store.read(root)[-1]["body"]["text"] == "line\u2028separator\u0085next\u2029para"
+    seal.has_protocol(root)   # every reader goes through read()
+
+
+# ---------- stamps ----------
+
+def test_init_seals_the_committed_protocol_once(root):
+    first = seal.init(root)
+    again = seal.init(root)
+    assert first["seq"] == again["seq"] == 1
+    body = store.read(root)[0]["body"]
+    text = (ROOT / "ledger" / "protocol_v1.json").read_text(encoding="utf-8")
+    assert body["protocol_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    assert body["protocol"]["forecast"]["horizons_sessions"]["primary"] == 20
+
+
+def test_missing_client_is_not_submitted_never_raises(tmp_path, root):
+    store.append(root, "protocol", {"v": 1})
+    rec = store.append(root, "decision", {"id": "x"})
+    s = stamp.stamp_record(root, rec, binary=None)
+    assert s["type"] == "stamp" and s["body"]["status"] == "not_submitted"
+    assert (root / "stamps" / f"{rec['seq']:06d}.hash").read_text().strip() == rec["hash"]
+    assert stamp.stamp_summary(root) == {"not_submitted": 1}
+    assert stamp.upgrade_all(root, binary=None) == []
+
+
+def _stamped_protocol(root: Path) -> None:
+    """Record 1 as `ledger init` leaves it: stamped (here already attested)."""
+    rec = store.append(root, "protocol", {"v": 1})
+    store.append(root, "stamp", {"target_seq": rec["seq"], "target_hash": rec["hash"],
+                                 "file": f"{rec['seq']:06d}.hash", "status": "attested"})
+
+
+def _fake_ots(tmp_path: Path, state: dict) -> str:
+    """A stand-in `ots` client that prints what the real one prints: `upgrade`
+    exits 1 with "Failed! Timestamp not complete" until a block confirms."""
+    script = tmp_path / "fake_ots"
+    script.write_text(f"""#!{sys.executable}
+import json, pathlib, sys
+state = json.loads(pathlib.Path({str(tmp_path / 'state.json')!r}).read_text())
+cmd, path = sys.argv[1], pathlib.Path(sys.argv[2])
+if cmd == "stamp":
+    pathlib.Path(str(path) + ".ots").write_text("receipt")
+    sys.exit(0)
+if cmd == "upgrade":
+    if state["block"]:
+        print("Got 1 attestation(s) from https://alice.btc.calendar.opentimestamps.org")
+        print("Success! Timestamp complete"); sys.exit(0)
+    print("Calendar https://bob.btc.calendar.opentimestamps.org: no complete answer within 5 seconds")
+    print("Failed! Timestamp not complete"); sys.exit(1)
+if cmd == "info":
+    print("    verify PendingAttestation('https://bob.btc.calendar.opentimestamps.org')")
+    if state["block"]:
+        print("    verify BitcoinBlockHeaderAttestation(973691)")
+""", encoding="utf-8")
+    script.chmod(0o755)
+    (tmp_path / "state.json").write_text(json.dumps(state))
+    return str(script)
+
+
+def test_unconfirmed_receipt_stays_pending_then_attests(tmp_path, root):
+    _stamped_protocol(root)
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    assert stamp.stamp_record(root, rec, binary=ots)["body"]["status"] == "pending"
+    # "Failed! Timestamp not complete" (exit 1) is the normal waiting state
+    assert stamp.upgrade_all(root, binary=ots) == []
+    assert stamp.stamp_summary(root) == {"pending": 1, "attested": 1}   # + record 1
+    (tmp_path / "state.json").write_text(json.dumps({"block": True}))
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["attested"]
+    assert stamp.upgrade_all(root, binary=ots) == []                # attested is final
+    assert store.verify(root)["ok"]
+
+
+def test_wrongly_failed_receipt_is_corrected_to_pending(tmp_path, root):
+    _stamped_protocol(root)
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    stamp.stamp_record(root, rec, binary=ots)
+    store.append(root, "stamp", {"target_seq": rec["seq"], "target_hash": rec["hash"],
+                                 "file": f"{rec['seq']:06d}.hash", "status": "failed",
+                                 "at": "2026-10-30T06:13:52+00:00", "detail": "old classifier"})
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["pending"]
+    assert stamp.stamp_summary(root) == {"pending": 1, "attested": 1}   # + record 1
+
+
+def test_missing_receipt_is_failed(tmp_path, root):
+    _stamped_protocol(root)
+    rec = store.append(root, "decision", {"id": "x"})
+    ots = _fake_ots(tmp_path, {"block": False})
+    stamp.stamp_record(root, rec, binary=ots)
+    (root / "stamps" / f"{rec['seq']:06d}.hash.ots").unlink()
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [c["body"]["status"] for c in changed] == ["failed"]
+
+
+def test_a_record_left_unstamped_by_a_crash_is_stamped_later(tmp_path, root):
+    """A seal that died between its append and its stamp: upgrade_all submits it."""
+    ots = _fake_ots(tmp_path, {"block": False})
+    store.append(root, "protocol", {"v": 1})
+    stamp.stamp_record(root, store.read(root)[0], binary=ots)
+    rec = store.append(root, "decision", {"id": "x"})              # ... crash: no stamp
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [(c["body"]["target_seq"], c["body"]["status"]) for c in changed] == [(rec["seq"], "pending")]
+    assert stamp.upgrade_all(root, binary=ots) == []
+
+
+@pytest.mark.parametrize("line", [b"[]", b"7", b'"x"',
+                                  b'{"seq": [1], "type": "decision", "prev_hash": "", "body": {}, "hash": ""}',
+                                  b'{"seq": "2", "type": "decision", "prev_hash": "", "body": {}, "hash": ""}'])
+def test_verify_reports_malformed_lines_instead_of_raising(root, line):
+    _init(root)
+    with open(store.ledger_path(root), "ab") as fh:
+        fh.write(line + b"\n")
+    v = store.verify(root)
+    assert v["ok"] is False and v["errors"]
+
+
+# ---------- Codex review 2026-11-02: what a seal writes outside the lock ----------
+
+def _archive_matches(root, body) -> bool:
+    arc = root / "archive" / body["archive_file"]
+    return arc.exists() and hashlib.sha256(arc.read_bytes()).hexdigest() == body["archive_sha256"]
+
+
+def test_a_losing_seal_leaves_the_winners_files_alone(tmp_path, root, monkeypatch):
+    """R2: two seals of one run date pass the early check in the same second; the one the
+    lock refuses must not overwrite (or delete) the archive the ledger recorded."""
+    seal.init(root)
+    ws = _workspace(tmp_path)
+    winner = seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    monkeypatch.setattr(seal, "outcome", lambda *a, **k: None)          # raced past it
+    (ws / "raw" / DATE / "late.txt").write_text("written by a competing run")
+    with pytest.raises(store.LedgerError, match="conflicts with record"):
+        seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    bodies = [r["body"] for r in store.read(root) if r["type"] == "decision"]
+    assert len(bodies) == 1 and bodies[0]["decision_id"] == winner["decision_id"]
+    assert _archive_matches(root, bodies[0])
+    assert len(list((root / "archive").iterdir())) == 1                  # loser cleaned up
+
+
+def test_a_decision_edited_during_the_seal_is_refused(tmp_path, root, monkeypatch):
+    seal.init(root)
+    ws = _workspace(tmp_path)
+    real = seal._release_check
+
+    def check_then_edit(*a, **k):
+        chk = real(*a, **k)
+        p = ws / "decision" / DATE / "final_decision.json"
+        p.write_text(p.read_text().replace('"confidence": 0.5', '"confidence": 0.9'))
+        return chk
+    monkeypatch.setattr(seal, "_release_check", check_then_edit)
+    with pytest.raises(store.LedgerError, match="changed while it was being sealed"):
+        seal.seal(ws, DATE, root, now=NOW, stamp_binary=None)
+    assert not any(r["type"] == "decision" for r in store.read(root))
+    assert not list((root / "archive").glob("*"))
+
+
+def test_a_corrupt_ledger_refuses_a_seal_cleanly(tmp_path, root):
+    seal.init(root)
+    lines = store.ledger_path(root).read_bytes().split(b"\n")
+    store.ledger_path(root).write_bytes(lines[0] + b"\n{not json\n" + b"\n".join(lines[1:]))
+    with pytest.raises(store.LedgerError):
+        seal.seal(_workspace(tmp_path), DATE, root, now=NOW, stamp_binary=None)
+
+
+
+def _corrupt_ticker(root):
+    """Valid JSON, original hash kept: only verify() can tell (Codex review, round 2)."""
+    rows = store.read(root)
+    rows[-1]["body"]["ticker"] = "OTHER"
+    store.ledger_path(root).write_bytes(b"".join(store.canonical(r) + b"\n" for r in rows))
+
+
+def test_a_ledger_that_does_not_verify_refuses_outcome_seal_and_block(tmp_path, root):
+    seal.init(root)
+    blocked = _workspace(tmp_path / "a", "blocked")
+    seal.record_block(blocked, DATE, root)
+    _corrupt_ticker(root)
+    assert store.verify(root)["ok"] is False
+    with pytest.raises(store.LedgerError, match="does not verify"):
+        seal.outcome(blocked, DATE, root)
+    with pytest.raises(store.LedgerError, match="does not verify"):
+        seal.seal(_workspace(tmp_path / "b"), DATE, root, now=NOW, stamp_binary=None)
+    with pytest.raises(store.LedgerError, match="does not verify"):
+        seal.record_block(blocked, DATE, root)
+    assert sum(r["type"] == "decision" for r in store.read(root)) == 0

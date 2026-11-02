@@ -73,3 +73,5 @@ scripts/*_build_*.py
 /*.pdf
 # User-supplied reference notes dropped at the repo root
 /*.html
+
+ex-docs/

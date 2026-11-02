@@ -11,6 +11,11 @@ records the merged ids, and writes the deduped digest.
 Usage:
     .venv/bin/python3 normalize/dedup_evidence.py {workspace} {date}
 
+Each digest entry also gets an ``evidence_class`` block from
+mcp/shared/evidence_meta.py (chip / suspected_chip / other, family, as_of,
+whether it may corroborate a chip-grounded call), so readers and the
+pre-release gate see the same classification.
+
 Self-degrading: on any error it falls back to a plain concatenation of all
 cards so the non-critical normalize stage never blocks the pipeline.
 """
@@ -20,6 +25,9 @@ import sys
 from glob import glob
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "mcp"))
+from shared import evidence_meta  # noqa: E402
 
 _TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|ref$|ref_)", re.I)
 
@@ -82,7 +90,20 @@ def dedupe(cards: list[dict]) -> list[dict]:
     for card in cards:
         cu = canonical_url(card.get("url", ""))
         tk = title_key(card.get("title", ""))
-        key = f"u:{cu}" if cu else (f"t:{tk}" if tk else f"id:{card.get('id')}")
+        # Cluster on canonical URL AND near-identical title, per this module's
+        # docstring and CLAUDE.md ("canonical URL + title"). Keying on URL alone
+        # collapses every distinct fact extracted from one primary document
+        # (e.g. 11 separate findings from a single 205-page filing PDF) into one
+        # card. Cross-desk repeats of the same article still merge, because they
+        # share both the URL and a near-identical title.
+        if cu and tk:
+            key = f"u:{cu}|t:{tk}"
+        elif cu:
+            key = f"u:{cu}"
+        elif tk:
+            key = f"t:{tk}"
+        else:
+            key = f"id:{card.get('id')}"
         if key in by_key:
             kept = _better(by_key[key], card)
             dropped = card if kept is by_key[key] else by_key[key]
@@ -123,6 +144,12 @@ def main() -> int:
     except Exception as e:  # degrade to plain concat
         deduped, removed = cards, 0
         print(f"dedup_evidence: degraded to concat ({type(e).__name__})", file=sys.stderr)
+
+    for card in deduped:
+        try:
+            card["evidence_class"] = evidence_meta.classify(card, workspace.name)
+        except Exception:  # noqa: BLE001 - annotation never blocks the digest
+            pass
 
     digest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(digest_path, "w", encoding="utf-8") as out:

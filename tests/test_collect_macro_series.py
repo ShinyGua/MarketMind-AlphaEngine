@@ -37,13 +37,16 @@ class _FakeResp:
         return {"observations": self._obs}
 
 
-CSV_BODY = "observation_date,VALUE\n2026-01-02,4.54\n2026-01-03,.\n2026-01-06,4.61\n"
+def _csv_body(series_id):
+    """A fredgraph CSV as FRED serves it: the header names the series."""
+    return (f"observation_date,{series_id}\n"
+            "2026-01-02,4.54\n2026-01-03,.\n2026-01-06,4.61\n")
 
 
 def _csv_get(url, params=None, timeout=None):
     """Every series resolves over the keyless CSV endpoint."""
     assert "fredgraph.csv" in url
-    return _FakeResp(200, text=CSV_BODY)
+    return _FakeResp(200, text=_csv_body(params["id"]))
 
 
 @pytest.fixture
@@ -83,7 +86,7 @@ def test_per_series_fred_failure_falls_back_to_csv(tmp_path, monkeypatch, no_dot
 
     def mixed_get(url, params=None, timeout=None):
         if "fredgraph.csv" in url:
-            return _FakeResp(200, text=CSV_BODY)
+            return _FakeResp(200, text=_csv_body(params["id"]))
         if (params or {}).get("series_id") == "DGS10":
             return _FakeResp(429)  # rate-limited on this series only
         return _FakeResp(200, [{"date": "2026-01-02", "value": "3.1"},
@@ -170,3 +173,24 @@ def test_no_yfinance_fallback_remains(tmp_path, monkeypatch, no_dotenv):
     ws = tmp_path / "workspaces" / "TEST"
     ws.mkdir(parents=True)
     assert cms.collect(ws, DATE)["mode"] == "unavailable"
+
+
+def test_maintenance_page_is_not_parsed_as_csv(monkeypatch):
+    """FRED serves its maintenance page as HTTP 200 text/html. Parsing that as
+    CSV once produced a bogus HY spread of 400 from a font URL's "300,400"."""
+    import requests
+    html = ('<!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/'
+            'css?family=Roboto:300,400"></head><body>Maintenance</body></html>')
+    monkeypatch.setattr(requests, "get", lambda url, params=None, timeout=None:
+                        _FakeResp(200, text=html))
+    rows, reason = cms.fetch_fred_csv("BAMLH0A0HYM2", 3)
+    assert rows == [] and reason == "not_csv"
+
+
+def test_csv_rows_with_bad_dates_are_dropped(monkeypatch):
+    import requests
+    body = "observation_date,DGS10\n2026-01-02,4.54\nnot-a-date,9.99\n"
+    monkeypatch.setattr(requests, "get", lambda url, params=None, timeout=None:
+                        _FakeResp(200, text=body))
+    rows, reason = cms.fetch_fred_csv("DGS10", 3)
+    assert reason is None and rows == [("2026-01-02", 4.54)]

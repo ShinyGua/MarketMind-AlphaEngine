@@ -30,9 +30,11 @@ Prereqs (real run): `codex` on PATH, the 3 MCP servers in ~/.codex/config.toml
 parity. `--dry-run` needs none of this — it prints the full ordered plan.
 """
 import argparse
+import itertools
 import json
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 VENV_PY = str(ROOT / ".venv" / "bin" / "python3")
 CODEX = "codex"
 sys.path.insert(0, str(ROOT / "mcp"))
+from shared import contracts  # noqa: E402
 from shared.contracts import STAGES  # noqa: E402
 
 # ── small utilities ────────────────────────────────────────────────────────
@@ -64,7 +67,8 @@ def log(msg: str):
     print(f"[driver] {msg}", flush=True)
 
 
-def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> int:
+def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True,
+         stdout_path: Path | None = None) -> int:
     """Run a subprocess (or record it in dry-run). Returns exit code."""
     pretty = " ".join(cmd if len(cmd) < 12 else cmd[:11] + ["…"])
     ctx.plan.append(cmd)
@@ -72,7 +76,11 @@ def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> i
         print(f"  $ {pretty}")
         return 0
     log(f"$ {pretty}")
-    proc = subprocess.run(cmd, cwd=str(cwd))
+    if stdout_path is not None:
+        with open(stdout_path, "w", encoding="utf-8") as out:
+            proc = subprocess.run(cmd, cwd=str(cwd), stdout=out)
+    else:
+        proc = subprocess.run(cmd, cwd=str(cwd))
     if proc.returncode != 0 and critical:
         raise RuntimeError(f"command failed ({proc.returncode}): {pretty}")
     return proc.returncode
@@ -81,6 +89,26 @@ def _run(cmd: list[str], ctx: Ctx, cwd: Path = ROOT, critical: bool = True) -> i
 def det(ctx: Ctx, module: str, *args: str, critical: bool = True) -> int:
     """Run a deterministic committed-Python stage."""
     return _run([VENV_PY, module, *map(str, args)], ctx, critical=critical)
+
+
+_USAGE_LOCK = threading.Lock()
+_USAGE_SEQ = itertools.count(1)
+
+
+def _usage_stream(ctx: Ctx, skill: str, extra: tuple) -> Path | None:
+    """Where this call's `codex exec --json` events go (read by
+    eval/usage_telemetry.py), with a sidecar naming its stage and skill."""
+    if ctx.dry:
+        return None
+    with _USAGE_LOCK:
+        n = next(_USAGE_SEQ)
+    d = ctx.ws / "eval" / ctx.date / "usage"
+    d.mkdir(parents=True, exist_ok=True)
+    stem = f"{n:03d}_{skill}" + ("_" + "_".join(extra) if extra else "")
+    stage = getattr(ctx, "current_stage", None) or "unknown"
+    d.joinpath(f"{stem}.meta.json").write_text(json.dumps(
+        {"stage": stage, "skill": skill, "args": list(extra), "at": _now()}), encoding="utf-8")
+    return d / f"{stem}.jsonl"
 
 
 def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int:
@@ -98,17 +126,17 @@ def codex_skill(ctx: Ctx, skill: str, *extra: str, critical: bool = True) -> int
         f"artifact path(s) you wrote."
     )
     # workspace-write disables network egress by DEFAULT; the collection desks
-    # (and any shell yfinance/requests fallback when an MCP tool isn't attached)
+    # (and any shell requests fallback when an MCP tool isn't attached)
     # need outbound DNS/HTTP. Grant it per-invocation so the fix doesn't depend on
     # the user's global ~/.codex/config.toml.
     cmd = [CODEX, "exec", "-C", str(ROOT),
            "--sandbox", "workspace-write",
            "-c", "sandbox_workspace_write.network_access=true",
-           "--skip-git-repo-check"]
+           "--skip-git-repo-check", "--json"]
     if ctx.model:
         cmd += ["--model", ctx.model]
     cmd.append(prompt)
-    return _run(cmd, ctx, critical=critical)
+    return _run(cmd, ctx, critical=critical, stdout_path=_usage_stream(ctx, skill, extra))
 
 
 def parallel(ctx: Ctx, thunks: list):
@@ -148,7 +176,20 @@ def set_stage(ctx: Ctx, stage: str, completed: str | None = None):
     st.setdefault("stages_completed", [])
     if completed and completed in STAGES and completed not in st["stages_completed"]:
         st["stages_completed"].append(completed)
-    path.write_text(json.dumps(st, indent=2, ensure_ascii=False), encoding="utf-8")
+    contracts.write_atomic(path, json.dumps(st, indent=2, ensure_ascii=False))
+
+
+def add_error(ctx: Ctx, message: str) -> None:
+    """Append to status.json errors[] (the orchestrator's update_status(error=...))."""
+    if ctx.dry:
+        return
+    path = ctx.ws / "status.json"
+    try:
+        st = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        st = {"ticker": ctx.ticker, "stages_completed": [], "errors": []}
+    st.setdefault("errors", []).append({"message": message, "at": _now()})
+    contracts.write_atomic(path, json.dumps(st, indent=2, ensure_ascii=False))
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -191,18 +232,46 @@ def load_existing_config(ctx: Ctx):
             pass
 
 
-def resolve_run_date(ctx: Ctx) -> str:
-    p = ctx.ws / "status.json"
-    if p.exists():
-        try:
-            d = json.loads(p.read_text(encoding="utf-8")).get("run_date")
-            if d:
-                return d
-        except json.JSONDecodeError:
-            pass
+def resolve_run_date(ctx: Ctx, keep_recorded: bool = False) -> str:
+    """The run's date: the last trading session, as the orchestrator does. A run
+    recorded for that same date is resumed (see _completed_stages); a run of an
+    earlier session, finished or not, never pins the date. An explicit --from
+    re-runs part of the recorded run, so it keeps the recorded date."""
+    if keep_recorded:
+        recorded = (_read_json(ctx.ws / "status.json") or {}).get("run_date")
+        if recorded:
+            return recorded
     out = subprocess.run([VENV_PY, str(ROOT / "scripts" / "trading_day.py"), str(ctx.ws)],
                          capture_output=True, text=True, cwd=str(ROOT))
     return (out.stdout or "").strip() or datetime.now(timezone.utc).date().isoformat()
+
+
+def start_fresh_if_new_date(ctx: Ctx) -> None:
+    """A new run date starts a new status: the previous run's completed stages
+    and errors must not be read as this run's."""
+    if ctx.dry:
+        return
+    st = _read_json(ctx.ws / "status.json")
+    if st is not None and st.get("run_date") == ctx.date:
+        return
+    contracts.write_atomic(ctx.ws / "status.json", json.dumps(
+        {"ticker": ctx.ticker, "run_mode": ctx.run_mode, "run_date": ctx.date,
+         "stage": None, "started_at": _now(), "updated_at": _now(),
+         "stages_completed": [], "errors": []}, indent=2, ensure_ascii=False))
+
+
+def reopen_stages(ctx: Ctx, stages: list[str]) -> None:
+    """A forced re-run (--from) redoes these stages: they are no longer complete, so a
+    crash part-way resumes them instead of finding the earlier run marked done."""
+    if ctx.dry:
+        return
+    st = _read_json(ctx.ws / "status.json")
+    if st is None or st.get("run_date") != ctx.date:
+        return
+    st["stages_completed"] = [s for s in st.get("stages_completed") or [] if s not in stages]
+    st["stage"] = stages[0] if stages else st.get("stage")
+    st["updated_at"] = _now()
+    contracts.write_atomic(ctx.ws / "status.json", json.dumps(st, indent=2, ensure_ascii=False))
 
 
 def _analyst_roles(ctx: Ctx) -> list[str]:
@@ -210,11 +279,13 @@ def _analyst_roles(ctx: Ctx) -> list[str]:
     return roles or ["company_analyst", "chips_analyst", "risk_analyst", "market_analyst"]
 
 
-def _read_json(path: Path):
+def _read_json(path: Path) -> dict | None:
+    """A JSON object from a workspace file; None if missing, torn or not an object."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 # ── stages ─────────────────────────────────────────────────────────────────
@@ -236,7 +307,7 @@ def st_collect(ctx):
     # Preflight: record which data sources are reachable + which keys are present
     # (sanitized) so a fallback-heavy run self-explains (dns vs auth vs key).
     det(ctx, "scripts/check_data_sources.py", ctx.ws, ctx.date, critical=False)
-    # Deterministic macro layer: FRED-first series collection (yfinance proxy
+    # Deterministic macro layer: FRED series collection (keyless fredgraph CSV
     # fallback), regime classification, and per-ticker macro evidence cards.
     det(ctx, "scripts/collect_macro_series.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "scripts/compute_macro_regime.py", ctx.ws, ctx.date, critical=False)
@@ -294,12 +365,14 @@ def st_discuss_debate(ctx):
         ])
         # 2. chair tallies views + surfaces retained dissent
         codex_skill(ctx, "mm-discussion-moderator", "tally", str(r), critical=False)
-        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds);
+        #    a verdict the grader did not write this round (it crashed) is never acted on
+        _clear(ctx, contracts.discussion_convergence_path(ctx.ws, ctx.date, r))
         det(ctx, "eval/graders/discussion_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
         if ctx.dry:
             print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
             break
-        conv = _read_json(ctx.ws / "discussion" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        conv = _read_json(contracts.discussion_convergence_path(ctx.ws, ctx.date, r))
         if (conv or {}).get("exit"):
             log(f"discussion panel converged on round {r}: {(conv or {}).get('exit_reason')}")
             break
@@ -353,10 +426,63 @@ def _latest_review(ctx):
     return _read_json(files[-1]) if files else None
 
 
+def _clear(ctx, path: Path) -> None:
+    if not ctx.dry:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:   # not a file (a directory, say): _read_json reads it as nothing
+            pass
+
+
+def _ledger_outcome(ctx) -> dict | None:
+    """This run date's release outcome in the ledger (sealed or blocked), if any.
+    A ledger that cannot be read yields {"type": "unreadable"}: it may hold one."""
+    if ctx.dry:
+        return None
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from ledger import seal as ledger_seal
+        return ledger_seal.outcome(ctx.ws, ctx.date)
+    except Exception as exc:  # noqa: BLE001 - unknown is not none
+        return {"type": "unreadable", "seq": None, "error": str(exc)}
+
+
+def _release_check(ctx, ledger: bool = True) -> dict:
+    if str(ROOT / "eval") not in sys.path:
+        sys.path.insert(0, str(ROOT / "eval"))
+    from pre_release_gate import release_check
+    return release_check(ctx.ws, ctx.date, ledger=ledger)
+
+
+class LedgerUnavailable(RuntimeError):
+    """The ledger cannot be verified, so this run date's outcome is unknown. Raised
+    out of the decide stage: the stage fails, is not marked complete, and a normal
+    re-run after the ledger is repaired decides (or finds the outcome) then."""
+
+
 def st_decide(ctx):
+    # A run date has one release outcome. Once the ledger holds it (a crash after
+    # the seal or the block, a resume, --from decide), deciding again could only
+    # produce a decision that can never be sealed or published.
+    settled = _ledger_outcome(ctx)
+    if settled and settled["type"] == "unreadable":
+        add_error(ctx, f"ledger unreadable, so {ctx.date}'s outcome is unknown; not deciding "
+                       f"until it is repaired (ledger/cli.py verify): {settled['error']}")
+        raise LedgerUnavailable("ledger unreadable; repair it, then re-run to resume at decide")
+    if settled:
+        log(f"decide: the ledger already holds record {settled['seq']} ({settled['type']}) "
+            f"for {ctx.date}; not deciding again")
+        if settled["type"] == "gate_block":
+            errors = (_read_json(ctx.ws / "status.json") or {}).get("errors") or []
+            if not any("pre_release_gate blocked" in str(e.get("message", "")) for e in errors
+                       if isinstance(e, dict)):
+                add_error(ctx, f"pre_release_gate blocked (ledger record {settled['seq']})")
+        return
     panel = (ctx.cfg.get("decision", {}) or {}).get("panel", {}) or {}
     if not panel.get("enabled", True):
         codex_skill(ctx, "mm-decision-maker")   # legacy single-shot decision
+        gate_decision(ctx)
         return
     roles = _analyst_roles(ctx)
     max_r = int(panel.get("max_rounds", 3))
@@ -368,21 +494,86 @@ def st_decide(ctx):
         ])
         # 2. chair tallies ballots + surfaces retained dissent
         codex_skill(ctx, "mm-decision-maker", "tally", str(r), critical=False)
-        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds)
+        # 3. deterministic convergence grader decides iterate-vs-exit (hard cap at max_rounds);
+        #    a verdict the grader did not write this round (it crashed) is never acted on
+        _clear(ctx, contracts.panel_convergence_path(ctx.ws, ctx.date, r))
         det(ctx, "eval/graders/panel_convergence_grader.py", ctx.ws, ctx.date, str(r), critical=False)
         if ctx.dry:
             print(f"  # (round {r}) if convergence>=threshold and round>=min_rounds -> exit; else next round")
             break
-        conv = _read_json(ctx.ws / "decision" / ctx.date / "panel" / f"convergence_round_{r}.json")
+        conv = _read_json(contracts.panel_convergence_path(ctx.ws, ctx.date, r))
         if (conv or {}).get("exit"):
             log(f"panel converged on round {r}: {(conv or {}).get('exit_reason')}")
             break
         log(f"panel round {r}: no convergence, continuing")
     # 4. chair writes the final decision (reads panel summaries -> risk_overlay + panel block)
     codex_skill(ctx, "mm-decision-maker")
+    gate_decision(ctx)
+
+
+def _gate(ctx) -> str:
+    """Run the pre-release gate, then re-check rather than trust its file: the
+    gate removes any earlier verdict before it runs, and release_check
+    re-evaluates the decision, so a crashed gate or a planted verdict reads
+    blocked. Exit 0 is passed and 2 blocked; anything else is a crash."""
+    rc = det(ctx, "eval/pre_release_gate.py", ctx.ws, ctx.date, critical=False)
+    if ctx.dry:
+        return "passed"
+    if rc not in (0, 2):
+        return "blocked"
+    # the decision alone; whether it is the sealed one is st_decide's and export's question
+    return "passed" if _release_check(ctx, ledger=False)["status"] == "passed" else "blocked"
+
+
+def gate_decision(ctx) -> str:
+    """Gate -> one revise on a block -> gate again. A second block releases the
+    run as blocked: recorded in status.json, and export renders nothing."""
+    if ctx.dry:
+        print("  # pre-release gate; if blocked: keep final_decision.pre_gate.json, "
+              "run mm-decision-maker revise once, gate again")
+    status = _gate(ctx)
+    if status == "passed":
+        _seal(ctx)
+        return status
+    dec = contracts.decision_path(ctx.ws, ctx.date)
+    if dec.exists():
+        contracts.pre_gate_decision_path(ctx.ws, ctx.date).write_text(
+            dec.read_text(encoding="utf-8"), encoding="utf-8")
+    log("pre-release gate blocked the decision; one revision")
+    codex_skill(ctx, "mm-decision-maker", "revise", critical=False)
+    status = _gate(ctx)
+    if status == "passed":
+        _seal(ctx)
+    else:
+        checks = sorted({str(e.get("check", "?")) for e in _release_check(ctx, ledger=False)["errors"]}) or ["unreadable"]
+        # ledger first: a crash between the two then resumes into st_decide's
+        # settled path, which adds the missing error — never an error without a block
+        if det(ctx, "ledger/cli.py", "block", ctx.ws, ctx.date, critical=False) != 0:
+            add_error(ctx, "ledger block not recorded: the ledger refused it (ledger/cli.py verify)")
+        add_error(ctx, f"pre_release_gate blocked: {', '.join(checks)}")
+        log(f"release BLOCKED by the pre-release gate ({', '.join(checks)})")
+    return status
+
+
+def _seal(ctx) -> None:
+    """Seal the passed decision in the ledger. Never blocks the release, but a
+    failure is recorded loudly: an unsealed decision cannot be scored."""
+    if det(ctx, "ledger/cli.py", "seal", ctx.ws, ctx.date, critical=False) != 0:
+        add_error(ctx, "ledger seal failed: decision released but NOT sealed (run `ledger/cli.py init`?)")
+        log("WARNING: ledger seal failed — the decision is not in the ledger")
 
 
 def st_export(ctx):
+    # Same command as orchestrator stage 13: re-check the decision, then the
+    # report and the decision land in final/ — or BLOCKED.md does.
+    if not ctx.dry:
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        import export_release
+        result = export_release.export(ctx.ws, ctx.date, ctx.run_mode, ctx.lang)
+        if result["status"] == "blocked":
+            log("export skipped: release blocked (final/{date}/BLOCKED.md)")
+            return
     chart_args = [ctx.ws, ctx.date, ctx.ticker]
     if ctx.lang == "ch":
         chart_args.append("--lang")
@@ -392,10 +583,13 @@ def st_export(ctx):
 
 
 def st_user_review(ctx):
-    out = ctx.ws / "decision" / ctx.date / "user_review.json"
+    out = contracts.user_review_path(ctx.ws, ctx.date)
     if ctx.dry:
         print("  # prompt on stdin if a TTY, else write empty user_review.json (headless)")
         return
+    blocked = contracts.blocked_report_path(ctx.ws, ctx.date)
+    if blocked.exists():
+        print(blocked.read_text(encoding="utf-8"))
     feedback = ""
     if sys.stdin.isatty():
         try:
@@ -403,8 +597,10 @@ def st_user_review(ctx):
         except EOFError:
             feedback = ""
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"feedback": feedback, "at": _now()}, ensure_ascii=False, indent=2),
-                   encoding="utf-8")
+    review = ({"reviewed": True, "skipped": False, "agrees_with_decision": None,
+               "user_feedback": feedback, "timestamp": _now()} if feedback
+              else {"reviewed": False, "skipped": True, "timestamp": _now()})
+    out.write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def st_reflect(ctx):
@@ -414,8 +610,14 @@ def st_reflect(ctx):
               "story_grader", "language_purity_grader", "cost_tracker"):
         det(ctx, f"eval/graders/{g}.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/release_gate.py", ctx.ws, ctx.date, critical=False)
+    # Ledger upkeep: upgrade pending OpenTimestamps receipts and score any
+    # sealed decision whose horizon has matured (all tickers, not just this one).
+    det(ctx, "ledger/cli.py", "stamps", critical=False)
+    det(ctx, "ledger/cli.py", "score", critical=False)
     det(ctx, "memory/retrieval.py", ctx.ws, ctx.date, "analyst", critical=False)
     codex_skill(ctx, "mm-memory-writer", critical=False)
+    # usage last, so the memory writer's tokens are counted
+    det(ctx, "eval/usage_telemetry.py", ctx.ws, ctx.date, critical=False)
     det(ctx, "eval/finalize_run.py", ctx.ws, ctx.date, critical=False)
 
 
@@ -462,11 +664,14 @@ def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
     # existing resolved_config so the header/lang are accurate (the
     # resolve_config stage re-merges fresh when it runs).
     load_existing_config(ctx)
-    ctx.date = resolve_run_date(ctx)
+    ctx.date = resolve_run_date(ctx, keep_recorded=from_stage is not None)
+    start_fresh_if_new_date(ctx)
     # An explicit --from is a forced re-run from that stage; otherwise resume by
     # skipping stages status.json already records as completed for this date.
     # Dry runs never skip — --dry-run previews the full plan, not resume state.
     skip = _completed_stages(ctx) if (from_stage is None and not ctx.dry) else set()
+    if from_stage is not None:
+        reopen_stages(ctx, STAGES[start:])
     log(f"ticker={ctx.ticker} run_date={ctx.date} lang={ctx.lang} "
         f"stages={STAGES[start]}..{STAGES[end-1]} dry_run={ctx.dry}")
     for stage in STAGES[start:end]:
@@ -476,6 +681,7 @@ def run_pipeline(ctx: Ctx, from_stage: str | None, to_stage: str | None):
         header = f"=== STAGE: {stage} ==="
         print(f"\n{header}")
         det(ctx, "eval/stage_timer.py", "start", ctx.ws, stage, critical=False)
+        ctx.current_stage = stage
         try:
             STAGE_FUNCS[stage](ctx)
             det(ctx, "eval/stage_timer.py", "end", ctx.ws, stage, "true", critical=False)

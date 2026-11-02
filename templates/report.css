@@ -28,8 +28,20 @@
 }
 @page :first { @top-left { content: none; } @top-right { content: none; } }
 
-/* Chinese reports: fontconfig resolves WenQuanYi (the only installed CJK face). */
-html[lang="ch"] body { font-family: "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif; }
+/* Chinese reports: Apple's built-in Simplified Song face. Without an explicit
+   CJK stack fontconfig falls back per-character and mixes Japanese (Hiragino)
+   glyphs, Verdana digits and Times punctuation into one line of Chinese. */
+html.lang-ch body {
+  /* Latin/digits from the Times family, CJK from Songti SC: fontconfig routes
+     the Latin run away from Songti anyway, so name the pairing explicitly
+     instead of letting the generic serif decide it per machine. */
+  font-family: "Times New Roman", "Liberation Serif",
+               "Songti SC", "STSong", "Noto Serif CJK SC",
+               "Source Han Serif SC", "SimSun", serif;
+}
+/* headings/table headers ride Songti's heavier weights, not a different face */
+html.lang-ch h2, html.lang-ch th,
+html.lang-ch .cover-bar .company, html.lang-ch .ratingbox .v { font-weight: 700; }
 
 body {
   font-family: "Helvetica Neue", Helvetica, Arial, "DejaVu Sans", sans-serif;
@@ -98,9 +110,15 @@ h2 {
 /* each top-level section starts a fresh page (except the first) */
 .report-body h2 { break-before: page; }
 .report-body > h2:first-of-type { break-before: avoid; }
+/* markdown emits an <hr> before every section heading; h2's forced page
+   break already separates sections, and a stray <hr> pushed past a full
+   page renders as a blank page. */
+.report-body hr { display: none; }
 h3 { font-size: 10.5pt; color: var(--jpmblue); font-weight: 700; margin: 10pt 0 4pt; }
 p { margin: 5pt 0; }
 strong { color: var(--jpmnavy); }
+code, pre, kbd { font-family: "SF Mono", Menlo, Consolas,
+                 "DejaVu Sans Mono", monospace; font-size: 0.92em; }
 em { color: var(--textsub); }
 
 ul, ol { margin: 5pt 0 5pt 16pt; }
@@ -117,7 +135,8 @@ td:first-child { text-align: left; }
 tr:nth-child(even) td { background: var(--bglight); }
 
 /* ---- charts / figures ---- */
-img { max-width: 100%; height: auto; display: block; margin: 8pt auto; }
+img { max-width: 100%; max-height: 118mm; width: auto; height: auto;
+      display: block; margin: 8pt auto; }
 figure { margin: 10pt 0; break-inside: avoid; }
 figcaption { font-size: 8pt; color: var(--textsub); text-align: center; margin-top: 3pt; }
 

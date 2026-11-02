@@ -4,6 +4,7 @@ values (zero slope), sparse-data degradation, and bilingual summary emission.
 """
 import importlib.util
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -183,8 +184,9 @@ def test_compute_with_synthetic_fred_data(tmp_path):
     ws.mkdir(parents=True)
     macro = tmp_path / "workspaces" / "shared" / "market_context" / DATE / "raw" / "macro"
     # 10Y rising in FRED percent units; 2Y above it -> inverted curve
-    _write_csv(macro / "DGS10.csv", [(f"d{i}", 4.0 + 0.01 * i) for i in range(70)])
-    _write_csv(macro / "DGS2.csv", [(f"d{i}", 5.0) for i in range(70)])
+    days = [(date(2025, 10, 1) + timedelta(days=i)).isoformat() for i in range(70)]
+    _write_csv(macro / "DGS10.csv", [(d, 4.0 + 0.01 * i) for i, d in enumerate(days)])
+    _write_csv(macro / "DGS2.csv", [(d, 5.0) for d in days])
     (macro / "macro_sources.json").write_text(json.dumps({
         "series": {"DGS10": {"source": "fred"}, "DGS2": {"source": "yfinance:^IRX"}},
         "inputs_missing": ["CPIAUCSL", "FEDFUNDS"],
@@ -220,3 +222,48 @@ def test_malformed_threshold_override_keeps_defaults(tmp_path):
            / "indicators" / "macro_regime.json")
     mr.compute(ws, DATE)
     assert out.exists()  # artifact still written despite the malformed config
+
+
+def test_inflation_yoy_matches_the_same_month_across_a_missing_one():
+    # FRED skipped 2025-10 (shutdown): the 13th row back is a 13-month base
+    dates = [f"2025-{m:02d}-01" for m in (7, 8, 9, 11, 12)] + \
+            [f"2026-{m:02d}-01" for m in range(1, 10)]
+    cpi = [322.169, 323.291, 324.245, 325.063, 326.031, 326.588, 327.46, 330.293,
+           332.407, 333.979, 332.568, 332.813, 334.131, 336.298]
+    out = mr.inflation_trend(cpi, cpi, TH["inflation_band"], dates, dates)
+    assert out["cpi_yoy"] == round(336.298 / 324.245 - 1, 4)           # Sep vs Sep: 3.7%
+    assert out["cpi_3m_annualized"] == round((336.298 / 332.568) ** 4 - 1, 4)  # vs Jun
+
+
+def test_inflation_missing_base_month_is_none_not_a_neighbour():
+    dates = [f"2025-{m:02d}-01" for m in (8, 10, 11, 12)] + [f"2026-{m:02d}-01" for m in range(1, 10)]
+    out = mr.inflation_trend([300.0] * 13, [300.0] * 13, TH["inflation_band"], dates, dates)
+    assert out["cpi_yoy"] is None                                       # 2025-09 absent
+
+
+def test_compute_reads_rows_in_date_order(tmp_path):
+    # F-D1-5: every block takes the last row as "latest"; rows out of date order
+    # (or a repeated date) must not make an older month the latest one
+    ws = tmp_path / "workspaces" / "TEST"
+    ws.mkdir(parents=True)
+    macro = tmp_path / "workspaces" / "shared" / "market_context" / DATE / "raw" / "macro"
+    months = [f"2024-{m:02d}-01" for m in range(9, 13)] + [f"2025-{m:02d}-01" for m in range(1, 10)]
+    cpi = [(d, 300.0 + i) for i, d in enumerate(months)]                # 2024-09 .. 2025-09
+    shuffled = cpi[6:] + cpi[:6]
+    shuffled.insert(0, ("2025-09-01", 999.0))      # a repeated date keeps its last-listed value
+    _write_csv(macro / "CPIAUCSL.csv", shuffled)
+    _write_csv(macro / "CPILFESL.csv", list(reversed(cpi)))
+    days = [(date(2025, 10, 1) + timedelta(days=i)).isoformat() for i in range(70)]
+    _write_csv(macro / "DGS10.csv", list(reversed([(d, 4.0 + 0.01 * i) for i, d in enumerate(days)])))
+    (macro / "macro_sources.json").write_text(json.dumps({
+        "series": {"CPIAUCSL": {"source": "fred"}, "CPILFESL": {"source": "fred"},
+                   "DGS10": {"source": "fred"}}, "inputs_missing": []}), encoding="utf-8")
+
+    regime = mr.compute(ws, DATE)
+    want = round(312.0 / 300.0 - 1, 4)                                  # 2025-09 vs 2024-09
+    assert regime["inflation"]["cpi_yoy"] == want
+    assert regime["inflation"]["core_cpi_yoy"] == want
+    assert regime["inflation"]["cpi_3m_annualized"] == round((312.0 / 309.0) ** 4 - 1, 4)
+    assert regime["rates"]["us10y"]["value"] == round((4.0 + 0.01 * 69) / 100, 6)
+    assert regime["rates"]["us10y"]["as_of"] == days[-1]
+    assert regime["rates"]["us10y"]["direction"] == "rising"

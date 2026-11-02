@@ -135,7 +135,10 @@ If MCP is not attached, fall back to the local Python servers/modules
   `scripts/chip_evidence_cards.py`) is **DIRECTIONAL** (`usage: "directional"`)
   — the deliberate asymmetry with macro/intraday/trend_regime: volume and chip
   exchange are the reproducible trace of buying/selling force, so chip evidence
-  may carry a stance/vote on its own. Respect per-block `data_quality`.
+  may push a stance/vote — but only fresh (`stale`/`unavailable` blocks and
+  undated chip cards support nothing), and a BUY/SELL resting on chips must also
+  cite independent same-direction evidence (rule K1, enforced before export by
+  the blocking `eval/pre_release_gate.py`).
 - `valuation_summary.role` is `anchor` (US/JP/UK/EU) or `reference` (CN/HK,
   via `valuation.role_by_market`): a reference valuation never appears in
   `final_decision.top_reasons` (decision_risk_grader warns); CN/HK reports lead
@@ -200,8 +203,8 @@ Skill files use Claude conventions; map them as follows:
   the orchestrator reflect stage).
 - **The macro, chips, intraday and peer-divergence layers are deterministic
   driver stages.** Both drivers run them as committed Python, not LLM passes: in
-  `st_collect`, `scripts/collect_macro_series.py` (FRED-first, yfinance-proxy
-  fallback) → `scripts/compute_macro_regime.py` (regime classification) →
+  `st_collect`, `scripts/collect_macro_series.py` (FRED API, keyless
+  fredgraph CSV fallback; no Yahoo) → `scripts/compute_macro_regime.py` (regime classification) →
   `scripts/macro_evidence_cards.py` (per-ticker `ev_{date}_macro_*` cards) →
   `scripts/collect_cn_chips.py` (akshare A-share flows, CN only, per-block
   degradation); in `st_normalize`, BEFORE `dedup_evidence.py`,

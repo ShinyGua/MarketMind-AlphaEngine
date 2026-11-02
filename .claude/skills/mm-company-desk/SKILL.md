@@ -25,12 +25,12 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD)
 
 This skill uses the **market-data** MCP server for all external data fetching. Prefer MCP tools when available; fall back to inline Python if not.
 
-- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_price_history` — daily OHLCV from approved sources (NASDAQ / akshare Sina / FRED); never Yahoo
 - `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
 - `mcp__market-data__get_filings` — fetch SEC EDGAR filings
-- `mcp__market-data__get_earnings_calendar` — fetch upcoming earnings dates
-- `mcp__market-data__get_company_info` — fetch company profile from yfinance
-- `mcp__market-data__get_fundamentals` — fetch valuation ratios + financial statements (for the valuation engine)
+- `mcp__market-data__get_earnings_calendar` — US: next earnings date from NASDAQ, labelled `estimated` until announced; CN/HK: `unavailable`
+- `mcp__market-data__get_company_info` — returns an explicit `unavailable` (no approved profile source); use the profile from `mm-company-resolver`
+- `mcp__market-data__get_fundamentals` — US: SEC EDGAR XBRL ratios + statements (for the valuation engine); CN/HK: `unavailable`
 
 ## Inputs
 
@@ -90,11 +90,11 @@ Both MCP and fallback paths must produce `≤ max_filings` entries in the output
 ### 3. Build Catalyst Calendar
 
 From the company profile and any available data, identify upcoming events:
-- Next earnings date (from yfinance `.calendar`)
+- Next earnings date (US: `get_earnings_calendar`, which is NASDAQ's *estimate* until the company announces; otherwise see below)
 - Recent insider transactions (from EDGAR Form 4)
 - Any known product launches, conferences, or regulatory dates from news
 
-Yahoo/yfinance is not available. Derive the catalyst calendar from sources that
+Yahoo is not used. Derive the rest of the catalyst calendar from sources that
 are: the filing cadence in EDGAR (`raw/{date}/filings/`), dates named in company
 news and press releases, and WebSearch for the next confirmed earnings date.
 Record how each date was established, and mark any that is an estimate rather
@@ -106,14 +106,19 @@ Save to `{workspace}/raw/{date}/calendar/catalysts.json`.
 
 **Indicator warm-up (MANDATORY)**: Always fetch **6 months** (`period='6mo'`) of daily data, even though the config says 3mo. MACD(12,26,9) needs 35 bars and SMA(50) needs 50 bars of warm-up; for the chart's full SMA50 across a ~65-day display window you need at least **114 daily rows**. The quant analyst and chart renderer compute on the full 6mo data but only output/display the last 3 months. **This file is the permanent fix for indicator warm-up** — if it is short, the SMA50/MACD lines render only partially.
 
-**Yahoo/yfinance is NOT used anywhere in this pipeline.** Daily OHLCV comes from
-the public NASDAQ API via the deterministic collector:
+**Yahoo is NOT used anywhere in this pipeline.** Daily OHLCV comes from the
+deterministic price router — the NASDAQ API for US names, akshare Sina for CN/HK.
+Pass the exchange-suffixed symbol (`yf_ticker` in the profile, e.g. `600519.SS`,
+`0700.HK`, `MU`) and keep the bare directory name in the file name:
 
 ```bash
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {TICKER} \
+.venv/bin/python3 scripts/price_router.py {YF_TICKER} \
     --out {workspace}/raw/{date}/prices/{TICKER}_3mo.csv \
     --schema history --months 12 --end {date}
 ```
+
+Prices are as traded (unadjusted). A bar for a session still in progress is
+dropped automatically, so a mid-session run ends on the last completed day.
 
 Save to `{workspace}/raw/{date}/prices/{TICKER}_3mo.csv` (12 months of data, well
 past the warm-up need). **Verify the row count is ≥ 114** before finishing; if a
@@ -128,7 +133,7 @@ is a supported state — do not try to synthesise intraday bars from daily data.
 
 Fetch valuation ratios and financial statements for the company **and every peer** — these feed the Stage 5b valuation engine (DCF + comps). Use the MCP tool:
 
-Fundamentals come from **SEC EDGAR XBRL** (not yfinance). One command collects
+Fundamentals come from **SEC EDGAR XBRL**. One command collects
 the company and every peer in `peer_set.json`:
 
 ```bash
@@ -175,9 +180,23 @@ Evidence card schema:
   "materiality_score": 0.0,
   "sentiment": "positive|negative|neutral",
   "topic_tags": [],
-  "time_horizon": "daily"
+  "time_horizon": "daily",
+  "as_of": "<YYYY-MM-DD the data describes — data cards only; omit for news>",
+  "lineage": {"dataset": "<source dataset>", "block": "<chip block, if chip/flow data>"}
 }
 ```
+
+**Dating and lineage (required for data cards).** `published_at` is when the
+item was published. For a card that reports a *data observation* (a margin
+balance, a fund-flow figure, a price level, a holder count), also give
+`as_of` — the date the number describes (e.g. `"as_of": "2026-10-21"` for
+"融资余额 as of 10-21" published on 10-22) — and `lineage`, naming the dataset
+and, for chip/flow data, the block:
+`"lineage": {"dataset": "akshare:stock_margin_detail_szse", "block": "margin"}`.
+Chip/flow data (融资余额 / 主力资金 / 北向 / 龙虎榜 / 股东户数 / 解禁 / 换手率)
+must also carry the `chips` topic tag. The pre-release gate treats such a card
+as chip evidence: undated or stale, it supports nothing, and it can never be
+the independent corroboration a chip-grounded BUY/SELL needs.
 
 Assess materiality:
 - Earnings/guidance: high (0.9+)

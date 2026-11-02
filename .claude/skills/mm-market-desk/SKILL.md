@@ -1,6 +1,6 @@
 ---
 name: mm-market-desk
-description: Collects macro headlines, index data, and macro asset prices via yfinance, FRED, and web search
+description: Collects macro headlines, index data, and macro asset prices via the approved price router (NASDAQ, akshare Sina, FRED) and web search
 user-invocable: false
 disable-model-invocation: true
 context: fork
@@ -25,7 +25,7 @@ Run date: $ARGUMENTS[1] (YYYY-MM-DD, e.g., 2026-03-21)
 
 This skill uses the **market-data** MCP server for all external data fetching. If MCP tools are available, prefer them over inline Python. If MCP tools are not available (e.g., server not running), fall back to the inline Python patterns below.
 
-- `mcp__market-data__get_price_history` — fetch OHLCV from yfinance
+- `mcp__market-data__get_price_history` — daily OHLCV from approved sources (NASDAQ / akshare Sina / FRED via `scripts/price_router.py`); never Yahoo
 - `mcp__market-data__get_news` — fetch news from NewsAPI (returns `fallback_needed: true` if no API key)
 - `mcp__market-data__get_macro_series` — fetch FRED macro data (returns `fallback_needed: true` if no API key)
 
@@ -47,16 +47,17 @@ hardcode US tickers. Fetch `primary_index` + all `secondary_indices` (e.g. HK �
 **Via MCP (preferred):**
 Call `mcp__market-data__get_price_history` with `tickers: [primary_index, *secondary_indices]` (from market_context_link.json), `period: "6mo"`, `interval: "1d"`.
 
-**Fallback (inline Python):**
-**Yahoo/yfinance is NOT used anywhere in this pipeline.** Index levels come from
-the public NASDAQ API. Index *symbols* (`^GSPC`, `^IXIC`, ...) have no history
-endpoint there, so the collector routes them to the liquid tracking ETF (SPY,
-QQQ, DIA, IWM, SOXX) and records the substitution in its provenance — good
-enough for relative strength, which is all this file feeds.
+**Fallback (CLI):**
+**Yahoo is NOT used anywhere in this pipeline.** `scripts/price_router.py` maps
+every symbol to an approved source: US names via the NASDAQ API (index symbols
+`^GSPC`/`^IXIC`/... route to their tracking ETF — SPY, QQQ, DIA, IWM, SOXX — and
+the substitution is recorded in provenance); CN/HK stocks and indices
+(`000300.SS`, `399006.SZ`, `^HSI`, `^HSTECH`) via akshare Sina. Prices are as
+traded (unadjusted).
 
 ```bash
 # one call per symbol in market_context_link.json
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py '{SYMBOL}' \
+.venv/bin/python3 scripts/price_router.py '{SYMBOL}' \
     --out workspaces/shared/market_context/{date}/raw/{SAFE_SYMBOL}_prices.csv \
     --months 12 --end {date}
 ```
@@ -73,10 +74,10 @@ this rule consistent so the primary index is always found.
 Call `mcp__market-data__get_price_history` with `tickers: ["GLD", "USO", "BTC-USD", "^VIX"]`, `period: "3mo"`, `interval: "1d"`.
 
 ```bash
-# GLD / USO and similar ETFs resolve directly; BTC-USD has no NASDAQ endpoint
-# and is expected to fail — skip it. VIX comes from the FRED macro layer
-# (VIXCLS), not from a price file.
-.venv/bin/python3 scripts/fetch_prices_nasdaq.py {ASSET} --assetclass etf \
+# GLD / USO and similar ETFs come from NASDAQ. ^VIX, BTC-USD and FX symbols
+# (CNY=X, HKD=X, DX-Y.NYB) come from FRED close-only series (VIXCLS, CBBTCUSD,
+# DEXCHUS, DEXHKUS, DTWEXBGS) — open/high/low are absent, by design.
+.venv/bin/python3 scripts/price_router.py '{ASSET}' \
     --out workspaces/shared/market_context/{date}/raw/{ASSET}_prices.csv \
     --months 6 --end {date}
 ```
@@ -101,7 +102,7 @@ and note in your fetch summary:
 The classified regime is at
 `workspaces/shared/market_context/{date}/indicators/macro_regime.json`. If the
 macro directory is absent entirely, log a warning and continue — the snapshot
-yfinance assets above still provide minimum coverage.
+assets above still provide minimum coverage.
 
 ### 4. Fetch Market Headlines
 
@@ -153,9 +154,23 @@ Evidence card schema:
   "materiality_score": 0.0,
   "sentiment": "neutral",
   "topic_tags": [],
-  "time_horizon": "daily"
+  "time_horizon": "daily",
+  "as_of": "<YYYY-MM-DD the data describes — data cards only; omit for news>",
+  "lineage": {"dataset": "<source dataset>", "block": "<chip block, if chip/flow data>"}
 }
 ```
+
+**Dating and lineage (required for data cards).** `published_at` is when the
+item was published. For a card that reports a *data observation* (a margin
+balance, a fund-flow figure, a price level, a holder count), also give
+`as_of` — the date the number describes (e.g. `"as_of": "2026-10-21"` for
+"融资余额 as of 10-21" published on 10-22) — and `lineage`, naming the dataset
+and, for chip/flow data, the block:
+`"lineage": {"dataset": "akshare:stock_margin_detail_szse", "block": "margin"}`.
+Chip/flow data (融资余额 / 主力资金 / 北向 / 龙虎榜 / 股东户数 / 解禁 / 换手率)
+must also carry the `chips` topic tag. The pre-release gate treats such a card
+as chip evidence: undated or stale, it supports nothing, and it can never be
+the independent corroboration a chip-grounded BUY/SELL needs.
 
 Save to `{workspace}/normalized/{date}/evidence_cards/market_*.json`.
 
@@ -167,7 +182,7 @@ Save to `{workspace}/normalized/{date}/evidence_cards/market_*.json`.
 
 ## Error Handling
 
-- If yfinance download fails for a specific ticker, skip it and continue with others
+- If a price fetch fails for a specific ticker, skip it and continue with others (the MCP tool reports it under `errors`)
 - If NewsAPI is not configured, use **WebSearch** as fallback to collect market headlines
 - If FRED is not configured, skip FRED data
 - Always produce at least the index price CSVs — this is the critical output

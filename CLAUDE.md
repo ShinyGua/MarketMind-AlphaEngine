@@ -22,7 +22,7 @@ Each evidence family carries a `usage` contract that bounds what it may justify.
 
 | Family | Contract | May it set/flip a stance or vote? |
 |---|---|---|
-| **Chips / volume** (`shared_context.chips`) | `directional` | **Yes — first-class stance evidence, may stand alone in `top_reasons` and carry the label.** Chip exchange is the reproducible trace of actual buying/selling force. Respect per-block `data_quality`: an `unavailable` block supports nothing |
+| **Chips / volume** (`shared_context.chips`, chip cards, any card carrying 融资余额/主力资金/北向/龙虎榜/股东户数/解禁/换手率 data) | `directional`, **fresh and corroborated (rule K1)** | **Yes — directional evidence that may stand in `top_reasons` and push the label**, because chip exchange is the reproducible trace of actual buying/selling force. Until each chip card type passes the deferred out-of-sample study: (a) a cited chip card must carry its observation date within its block's cadence, counted on the name's own exchange calendar (the strictest block its fields imply) — `stale`/`unavailable` blocks and undated chip data support nothing, for any label; (b) a BUY or SELL needs a reason pointing its way, and if its same-direction or neutral reasons cite chip evidence it must also cite dated, independent same-direction evidence (company / filing / catalyst / company-specific news; never market, sector, macro, trend, intraday or reference valuation). Enforced by the blocking `eval/pre_release_gate.py` |
 | **Macro regime** | context, not trigger | No. Feeds the WACC input, analyst framing, and `risk_overlay` narrative; never flips a vote or caps conviction |
 | **Intraday 1h/4h** (`shared_context.intraday`) | `timing_only` | No. Frames staged entry/exit price zones in `stance_notes` only (chip S/R + daily ATR fallback when `available: false`). Citing it as a vote reason → decision-risk grader warns |
 | **Daily SMA / `trend_regime`** | `context_only` | No. Trend backdrop only; a price-vs-SMA position or MA cross is never the sole reason for a stance or vote (prompt-level de-weighting; no grader) |
@@ -61,7 +61,7 @@ Deterministic macro layer (non-critical, before the desks):
 - `scripts/collect_macro_series.py` — FRED-first: CPI (CPIAUCSL/CPILFESL), FEDFUNDS, curve (DGS2/5/10/30), DTWEXBGS, HY OAS (BAMLH0A0HYM2), VIXCLS → `workspaces/shared/market_context/{date}/raw/macro/`. Keyless → proxy series (treasury quotes ÷10 to FRED percent units), missing inputs recorded in `inputs_missing` (provenance: `macro_sources.json`)
 - `scripts/compute_macro_regime.py` → `indicators/macro_regime.json`: rate trend, 2s10s slope, inflation trend, Fed stance, VIX 1y percentile, USD trend, credit regime — each block with `data_quality` (fred/proxy/missing), plus a `summary_i18n` en+ch cache. The artifact is shared across same-day workspaces that may disagree on language, so read the resolved summary from `shared_context.macro_regime.summary`, **not** from here
 - `scripts/macro_evidence_cards.py` — projects material observations (inverted curve, VIX ≥80th pct, stressed spreads, ≥25bp 10Y moves, easing/tightening, ≥2% USD moves) into `ev_{date}_macro_*` cards. Benign regime → zero cards
-- `scripts/collect_cn_chips.py` — CN names only, non-critical: 换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列 via akshare → `raw/{date}/chips/cn_flows.json`. Every block carries its own `data_quality` (`akshare` | `unavailable`) and degrades independently (eastmoney hosts drop connections intermittently — expected). Non-CN markets skip
+- `scripts/collect_cn_chips.py` — CN names only, non-critical: 换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列 via akshare → `raw/{date}/chips/cn_flows.json`. Every block carries its own `data_quality` (`akshare` | `stale` | `unavailable`), `as_of`, cadence and session lag, and degrades independently (eastmoney hosts drop connections intermittently — expected). Cadence rules live in `mcp/shared/freshness.py`; a stale block is stripped to its date and reason (numbers kept only in `cn_flows_stale.json`). Non-CN markets skip
 
 Then, in parallel: **mm-market-desk** (macro headlines, index + macro asset prices), **mm-company-desk** (company news, SEC filings, catalyst calendar), **mm-sector-desk** (sector news, peer prices), **mm-web-research** (web news with provenance; US names pull NASDAQ `api.nasdaq.com` first, `nasdaq.com` pages as fallback).
 
@@ -76,7 +76,7 @@ Deterministic chip layer first (non-critical — it needs the desks' raw price C
 Then: convert raw data → evidence cards, build time-series tables, deduplicate news across all four collectors (canonical URL + title) before building the evidence digest.
 
 ### 4. Quant Snapshot
-- `scripts/intraday_timing.py` (non-critical) → `quant/{date}/intraday_timing.json`: 1h/4h RSI(14) + MACD(12,26,9) over ~90d of hourly bars, last confirmed 4h swing high/low, 30d range, `timing_state` label. No 1h coverage → `available: false`. Symbol resolution via `contracts.resolve_yf_symbol()` (canonical key `yf_ticker`, exchange-suffixed)
+- `scripts/intraday_timing.py` (non-critical) → `quant/{date}/intraday_timing.json`: 1h/4h RSI(14) + MACD(12,26,9), 4h swing high/low, 30d range, `timing_state` — computed only when hourly bars exist. **No approved hourly source exists**, so today it always writes the schema-valid `available: false` (`reason: no_approved_hourly_source`) and zones fall back to chip S/R + daily ATR
 - `scripts/peer_divergence.py` (non-critical) → `quant/{date}/peer_divergence.json`: 20/60/120/250d returns for target + peers, benchmark/target correlations, deterministic **path class** (`follows_sector` / `independent_up` / `independent_down` / `basing` / `launched`; outcome-gap beats co-movement, a spliced benchmark file with a >30% daily "bar" is discarded), cohort dispersion, 60d leader/laggard
 - **mm-quant-analyst**: RSI(14), MACD(12,26,9), SMA(20,50), EMA(12,26), ATR(14); returns over 1d/5d/1m/3m; relative strength vs index, sector, peers
 - **No golden/death-cross flags** — MA crossovers carry no meaning for institutional readers. SMAs exist only to feed `trend_regime`; the PDF price chart annotates chip S/R + cost band instead
@@ -133,14 +133,16 @@ Default is a multi-round **decision panel** (legacy single-shot when `decision.p
 2. **Chair tally** — **mm-decision-maker** (`tally` mode) → `panel_summary_round_{N}.json`
 3. **Convergence** — `eval/graders/panel_convergence_grader.py`, same guards as above → `convergence_round_{N}.json`
 
-**mm-decision-maker** (final mode) then writes `final_decision.json`: BUY/HOLD/SELL + `risk_overlay`, confidence score, conviction-weighted panel lean (not head-count), top reasons, key risks, disconfirming signals, a `main_force_read` block (`unclear` when thin), the investor `horizon`, and a `panel` block (rounds, final tally, convergence score, retained dissent).
+**mm-decision-maker** (final mode) then writes `final_decision.json` (schema v2): two actions — `actions.if_flat` and `actions.if_long`, each BUY/HOLD/SELL + overlay (none/hedge/trim/stop, where `stop` is a protective stop-loss) — and a separate `forecast.p_outperform` (probability the stock's 20-session price return beats its market benchmark's: S&P 500 / CSI 300 / HSI); confidence score, conviction-weighted panel lean (not head-count), structured `top_reasons` `{text, evidence_ids, direction}`, key risks, disconfirming signals, a `main_force_read` block (`unclear` when thin), the investor `horizon`, and a `panel` block (rounds, final tally, convergence score, retained dissent). The headline `decision`/`risk_overlay` are the action for the investor's declared `position_state`.
+
+**Pre-release gate (blocking).** `eval/pre_release_gate.py` then checks the decision before anything is exported: schema v2, every cited id exists and belongs to exactly one card file, no cited card published after issuance, no stale/undated chip card, and rule K1. Input it cannot evaluate blocks (it never crashes), and it deletes any earlier verdict before it runs. A block gets one `mm-decision-maker revise` pass (blocked original kept as `final_decision.pre_gate.json`); a second block releases the run as `blocked` — `final/{date}/BLOCKED.md` instead of a report, `errors[]` in status, and `render_pdf.py` refuses to render. The gate records the decision's sha256; the seal, `scripts/export_release.py` and `render_pdf.py` re-evaluate the decision (`release_check`) rather than trust the verdict file, which LLM steps can write. A run date has one release outcome: once the ledger holds its seal or block, the Codex driver does not decide again and only the sealed decision can be exported.
 
 All evidence-usage contracts above bind this stage — see the contracts table.
 
 Config: `decision.panel` (same knobs as the discussion panel, plus `overlay_labels`).
 
 ### 10. Export
-Final markdown + structured JSON to `final/`. **mm-pdf-exporter** renders annotated SVG charts (`templates/charts.py`) then markdown → HTML/CSS → PDF via **WeasyPrint** (committed `report.css` + `report.html.j2`; no LaTeX): page-1 rating box from JSON, embedded charts, styled tables, running headers/footers. Output: `exports/{date}/pdf/report.pdf` (+ `report.html` for debugging, `charts/*.svg`).
+`scripts/export_release.py` (both drivers) writes the final markdown + structured JSON to `final/` — the draft with its header decision taken from the gated decision — or `BLOCKED.md`. **mm-pdf-exporter** renders annotated SVG charts (`templates/charts.py`) then markdown → HTML/CSS → PDF via **WeasyPrint** (committed `report.css` + `report.html.j2`; no LaTeX): page-1 rating box from JSON, embedded charts, styled tables, running headers/footers. Output: `exports/{date}/pdf/report.pdf` (+ `report.html` for debugging, `charts/*.svg`). `render_pdf.py` renders only a decision that passes the pre-release gate as it stands (re-checked, and the sealed one once sealed; exit 3 otherwise); `--allow-ungated` re-renders runs dated before 2026-10-29, which predate the gate, and never overrides a block.
 
 ### 11. Reflect (Non-Critical)
 Run code-based graders, finalize `logs/run_log.jsonl`, and run **mm-memory-writer** to store episodic/semantic/procedural memories (including user-review feedback). Failure here still counts the pipeline as complete.
@@ -197,9 +199,9 @@ Merge order (later overrides earlier): `config.example.yaml` (defaults, always p
 
 | Source | Key | Used For |
 |---|---|---|
-| yfinance | none | Prices, index/peer/macro assets, 1h intraday bars, macro proxies (^TNX/^FVX/^TYX/^IRX/DX-Y.NYB/^VIX) when FRED is keyless |
+| Price router (`scripts/price_router.py`) | none | Daily OHLCV for every consumer: US via `api.nasdaq.com` (indices → tracking ETF), CN/HK stocks + indices via akshare Sina, ^VIX / BTC-USD / FX via FRED close-only series. As traded (unadjusted); an unfinished session bar is dropped. No intraday source. **Yahoo/yfinance is never used — not as a source, not as a fallback** |
 | NewsAPI | `NEWSAPI_KEY` | Market, sector, company news |
-| akshare | none | CN chip/flow signals (换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列); per-block degradation |
+| akshare | none | CN/HK daily prices (Sina, via the price router) and CN chip/flow signals (换手率, 主力资金流, 龙虎榜, 北向持股, 融资余额, 股东户数, 解禁队列); per-block degradation |
 | SEC EDGAR | none | Filings (10-K/10-Q/8-K), insider transactions |
 | FRED | key required | CPI, Fed funds, Treasury curve, USD index, HY spread, VIX → macro_regime + live DCF risk-free |
 | NASDAQ | none (`api.nasdaq.com`, unofficial) | US-name news + quote; falls back to nasdaq.com pages |
@@ -224,6 +226,10 @@ Three types stored as append-only JSONL at `memory/{type}/index.jsonl`:
 | Procedural | Process learnings from errors | Never expires |
 
 `memory/retrieval.py` scores by `importance × confidence × recency_decay(days)` and returns top-k — injected before analyst memos (episodic + semantic), report writing (procedural + recent episodic) and review (procedural). Memory supplements, never replaces, current evidence.
+
+## Decision Ledger (`ledger/`)
+
+Outcome scoring needs a record nobody can backdate. `ledger/` keeps one append-only, hash-chained `ledger.jsonl` in `MM_DATA_ROOT` (default `~/MarketMindData`, never inside iCloud). Record 1 is the preregistration (`ledger/protocol_v1.json`: forecast event, 20-session horizon, benchmarks, action tracks, review points; "inconclusive" by default). After the pre-release gate passes, both drivers run `ledger/cli.py seal {workspace} {date}`: issuance time from the code's clock, forecast, both actions, final-round ballots with conviction- and equal-weight tallies, hashes of every dated input, config, skills and code version, plus a run archive. Each record hash gets a free OpenTimestamps receipt (`pending` → `attested` via `ledger/cli.py stamps`). A blocked release is recorded as `gate_block`, never sealed. Each ticker and run date gets one outcome — `seal` and `block` refuse a second, checked under the ledger lock (`ledger/cli.py outcome` shows it). `ledger/cli.py verify` recomputes the chain; `score` / `report` apply the protocol (both run in reflect); `backup` / `drill` drive restic to an off-site repository (`RESTIC_REPOSITORY`, password from the Keychain item `marketmind-restic`) and restore-verify the latest snapshot, logging each drill. Decisions before the first seal are history only (`backfill`: descriptive CSV, never evaluated).
 
 ## Evaluation Layer (`eval/`)
 
@@ -264,4 +270,4 @@ Thresholds (configurable in `config.yaml`): overall score ≥ **8.0**, factualit
 
 ## Artifact Contract
 
-All inter-stage exchange is JSON files in the workspace: evidence cards, `quant_summary.json`, `valuation_summary.json`, `thesis_map.json`, review outputs, `final_decision.json`, panel ballots. Complete schemas: `market_report_agent_codex_spec.md` §11.1–11.6.
+All inter-stage exchange is JSON files in the workspace: evidence cards, `quant_summary.json`, `valuation_summary.json`, `thesis_map.json`, review outputs, `final_decision.json`, panel ballots. Each artifact's schema lives in the skill that writes it (`.claude/skills/*/SKILL.md`); the ones code enforces are `final_decision.json` (`eval/pre_release_gate.py`, `check_schema`), the panel files (the convergence graders) and the MCP tool payloads (`mcp/shared/schemas.py`).

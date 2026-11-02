@@ -16,7 +16,7 @@
 #     poison os.environ and block the real `.env` value. Leave env empty.
 #     Canonical name is NEWSAPI_KEY (NEWSAPI_API_KEY is accepted as an alias).
 #   * NETWORK ACCESS: the `workspace-write` sandbox disables outbound network by
-#     DEFAULT. Live data (NewsAPI/yfinance/FRED/SEC) requires the
+#     DEFAULT. Live data (NewsAPI/NASDAQ/akshare/FRED/SEC) requires the
 #     [sandbox_workspace_write] block below; without it the desks fall back to
 #     WebSearch/cache with DNS failures. The headless driver also sets this per-run
 #     via `-c sandbox_workspace_write.network_access=true`.

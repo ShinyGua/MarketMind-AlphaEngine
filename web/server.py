@@ -245,7 +245,8 @@ def eval_ticker(ticker):
                     "confidence": entry.get("confidence") or entry.get("final_confidence"),
                     "overall_score": (entry.get("final_review_scores") or entry.get("final_scores", {})).get("overall"),
                     "release_status": entry.get("release_status"),
-                    "success": entry.get("release_status", "passed") != "failed",
+                    # blocked = stopped by the pre-release gate: not a success
+                    "success": entry.get("release_status", "passed") not in ("failed", "blocked"),
                     "user_review": entry.get("user_review"),
                     "duration_s": entry.get("total_duration_s"),
                     "review_iterations": entry.get("review_iterations"),

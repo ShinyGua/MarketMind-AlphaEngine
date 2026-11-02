@@ -48,3 +48,72 @@ def test_unknown_stage_names_are_ignored(tmp_path):
     ctx = _ctx(tmp_path, {"run_date": DATE,
                           "stages_completed": ["collect", "not_a_stage"]})
     assert driver._completed_stages(ctx) == {"collect"}
+
+
+# ---------- the run date: a finished run never pins the next one ----------
+
+def _today_is(monkeypatch, day: str):
+    monkeypatch.setattr(driver.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(stdout=day + "\n", returncode=0))
+
+
+def test_a_completed_run_does_not_pin_the_next_trading_day(tmp_path, monkeypatch):
+    _today_is(monkeypatch, "2026-06-10")
+    ctx = _ctx(tmp_path, {"run_date": DATE, "stage": "completed",
+                          "stages_completed": list(driver.STAGES)})
+    assert driver.resolve_run_date(ctx) == "2026-06-10"
+
+
+def test_explicit_from_keeps_the_recorded_run(tmp_path, monkeypatch):
+    _today_is(monkeypatch, "2026-06-10")
+    ctx = _ctx(tmp_path, {"run_date": DATE, "stage": "completed"})
+    assert driver.resolve_run_date(ctx, keep_recorded=True) == DATE
+
+
+def test_a_new_run_date_starts_a_fresh_status(tmp_path):
+    ctx = _ctx(tmp_path, {"run_date": "2026-06-08", "stage": "completed",
+                          "stages_completed": list(driver.STAGES),
+                          "errors": [{"message": "pre_release_gate blocked: stale_chip"}]})
+    ctx.dry, ctx.ticker, ctx.run_mode = False, "WS", "daily"
+    driver.start_fresh_if_new_date(ctx)
+    st = json.loads((ctx.ws / "status.json").read_text())
+    assert st["run_date"] == DATE and st["stages_completed"] == [] and st["errors"] == []
+    assert driver._completed_stages(ctx) == set()
+
+
+def test_the_same_run_date_keeps_its_status(tmp_path):
+    status = {"run_date": DATE, "stages_completed": ["collect"], "errors": [{"message": "x"}]}
+    ctx = _ctx(tmp_path, status)
+    ctx.dry, ctx.ticker, ctx.run_mode = False, "WS", "daily"
+    driver.start_fresh_if_new_date(ctx)
+    assert json.loads((ctx.ws / "status.json").read_text()) == status
+
+
+def test_status_writes_are_atomic(tmp_path, monkeypatch):
+    """A crash mid-write must leave the previous status, not a torn file."""
+    ctx = _ctx(tmp_path, {"run_date": DATE, "stages_completed": ["collect"], "errors": []})
+    ctx.dry, ctx.ticker, ctx.run_mode = False, "WS", "daily"
+    real = driver.contracts.os.replace
+
+    def crash(*a):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(driver.contracts.os, "replace", crash)
+    try:
+        driver.add_error(ctx, "boom")
+    except KeyboardInterrupt:
+        pass
+    monkeypatch.setattr(driver.contracts.os, "replace", real)
+    assert json.loads((ctx.ws / "status.json").read_text())["stages_completed"] == ["collect"]
+
+
+def test_a_forced_rerun_reopens_the_stages_it_redoes(tmp_path):
+    """--from decide on a completed run: a crash part-way must resume decide, not find
+    the earlier run's markers (found by TLC while checking the ledger-repair fix)."""
+    ctx = _ctx(tmp_path, {"run_date": DATE, "stage": "completed",
+                          "stages_completed": list(driver.STAGES), "errors": []})
+    ctx.dry = False
+    driver.reopen_stages(ctx, driver.STAGES[driver.STAGES.index("decide"):])
+    st = json.loads((ctx.ws / "status.json").read_text())
+    assert st["stage"] == "decide"
+    assert st["stages_completed"] == driver.STAGES[:driver.STAGES.index("decide")]
+    assert driver._completed_stages(ctx) == set(driver.STAGES[:driver.STAGES.index("decide")])

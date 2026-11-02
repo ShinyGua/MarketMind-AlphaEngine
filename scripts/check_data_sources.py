@@ -115,14 +115,12 @@ def probe_fred(present: bool, dns_ok: bool) -> str:
                    "file_type": "json", "limit": 1})
 
 
-def macro_plan(fred_probe: str, series=None, proxies=None) -> dict:
+def macro_plan(fred_probe: str, series=None) -> dict:
     """How the macro collector will source each series given the FRED probe result.
 
-    Keyless runs no longer degrade to yfinance proxies (Yahoo is not used anywhere
-    in this pipeline). They fall back to the public fredgraph CSV endpoint, which
-    serves the *same* FRED series in FRED units — so a keyless run is now
-    full-coverage rather than missing CPI / Fed funds / HY spread, and nothing is
-    reported unavailable purely for lack of a key.
+    Keyless runs use the public fredgraph CSV endpoint, which serves the *same*
+    FRED series in FRED units, so nothing is reported unavailable purely for lack
+    of a key. Yahoo is not used anywhere in this pipeline.
     """
     series = list(series if series is not None else MACRO_SERIES)
     if fred_probe == "auth_ok":
@@ -130,6 +128,27 @@ def macro_plan(fred_probe: str, series=None, proxies=None) -> dict:
                 "series_via_fred_csv": [], "series_unavailable": []}
     return {"mode": "fred_csv", "series_via_fred": [],
             "series_via_fred_csv": series, "series_unavailable": []}
+
+
+def icloud_evicted(paths: list[Path]) -> dict:
+    """Files iCloud has evicted to the cloud ("dataless") under each path.
+
+    Reading an evicted file blocks until iCloud downloads it, which is how
+    scripts hang with no error. macOS only; elsewhere returns "n/a"."""
+    import subprocess
+
+    out = {}
+    for path in paths:
+        if sys.platform != "darwin" or not path.exists():
+            out[str(path)] = "n/a"
+            continue
+        try:
+            proc = subprocess.run(["find", str(path), "-flags", "+dataless"],
+                                  capture_output=True, text=True, timeout=120)
+            out[str(path)] = len([l for l in proc.stdout.splitlines() if l.strip()])
+        except (OSError, subprocess.TimeoutExpired):
+            out[str(path)] = "unknown"
+    return out
 
 
 def run(show_lengths: bool = True) -> dict:
@@ -166,6 +185,9 @@ def main():
 
     ws = Path(argv[0]) if len(argv) >= 1 else None
     date = argv[1] if len(argv) >= 2 else None
+    root = Path(__file__).resolve().parent.parent
+    result["icloud_evicted_files"] = icloud_evicted(
+        [root / ".venv"] + ([ws] if ws is not None else []))
 
     if ws is not None and date is not None:
         out = ws / "raw" / date / "diagnostics" / "data_sources.json"
@@ -181,6 +203,10 @@ def main():
         print(f"  dns   {host}: {st}")
     for src, st in result["sources"].items():
         print(f"  probe {src}: {st}")
+    for path, n in result["icloud_evicted_files"].items():
+        if isinstance(n, int) and n > 0:
+            print(f"  WARN  {n} iCloud-evicted file(s) under {path} — reads may hang; "
+                  "set the folder to Keep Downloaded (Finder) or run `brctl download <path>`")
 
 
 if __name__ == "__main__":

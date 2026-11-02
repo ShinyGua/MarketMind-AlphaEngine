@@ -130,32 +130,22 @@ Current position in this name? (none / holding — include cost basis if holding
 
 Map → `strategy.position_state` (`none` | `holding` | `adding`) and, when given, `strategy.cost_basis` (number in the listing currency).
 
-### 5. Enrich via yfinance (Optional)
+### 5. Enrich Company Details (Optional)
 
-Try to get additional details:
+Yahoo is not used anywhere in this pipeline. For a US name, get the live quote
+and exchange from the NASDAQ API:
 
 ```bash
-python3 -c "
-import yfinance as yf, json
-t = yf.Ticker('TICKER')
-info = t.info
-print(json.dumps({
-    'name': info.get('longName', ''),
-    'exchange': info.get('exchange', ''),
-    'sector': info.get('sector', ''),
-    'industry': info.get('industry', ''),
-    'market_cap': info.get('marketCap', 0),
-    'currency': info.get('currency', 'USD'),
-    'country': info.get('country', ''),
-}))
-"
+.venv/bin/python3 scripts/nasdaq_fetch.py TICKER
 ```
 
-If yfinance fails, use web search results — they are sufficient.
+Sector, industry, currency and country come from the Step 2 web search results,
+which are sufficient on their own. If no source resolves a field, leave it empty
+rather than guessing — the resolver stage fills the profile properly.
 
 ### 6. Determine Market Profile
 
-Use the exchange information from Step 2 (WebSearch) and Step 5 (yfinance) to determine the market profile. If unclear from those results, use **WebSearch** to search `"{TICKER} stock exchange listing market"` and determine which market it belongs to.
+Use the exchange information from Step 2 (WebSearch) and Step 5 (NASDAQ quote, US names) to determine the market profile. If unclear from those results, use **WebSearch** to search `"{TICKER} stock exchange listing market"` and determine which market it belongs to.
 
 Map to one of the allowed values — **must be exactly one of**: `US`, `HK`, `CN`, `JP`, `UK`, `EU`
 

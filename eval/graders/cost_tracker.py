@@ -160,6 +160,10 @@ def grade(workspace: str, date: str) -> dict:
 
     result = {
         "grader": "cost",
+        # File bytes / 4, with upstream artifacts counted again as downstream
+        # input: a size proxy, NOT spend. Actual usage: eval/usage_telemetry.py.
+        "method": "byte_proxy",
+        "not_billing": True,
         "estimated_input_tokens": 0,
         "estimated_output_tokens": 0,
         "estimated_total_tokens": 0,
