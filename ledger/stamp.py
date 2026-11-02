@@ -50,6 +50,9 @@ def _run(args: list[str], timeout: int = 60) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
+STAMPED_TYPES = ("protocol", "decision")   # what init and seal stamp
+
+
 def stamp_record(root: Path, record: dict, binary: str | None = "auto") -> dict:
     """Write the record hash to a file, submit it, append a stamp record."""
     binary = ots_binary() if binary == "auto" else binary
@@ -106,8 +109,14 @@ def upgrade_all(root: Path, binary: str | None = "auto") -> list[dict]:
         return []
     records = store.read(root)
     by_seq = {r["seq"]: r for r in records}
+    latest = _latest_status(records)
     changed = []
-    for seq, last in sorted(_latest_status(records).items()):
+    # a seal or init that died between its append and its stamp left a record
+    # with no stamp at all: submit it now, or it is never anchored
+    for rec in records:
+        if rec["type"] in STAMPED_TYPES and rec["seq"] not in latest:
+            changed.append(stamp_record(root, rec, binary))
+    for seq, last in sorted(latest.items()):
         if last["status"] in ("attested",):
             continue
         if last["status"] == "not_submitted":

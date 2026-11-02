@@ -89,8 +89,9 @@ def check_copy(copy: Path) -> dict:
     for rec in store.read(copy):
         body = rec["body"]
         if rec["type"] == "decision":
-            man = copy / "manifests" / f"{body['decision_id']}.json"
-            arc = copy / "archive" / f"{body['decision_id']}.tar.gz"
+            # records sealed before 2026-11-02 name their files by decision_id
+            man = copy / "manifests" / body.get("manifest_file", f"{body['decision_id']}.json")
+            arc = copy / "archive" / body.get("archive_file", f"{body['decision_id']}.tar.gz")
             if not man.exists() or _sha(man) != body.get("manifest_sha256"):
                 errors.append(f"manifest missing or changed for {body['decision_id']}")
             if not arc.exists() or _sha(arc) != body.get("archive_sha256"):

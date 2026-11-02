@@ -209,6 +209,16 @@ def test_missing_client_is_not_submitted_never_raises(tmp_path, root):
     assert stamp.upgrade_all(root, binary=None) == []
 
 
+def _conflicting_append(args):
+    root, n = args
+    try:
+        store.append(Path(root), "decision", {"ticker": "300308", "run_date": DATE, "n": n},
+                     conflicts=lambda r: r["type"] == "decision")
+        return 1
+    except store.LedgerError:
+        return 0
+
+
 def _fake_ots(tmp_path: Path, state: dict) -> str:
     """A stand-in `ots` client that prints what the real one prints: `upgrade`
     exits 1 with "Failed! Timestamp not complete" until a block confirms."""
@@ -237,13 +247,13 @@ if cmd == "info":
 
 
 def test_unconfirmed_receipt_stays_pending_then_attests(tmp_path, root):
-    store.append(root, "protocol", {"v": 1})
+    _stamped_protocol(root)
     rec = store.append(root, "decision", {"id": "x"})
     ots = _fake_ots(tmp_path, {"block": False})
     assert stamp.stamp_record(root, rec, binary=ots)["body"]["status"] == "pending"
     # "Failed! Timestamp not complete" (exit 1) is the normal waiting state
     assert stamp.upgrade_all(root, binary=ots) == []
-    assert stamp.stamp_summary(root) == {"pending": 1}
+    assert stamp.stamp_summary(root) == {"pending": 1, "attested": 1}   # + record 1
     (tmp_path / "state.json").write_text(json.dumps({"block": True}))
     changed = stamp.upgrade_all(root, binary=ots)
     assert [c["body"]["status"] for c in changed] == ["attested"]
@@ -252,7 +262,7 @@ def test_unconfirmed_receipt_stays_pending_then_attests(tmp_path, root):
 
 
 def test_wrongly_failed_receipt_is_corrected_to_pending(tmp_path, root):
-    store.append(root, "protocol", {"v": 1})
+    _stamped_protocol(root)
     rec = store.append(root, "decision", {"id": "x"})
     ots = _fake_ots(tmp_path, {"block": False})
     stamp.stamp_record(root, rec, binary=ots)
@@ -261,14 +271,61 @@ def test_wrongly_failed_receipt_is_corrected_to_pending(tmp_path, root):
                                  "at": "2026-10-30T06:13:52+00:00", "detail": "old classifier"})
     changed = stamp.upgrade_all(root, binary=ots)
     assert [c["body"]["status"] for c in changed] == ["pending"]
-    assert stamp.stamp_summary(root) == {"pending": 1}
+    assert stamp.stamp_summary(root) == {"pending": 1, "attested": 1}   # + record 1
 
 
 def test_missing_receipt_is_failed(tmp_path, root):
-    store.append(root, "protocol", {"v": 1})
+    _stamped_protocol(root)
     rec = store.append(root, "decision", {"id": "x"})
     ots = _fake_ots(tmp_path, {"block": False})
     stamp.stamp_record(root, rec, binary=ots)
     (root / "stamps" / f"{rec['seq']:06d}.hash.ots").unlink()
     changed = stamp.upgrade_all(root, binary=ots)
     assert [c["body"]["status"] for c in changed] == ["failed"]
+
+
+def test_conflict_check_and_append_are_one_step(root):
+    """Concurrent seals of one run date: the check runs under the append's lock."""
+    _init(root)
+    ctx = multiprocessing.get_context("fork")
+    with ctx.Pool(6) as pool:
+        assert sum(pool.map(_conflicting_append, [(str(root), n) for n in range(12)])) == 1
+    assert store.verify(root)["ok"]
+
+
+def test_read_splits_records_on_newline_only(root):
+    """A ballot field holding U+2028 / U+0085 must not split its record on read."""
+    _init(root)
+    store.append(root, "decision", {"text": "line\u2028separator\u0085next\u2029para"})
+    assert store.verify(root)["ok"]
+    assert store.read(root)[-1]["body"]["text"] == "line\u2028separator\u0085next\u2029para"
+    seal.has_protocol(root)   # every reader goes through read()
+
+
+def _stamped_protocol(root: Path) -> None:
+    """Record 1 as `ledger init` leaves it: stamped (here already attested)."""
+    rec = store.append(root, "protocol", {"v": 1})
+    store.append(root, "stamp", {"target_seq": rec["seq"], "target_hash": rec["hash"],
+                                 "file": f"{rec['seq']:06d}.hash", "status": "attested"})
+
+
+def test_a_record_left_unstamped_by_a_crash_is_stamped_later(tmp_path, root):
+    """A seal that died between its append and its stamp: upgrade_all submits it."""
+    ots = _fake_ots(tmp_path, {"block": False})
+    store.append(root, "protocol", {"v": 1})
+    stamp.stamp_record(root, store.read(root)[0], binary=ots)
+    rec = store.append(root, "decision", {"id": "x"})              # ... crash: no stamp
+    changed = stamp.upgrade_all(root, binary=ots)
+    assert [(c["body"]["target_seq"], c["body"]["status"]) for c in changed] == [(rec["seq"], "pending")]
+    assert stamp.upgrade_all(root, binary=ots) == []
+
+
+@pytest.mark.parametrize("line", [b"[]", b"7", b'"x"',
+                                  b'{"seq": [1], "type": "decision", "prev_hash": "", "body": {}, "hash": ""}',
+                                  b'{"seq": "2", "type": "decision", "prev_hash": "", "body": {}, "hash": ""}'])
+def test_verify_reports_malformed_lines_instead_of_raising(root, line):
+    _init(root)
+    with open(store.ledger_path(root), "ab") as fh:
+        fh.write(line + b"\n")
+    v = store.verify(root)
+    assert v["ok"] is False and v["errors"]
