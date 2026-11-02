@@ -32,7 +32,7 @@ import json
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -64,10 +64,14 @@ TAGS = {
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
         "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic"],
     "tax_provision": ["IncomeTaxExpenseBenefit"],
-    # ProfitLoss includes non-controlling interests: IBKR stopped tagging
-    # NetIncomeLoss in 2013, so ProfitLoss ($4.9B, 77% of it IBG Holdings') beat
-    # the $1.1B that belongs to the Class A shares the market cap counts.
-    "net_income": ["NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"],
+    # Net income belongs to the shares the market cap counts. ProfitLoss includes
+    # non-controlling interests: IBKR stopped tagging NetIncomeLoss after FY2014,
+    # so ProfitLoss ($4.9B, 77% of it IBG Holdings') beat the $1.1B that belongs to
+    # the Class A shares. NetIncomeLoss is before preferred dividends: SCHW's TTM
+    # read $10,096M against $9,722M available to common. Freshness still ranks
+    # first, so a filer that tags only NetIncomeLoss, or tags the to-common line
+    # less recently, keeps NetIncomeLoss.
+    "net_income": ["NetIncomeLossAvailableToCommonStockholdersBasic", "NetIncomeLoss", "ProfitLoss"],
     "operating_cash_flow": ["NetCashProvidedByUsedInOperatingActivities",
                             "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
     "capex": ["PaymentsToAcquirePropertyPlantAndEquipment",
@@ -256,7 +260,30 @@ def _period_days(start: str, end: str) -> int | None:
         return None
 
 
-def _ttm_cumulative(entries: list[dict], asof: str | None = None) -> float | None:
+def _next_day(iso: str) -> str:
+    return (datetime.fromisoformat(iso) + timedelta(days=1)).date().isoformat()
+
+
+def _public_by(entry: dict, asof: str | None) -> bool:
+    """Was this fact public on ``asof``? A replayed or resumed run fetches
+    companyfacts after its run date; a 10-Q filed after that date must not
+    reach it. An entry without ``filed`` (test fixtures) is kept."""
+    return not asof or (entry.get("filed") or "") <= asof
+
+
+def _facts_known_by(facts: dict, asof: str) -> dict:
+    """companyfacts as it stood on ``asof``: entries filed after it dropped."""
+    out = {**facts, "facts": {}}
+    for taxonomy, tags in (facts.get("facts") or {}).items():
+        out["facts"][taxonomy] = {
+            name: {**node, "units": {unit: [e for e in entries if _public_by(e, asof)]
+                                     for unit, entries in (node.get("units") or {}).items()}}
+            for name, node in tags.items()}
+    return out
+
+
+def _ttm_cumulative(entries: list[dict], asof: str | None = None,
+                    known_by: str | None = None) -> float | None:
     """TTM for statements filed year-to-date rather than as discrete quarters.
 
     Cash-flow lines in a 10-Q are cumulative from the fiscal year start (90d,
@@ -265,47 +292,88 @@ def _ttm_cumulative(entries: list[dict], asof: str | None = None) -> float | Non
 
         TTM = latest_YTD + prior_full_year - prior_year_YTD_of_equal_length
 
+    Each leg is pinned, not merely the nearest candidate:
+      - the window ends at the newest period on file, so right after a 10-K the
+        TTM is the fiscal year just filed (SCHW's OCF otherwise read -$753M, the
+        TTM to Q3, against a filed FY of +$9,311M);
+      - latest_YTD opens the day after a reported fiscal year closes: a discrete
+        quarter (an income line's 3-month column, a 10-K-tagged Q4) is not
+        year-to-date;
+      - prior_full_year is that year, never an older one across a missing 10-K;
+      - a restated period takes its latest-filed value, as in ``_ttm``.
+
     Returns None unless all three legs line up, so a partial match degrades to
     the caller's fiscal-year fallback instead of inventing a number.
     """
-    durations = []
+    latest_filed: dict[tuple[str, str], tuple[str, float]] = {}
     for e in entries:
         start, end, val = e.get("start"), e.get("end"), e.get("val")
         if not start or not end or val is None:
             continue
-        if asof and end > asof:
+        if (asof and end > asof) or not _public_by(e, known_by or asof):
             continue
+        filed = e.get("filed") or ""
+        if (start, end) not in latest_filed or filed >= latest_filed[(start, end)][0]:
+            latest_filed[(start, end)] = (filed, float(val))
+    durations = []
+    for (start, end), (_f, val) in latest_filed.items():
         days = _period_days(start, end)
-        if days is None or days < 60:
-            continue
-        durations.append((start, end, days, float(val)))
-    if not durations:
+        if days is not None and 60 <= days <= 400:
+            durations.append((start, end, days, val))
+    annuals = sorted((d for d in durations if d[2] >= 330), key=lambda d: (d[1], d[0]))
+    if not annuals:
         return None
 
-    annuals = [d for d in durations if 330 <= d[2] <= 400]
-    partials = [d for d in durations if d[2] < 330]
-    if not partials or not annuals:
-        return max(annuals, key=lambda d: d[1])[3] if annuals else None
+    newest_end = max(d[1] for d in durations)
+    if annuals[-1][1] == newest_end:
+        return annuals[-1][3]  # the fiscal year just filed is the trailing year
 
-    latest = max(partials, key=lambda d: d[1])
-    # The prior full year is the annual ending just before this YTD window opens.
-    prior_annual = None
-    for a in sorted(annuals, key=lambda d: d[1], reverse=True):
-        if a[1] < latest[0]:
-            prior_annual = a
-            break
-    if prior_annual is None:
+    # A fiscal year opens the day after the previous one closes.
+    prior_of = {_next_day(a[1]): a for a in annuals}
+    ytds = [d for d in durations if d[2] < 330 and d[0] in prior_of]
+    latest = max(ytds, key=lambda d: (d[1], d[2]), default=None)
+    if latest is None or latest[1] != newest_end:
         return None
+    prior_annual = prior_of[latest[0]]
     # Same-length YTD window one year earlier, anchored on that year's start.
-    prior_ytd = next((p for p in partials
-                      if p[0] == prior_annual[0] and abs(p[2] - latest[2]) <= 10), None)
+    prior_ytd = min((p for p in durations
+                     if p[2] < 330 and p[0] == prior_annual[0] and abs(p[2] - latest[2]) <= 10),
+                    key=lambda p: abs(p[2] - latest[2]), default=None)
     if prior_ytd is None:
         return None
     return latest[3] + prior_annual[3] - prior_ytd[3]
 
 
-def _ttm(facts: dict, names: list[str], asof: str | None = None) -> float | None:
-    """Trailing-twelve-month total from quarterly XBRL facts.
+# A tag whose newest period trails the line's newest by more than this has
+# been retired, and its last complete window is out of date (IBKR's last
+# NetIncomeLoss is FY2014). One quarter of lag is tolerated.
+_STALE_TAG_DAYS = 120
+
+
+def _newest_end(series: list[dict], asof: str | None, known_by: str | None = None) -> str:
+    """Newest end, up to ``asof``, among the series' flow periods (60-400 days)."""
+    newest = ""
+    for e in series:
+        start, end = e.get("start"), e.get("end")
+        if not start or not end or e.get("val") is None or not _public_by(e, known_by or asof):
+            continue
+        if asof and end > asof:
+            continue
+        if 60 <= (_period_days(start, end) or 0) <= 400:
+            newest = max(newest, end)
+    return newest
+
+
+def _ttm(facts: dict, names: list[str], asof: str | None = None,
+         known_by: str | None = None) -> float | None:
+    """Trailing-twelve-month total (see ``_ttm_window``)."""
+    window = _ttm_window(facts, names, asof=asof, known_by=known_by)
+    return window[0] if window else None
+
+
+def _ttm_window(facts: dict, names: list[str], asof: str | None = None,
+                known_by: str | None = None) -> tuple[float, str] | None:
+    """(trailing-twelve-month total, the end of its window) from quarterly XBRL facts.
 
     yfinance reported TTM metrics; the annual 10-K figure can be up to a year
     stale, which for a fast-ramping filer misstates every multiple. So rebuild
@@ -313,13 +381,29 @@ def _ttm(facts: dict, names: list[str], asof: str | None = None) -> float | None
 
     Q4 is normally never filed as a 10-Q (it is only inside the 10-K), so a
     missing quarter is derived as ``annual - sum(the year's other quarters)``.
+
+    ``asof`` is point in time: a fact counts only if its period ended and it was
+    filed by then. ``known_by`` moves the filing cutoff alone: the growth leg
+    asks for the window a year back as it is known on the run date, restated
+    values included. The window must end at the newest period on file for the
+    line; with a 10-Q missing, four contiguous quarters can still be found one
+    quarter back, and that stale window loses to the cumulative path. A tag
+    retired more than ``_STALE_TAG_DAYS`` before the line's newest period is
+    never a fallback: None sends the caller to its flagged fiscal-year value.
     """
-    for series in _candidate_series(facts, names):
+    candidates = _candidate_series(facts, names)
+    newest_of = [_newest_end(series, asof, known_by) for series in candidates]
+    line_newest = max(newest_of, default="")
+    for series, newest in zip(candidates, newest_of):
+        if not newest or (_period_days(newest, line_newest) or 0) > _STALE_TAG_DAYS:
+            continue
         quarters: dict[tuple[str, str], tuple[str, float]] = {}
         annuals: dict[tuple[str, str], tuple[str, float]] = {}
         for e in series:
             start, end, val = e.get("start"), e.get("end"), e.get("val")
             if not start or not end or val is None:
+                continue
+            if not _public_by(e, known_by or asof):
                 continue
             days = _period_days(start, end)
             if days is None:
@@ -356,17 +440,51 @@ def _ttm(facts: dict, names: list[str], asof: str | None = None) -> float | None
                 rows = [r for r in rows if r[1] <= asof]
             if len(rows) >= 4:
                 window = rows[-4:]
-                # Only trust a genuinely contiguous year (no gap, no overlap).
+                # Only trust a genuinely contiguous year (no gap, no overlap)
+                # that is also the latest one.
                 span = _period_days(window[0][0], window[-1][1])
-                if span is not None and 330 <= span <= 400:
-                    return sum(v for _s, _e, v in window)
+                if span is not None and 330 <= span <= 400 and window[-1][1] >= newest:
+                    return sum(v for _s, _e, v in window), window[-1][1]
 
         # No usable discrete quarters — the filer reports this line cumulatively
         # (the cash-flow statement always does).
-        cumulative = _ttm_cumulative(series, asof=asof)
+        cumulative = _ttm_cumulative(series, asof=asof, known_by=known_by)
         if cumulative is not None:
-            return cumulative
+            return cumulative, newest  # its window always ends at the newest period
     return None
+
+
+# 52/53-week years move a quarter end by up to a week year over year.
+_YEAR_SLACK_DAYS = 10
+
+
+def _year_before(iso: str) -> str:
+    d = datetime.fromisoformat(iso[:10]).date()
+    try:
+        return d.replace(year=d.year - 1).isoformat()
+    except ValueError:  # 29 February
+        return d.replace(year=d.year - 1, day=28).isoformat()
+
+
+def _ttm_year_before(facts: dict, names: list[str], current_end: str,
+                     known_by: str) -> float | None:
+    """TTM of the window ending a year before ``current_end``: growth's base.
+
+    Anchored on the current window, not on the run date. Between a quarter's end
+    and its 10-Q the current TTM still ends a quarter back, while last year's 10-Q
+    for that quarter is long on file, so "run date - 1 year" set SCHW's TTM to Q2
+    against the TTM to Q3 a year earlier (revenue growth 13.6% instead of 20.3%).
+    ``known_by`` is the run date: last year's window as known now, restatements
+    included. A window ending more than ``_YEAR_SLACK_DAYS`` from the anniversary
+    (last year's quarter missing) is no base: None.
+    """
+    anchor = _year_before(current_end)
+    asof = (datetime.fromisoformat(anchor) + timedelta(days=_YEAR_SLACK_DAYS)).date().isoformat()
+    window = _ttm_window(facts, names, asof=asof, known_by=known_by)
+    if window is None:
+        return None
+    lag = _period_days(anchor, window[1])
+    return window[0] if lag is not None and abs(lag) <= _YEAR_SLACK_DAYS else None
 
 
 def _latest_share_count(entries: list[dict], quarterly: bool) -> tuple[str, float | None]:
@@ -493,6 +611,10 @@ def build(ticker: str, end: str | None = None, with_beta: bool = True) -> dict:
         raise RuntimeError(f"{ticker}: no CIK on SEC (non-US filer?)")
     time.sleep(REQUEST_DELAY_S)
     facts = _get(FACTS_URL.format(cik=cik))
+    if end:
+        # Point in time for every field, not just TTM: annual rows, balances and
+        # share counts filed after the run date belong to a later run.
+        facts = _facts_known_by(facts, end)
 
     flows = {k: _annual(facts, names) for k, names in TAGS.items()}
     years = sorted({y for s in flows.values() for y in s}, reverse=True)[:5]
@@ -549,14 +671,16 @@ def build(ticker: str, end: str | None = None, with_beta: bool = True) -> dict:
     # whose run-rate is moving fast. Fall back to the last full fiscal year only
     # when the quarterly chain is incomplete, and say so in metadata.
     basis_stale: list[str] = []
+    window_end: dict[str, str] = {}
 
     def pick(key: str, tags: list[str], fallback):
-        val = _ttm(facts, tags, asof=end)
-        if val is None:
+        window = _ttm_window(facts, tags, asof=end)
+        if window is None:
             if fallback is not None:
                 basis_stale.append(key)
             return fallback
-        return val
+        window_end[key] = window[1]
+        return window[0]
 
     revenue = pick("revenue", TAGS["revenue"], latest_is.get("revenue"))
     net_income = pick("net_income", TAGS["net_income"], latest_is.get("net_income"))
@@ -576,15 +700,21 @@ def build(ticker: str, end: str | None = None, with_beta: bool = True) -> dict:
     prior_asof = None
     if end:
         try:
-            prior_asof = end[:10].replace(end[:4], str(int(end[:4]) - 1), 1)
+            prior_asof = _year_before(end)
         except ValueError:
             prior_asof = None
-    prev_revenue = _ttm(facts, TAGS["revenue"], asof=prior_asof) if prior_asof else None
-    prev_net_income = _ttm(facts, TAGS["net_income"], asof=prior_asof) if prior_asof else None
-    if prev_revenue is None:
-        prev_revenue = prev_is.get("revenue")
-    if prev_net_income is None:
-        prev_net_income = prev_is.get("net_income")
+
+    def year_before(key: str, tags: list[str], fallback):
+        if not prior_asof:
+            return fallback
+        if key in window_end:
+            val = _ttm_year_before(facts, tags, window_end[key], known_by=end)
+        else:  # no current TTM: the TTM as of the run date's anniversary, as before
+            val = _ttm(facts, tags, asof=prior_asof, known_by=end)
+        return fallback if val is None else val
+
+    prev_revenue = year_before("revenue", TAGS["revenue"], prev_is.get("revenue"))
+    prev_net_income = year_before("net_income", TAGS["net_income"], prev_is.get("net_income"))
 
     market_cap = (current_price * shares) if (current_price and shares) else None
     ev = (market_cap + (total_debt or 0) - (total_cash or 0)) if market_cap else None

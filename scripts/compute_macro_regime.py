@@ -287,7 +287,10 @@ def compute(workspace: Path, date: str) -> dict:
     dates: dict[str, list[str]] = {}
 
     def load(sid: str, pct_to_decimal: bool = False) -> tuple[list[float], dict]:
-        rows = read_series(macro_dir / f"{sid}.csv")
+        # Every block reads the last row as "latest" and counts back from it, so
+        # put the rows in date order, one per date (a repeated date keeps its
+        # last-listed value). FRED's CSV already is; nothing upstream promises it.
+        rows = sorted(dict(read_series(macro_dir / f"{sid}.csv")).items())
         dates[sid] = [d for d, _ in rows]
         values = [v / 100.0 if pct_to_decimal else v for _, v in rows]
         meta = {"source": (sources.get("series", {}).get(sid) or {}).get("source", "missing"),
